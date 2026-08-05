@@ -23,11 +23,16 @@ export type PatioRegion = {
 
 export type PlacedObject = {
   id: string;
+  /** References OBJECT_LIBRARY id */
   catalogItemId: string;
   name: string;
+  /** Center of footprint */
   position: PointMm;
   rotationDeg: number;
   layerId: DesignLayerId;
+  /** Footprint snapshot at placement (mm) */
+  widthMm: number;
+  depthMm: number;
 };
 
 export type PlumbingRun = {

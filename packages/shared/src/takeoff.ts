@@ -5,13 +5,14 @@ import {
   polygonPerimeterMm,
   polylineLengthMm,
 } from "./design-model";
+import { getPlaceableItem } from "./object-library";
 import type { UnitSystem } from "./units";
 import { mmToInches } from "./units";
 
 export type TakeoffLine = {
   catalogItemId: string;
   name: string;
-  category: CatalogItem["category"];
+  category: CatalogItem["category"] | "furniture" | "amenity" | "attraction";
   unit: CatalogUnit;
   quantity: number;
   unitPriceCents: number;
@@ -140,8 +141,34 @@ export function buildTakeoff(
     mm2ToSf(patioAreaMm2) * 0.03 +
     mmToLf(pipeMm) * 0.15 +
     poolCount * 24 +
-    avgDepthIn * 0.5;
+    avgDepthIn * 0.5 +
+    design.objects.length * 0.5;
   push("labor_install", roundQty(laborHrs, 1), "hr", "Estimated install hours");
+
+  // Group placed library objects
+  const objectCounts = new Map<string, number>();
+  for (const obj of design.objects ?? []) {
+    objectCounts.set(
+      obj.catalogItemId,
+      (objectCounts.get(obj.catalogItemId) ?? 0) + 1,
+    );
+  }
+  for (const [catalogItemId, count] of objectCounts) {
+    const item = getPlaceableItem(catalogItemId);
+    if (!item) continue;
+    const category: TakeoffLine["category"] =
+      item.category === "hardscape" ? "hardscape" : item.category;
+    lines.push({
+      catalogItemId,
+      name: item.name,
+      category,
+      unit: "ea",
+      quantity: count,
+      unitPriceCents: item.unitPriceCents,
+      totalCents: count * item.unitPriceCents,
+      note: "Placed from object library",
+    });
+  }
 
   return {
     lines,

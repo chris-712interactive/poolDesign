@@ -7,6 +7,8 @@ import {
   DESIGN_LEVEL_LABELS,
   axisAlignedRect,
   formatLength,
+  formatMoney,
+  objectLibraryForLevel,
   parseLengthToMm,
   polygonAreaMm2,
   polygonPerimeterMm,
@@ -16,6 +18,8 @@ import {
   type DesignDocument,
   type DesignLevel,
   type PatioRegion,
+  type PlaceableItem,
+  type PlacedObject,
   type PointMm,
   type PoolBody,
   type PlumbingRun,
@@ -24,11 +28,12 @@ import {
 import { EstimatePanel } from "@/components/EstimatePanel";
 
 type WorkspaceView = "design" | "estimate";
-type Tool = "select" | "pool_rect" | "pool_poly" | "patio" | "plumbing";
+type Tool = "select" | "pool_rect" | "pool_poly" | "patio" | "plumbing" | "place";
 type Selection =
   | { kind: "pool"; id: string }
   | { kind: "patio"; id: string }
   | { kind: "run"; id: string }
+  | { kind: "object"; id: string }
   | null;
 
 type Props = {
@@ -91,12 +96,22 @@ export function CadWorkspace({
   const [past, setPast] = useState<DesignDocument[]>([]);
   const [future, setFuture] = useState<DesignDocument[]>([]);
   const [tool, setTool] = useState<Tool>("pool_rect");
+  const [placeItemId, setPlaceItemId] = useState<string | null>(null);
   const [ortho, setOrtho] = useState(true);
   const [draftPoints, setDraftPoints] = useState<PointMm[]>([]);
   const [cursor, setCursor] = useState<PointMm | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
+  );
+
+  const library = useMemo(
+    () => objectLibraryForLevel(designLevel),
+    [designLevel],
+  );
+  const placeItem = useMemo(
+    () => library.find((i) => i.id === placeItemId) ?? null,
+    [library, placeItemId],
   );
 
   const previewPoint = cursor;
@@ -135,6 +150,14 @@ export function CadWorkspace({
         ? design.plumbingRuns.find((r) => r.id === selection.id) ?? null
         : null,
     [design.plumbingRuns, selection],
+  );
+
+  const selectedObject = useMemo(
+    () =>
+      selection?.kind === "object"
+        ? design.objects.find((o) => o.id === selection.id) ?? null
+        : null,
+    [design.objects, selection],
   );
 
   const persist = useCallback(
@@ -257,6 +280,34 @@ export function CadWorkspace({
       }
     }
 
+    for (const obj of design.objects ?? []) {
+      const hasLayer = design.layers.some((l) => l.id === obj.layerId);
+      if (hasLayer && !layerVisible(design, obj.layerId)) continue;
+      drawPlacedObject(
+        ctx,
+        obj,
+        selection?.kind === "object" && selection.id === obj.id,
+      );
+    }
+
+    if (tool === "place" && placeItem && previewPoint) {
+      drawPlacedObject(
+        ctx,
+        {
+          id: "preview",
+          catalogItemId: placeItem.id,
+          name: placeItem.name,
+          position: previewPoint,
+          rotationDeg: 0,
+          layerId: placeItem.layerId,
+          widthMm: placeItem.widthMm,
+          depthMm: placeItem.depthMm,
+        },
+        true,
+        true,
+      );
+    }
+
     if (draftPoints.length) {
       const draftClosed =
         tool === "pool_poly" || tool === "patio" || tool === "pool_rect";
@@ -323,7 +374,15 @@ export function CadWorkspace({
         ORIGIN.y - 16,
       );
     }
-  }, [design, draftPoints, previewPoint, selection, tool, unitSystem]);
+  }, [
+    design,
+    draftPoints,
+    placeItem,
+    previewPoint,
+    selection,
+    tool,
+    unitSystem,
+  ]);
 
   useEffect(() => {
     drawScene();
@@ -410,6 +469,14 @@ export function CadWorkspace({
       return;
     }
 
+    if (tool === "place") {
+      if (!placeItem) return;
+      const placed = placeLibraryItem(design, placeItem, point);
+      commitDesign(placed.design);
+      setSelection({ kind: "object", id: placed.object.id });
+      return;
+    }
+
     if (tool === "pool_rect") {
       if (draftPoints.length === 0) {
         setDraftPoints([point]);
@@ -485,6 +552,11 @@ export function CadWorkspace({
         ...design,
         plumbingRuns: design.plumbingRuns.filter((r) => r.id !== selection.id),
       });
+    } else if (selection.kind === "object") {
+      commitDesign({
+        ...design,
+        objects: design.objects.filter((o) => o.id !== selection.id),
+      });
     }
     setSelection(null);
   }
@@ -519,7 +591,9 @@ export function CadWorkspace({
         ? "Click corners. Click near the first point (or Enter) to close."
         : tool === "plumbing"
           ? "Click segments. Enter finishes the run. Ortho/Shift for straight lines."
-          : "Click a pool, patio, or plumbing run to select it.";
+          : tool === "place"
+            ? "Pick a library item, then click the canvas to place it."
+            : "Click a pool, patio, object, or plumbing run to select it.";
 
   return (
     <div className="stack" style={{ gap: "0.85rem" }}>
@@ -568,6 +642,7 @@ export function CadWorkspace({
               ["pool_poly", "Pool poly"],
               ["patio", "Patio"],
               ["plumbing", "Plumbing"],
+              ["place", "Library"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -577,12 +652,41 @@ export function CadWorkspace({
               onClick={() => {
                 setTool(id);
                 setDraftPoints([]);
+                if (id === "place" && !placeItemId && library[0]) {
+                  setPlaceItemId(library[0].id);
+                }
               }}
             >
               {label}
             </button>
           ))}
         </div>
+
+        {tool === "place" && (
+          <div className="stack">
+            <strong>Object library</strong>
+            <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>
+              Filtered for {DESIGN_LEVEL_LABELS[designLevel].toLowerCase()} jobs.
+            </p>
+            {library.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="card-link"
+                style={{
+                  textAlign: "left",
+                  borderColor: placeItemId === item.id ? "var(--accent)" : undefined,
+                }}
+                onClick={() => setPlaceItemId(item.id)}
+              >
+                <strong>{item.name}</strong>
+                <div className="muted" style={{ textTransform: "capitalize" }}>
+                  {item.category} · {formatMoney(item.unitPriceCents)}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="row">
           <button
@@ -759,9 +863,22 @@ export function CadWorkspace({
           </div>
         )}
 
+        {selectedObject && (
+          <div className="stack">
+            <strong>{selectedObject.name}</strong>
+            <div className="muted">
+              {formatLength(selectedObject.widthMm, unitSystem)} ×{" "}
+              {formatLength(selectedObject.depthMm, unitSystem)} footprint
+            </div>
+            <button type="button" className="btn danger" onClick={deleteSelection}>
+              Delete object
+            </button>
+          </div>
+        )}
+
         <hr style={{ border: 0, borderTop: "1px solid var(--line)", width: "100%" }} />
 
-        <h2>Objects</h2>
+        <h2>On drawing</h2>
         <div className="stack">
           {design.poolBodies.map((pool) => (
             <button
@@ -821,6 +938,24 @@ export function CadWorkspace({
               </div>
             </button>
           ))}
+          {design.objects.map((obj) => (
+            <button
+              key={obj.id}
+              type="button"
+              className="card-link"
+              style={{
+                textAlign: "left",
+                borderColor:
+                  selection?.kind === "object" && selection.id === obj.id
+                    ? "var(--accent)"
+                    : undefined,
+              }}
+              onClick={() => setSelection({ kind: "object", id: obj.id })}
+            >
+              <strong>{obj.name}</strong>
+              <div className="muted">Library object</div>
+            </button>
+          ))}
         </div>
       </aside>
     </div>
@@ -833,8 +968,55 @@ function parseDepthInput(input: string, unitSystem: UnitSystem): number | null {
   return parseLengthToMm(input, unitSystem);
 }
 
+function placeLibraryItem(
+  design: DesignDocument,
+  item: PlaceableItem,
+  position: PointMm,
+): { design: DesignDocument; object: PlacedObject } {
+  const object: PlacedObject = {
+    id: newId("obj"),
+    catalogItemId: item.id,
+    name: item.name,
+    position,
+    rotationDeg: 0,
+    layerId: item.layerId,
+    widthMm: item.widthMm,
+    depthMm: item.depthMm,
+  };
+
+  let layers = design.layers;
+  if (!layers.some((l) => l.id === item.layerId)) {
+    layers = [...layers, { id: item.layerId, name: item.layerId, visible: true }];
+  }
+
+  return {
+    object,
+    design: {
+      ...design,
+      layers,
+      objects: [...design.objects, object],
+    },
+  };
+}
+
+function objectFootprint(obj: PlacedObject): PointMm[] {
+  const hw = obj.widthMm / 2;
+  const hd = obj.depthMm / 2;
+  return [
+    { x: obj.position.x - hw, y: obj.position.y - hd },
+    { x: obj.position.x + hw, y: obj.position.y - hd },
+    { x: obj.position.x + hw, y: obj.position.y + hd },
+    { x: obj.position.x - hw, y: obj.position.y + hd },
+  ];
+}
+
 function hitTest(design: DesignDocument, point: PointMm): Selection {
   const tol = 120;
+  for (let i = design.objects.length - 1; i >= 0; i--) {
+    if (pointInPolygon(point, objectFootprint(design.objects[i]))) {
+      return { kind: "object", id: design.objects[i].id };
+    }
+  }
   for (let i = design.plumbingRuns.length - 1; i >= 0; i--) {
     const run = design.plumbingRuns[i];
     for (let j = 1; j < run.points.length; j++) {
@@ -854,6 +1036,33 @@ function hitTest(design: DesignDocument, point: PointMm): Selection {
     }
   }
   return null;
+}
+
+function drawPlacedObject(
+  ctx: CanvasRenderingContext2D,
+  obj: PlacedObject,
+  selected: boolean,
+  preview = false,
+) {
+  const outline = objectFootprint(obj);
+  ctx.beginPath();
+  outline.forEach((p, i) => {
+    const c = toCanvas(p);
+    if (i === 0) ctx.moveTo(c.x, c.y);
+    else ctx.lineTo(c.x, c.y);
+  });
+  ctx.closePath();
+  ctx.fillStyle = preview ? "rgba(196,122,44,0.25)" : "rgba(196,122,44,0.35)";
+  ctx.fill();
+  ctx.strokeStyle = selected || preview ? "#8a4f12" : "#c47a2c";
+  ctx.lineWidth = selected ? 2.5 : 1.5;
+  if (preview) ctx.setLineDash([5, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  const label = toCanvas(obj.position);
+  ctx.fillStyle = "rgba(20,32,41,0.8)";
+  ctx.font = "11px Source Sans 3, sans-serif";
+  ctx.fillText(obj.name, label.x - 24, label.y + 4);
 }
 
 function distToSegment(p: PointMm, a: PointMm, b: PointMm): number {

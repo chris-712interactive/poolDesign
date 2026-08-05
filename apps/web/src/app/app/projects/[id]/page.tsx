@@ -18,7 +18,12 @@ function parseDesign(
   try {
     const parsed = JSON.parse(json) as DesignDocument;
     if (parsed?.version === 1 && Array.isArray(parsed.plumbingRuns)) {
-      return parsed;
+      return {
+        ...parsed,
+        objects: Array.isArray(parsed.objects) ? parsed.objects : [],
+        patios: Array.isArray(parsed.patios) ? parsed.patios : [],
+        poolBodies: Array.isArray(parsed.poolBodies) ? parsed.poolBodies : [],
+      };
     }
   } catch {
     // fall through
