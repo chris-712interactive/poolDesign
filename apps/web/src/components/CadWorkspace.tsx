@@ -26,6 +26,24 @@ import {
   type UnitSystem,
 } from "@pool-design/shared";
 import { EstimatePanel } from "@/components/EstimatePanel";
+import {
+  DEFAULT_VIEWPORT,
+  applyAngleSnap,
+  applyOrtho,
+  pointAtLength,
+  screenToWorld,
+  worldToScreen,
+  zoomAt,
+  type Viewport,
+} from "@/lib/cad/math";
+import {
+  drawDraft,
+  drawGrid,
+  drawPlacedObject,
+  drawPolygon,
+  drawRun,
+  drawEdgeLabel,
+} from "@/lib/cad/draw";
 
 type WorkspaceView = "design" | "estimate";
 type Tool = "select" | "pool_rect" | "pool_poly" | "patio" | "plumbing" | "place";
@@ -36,6 +54,27 @@ type Selection =
   | { kind: "object"; id: string }
   | null;
 
+type DragState =
+  | {
+      mode: "pan";
+      startX: number;
+      startY: number;
+      originPanX: number;
+      originPanY: number;
+    }
+  | {
+      mode: "vertex";
+      kind: "pool" | "patio" | "run";
+      id: string;
+      index: number;
+    }
+  | {
+      mode: "move";
+      kind: "pool" | "patio" | "run" | "object";
+      id: string;
+      last: PointMm;
+    };
+
 type Props = {
   projectId: string;
   projectName: string;
@@ -44,43 +83,31 @@ type Props = {
   initialDesign: DesignDocument;
 };
 
-const PX_PER_MM = 0.05;
-const ORIGIN = { x: 80, y: 80 };
 const CLOSE_TOLERANCE_MM = 150;
-
-function toCanvas(p: PointMm) {
-  return { x: ORIGIN.x + p.x * PX_PER_MM, y: ORIGIN.y + p.y * PX_PER_MM };
-}
-
-function fromCanvas(x: number, y: number, unitSystem: UnitSystem): PointMm {
-  return {
-    x: snapMm((x - ORIGIN.x) / PX_PER_MM, unitSystem),
-    y: snapMm((y - ORIGIN.y) / PX_PER_MM, unitSystem),
-  };
-}
-
-function applyOrtho(from: PointMm, to: PointMm): PointMm {
-  const dx = Math.abs(to.x - from.x);
-  const dy = Math.abs(to.y - from.y);
-  if (dx >= dy) return { x: to.x, y: from.y };
-  return { x: from.x, y: to.y };
-}
+const VERTEX_HIT_PX = 10;
 
 function newId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function formatArea(mm2: number, unitSystem: UnitSystem): string {
-  if (unitSystem === "metric") {
-    const m2 = mm2 / 1_000_000;
-    return `${m2.toFixed(2)} m²`;
-  }
-  const sqFt = mm2 / 92903.04;
-  return `${sqFt.toFixed(1)} ft²`;
+  if (unitSystem === "metric") return `${(mm2 / 1_000_000).toFixed(2)} m²`;
+  return `${(mm2 / 92903.04).toFixed(1)} ft²`;
 }
 
 function layerVisible(design: DesignDocument, id: string): boolean {
   return design.layers.find((l) => l.id === id)?.visible !== false;
+}
+
+function objectFootprint(obj: PlacedObject): PointMm[] {
+  const hw = obj.widthMm / 2;
+  const hd = obj.depthMm / 2;
+  return [
+    { x: obj.position.x - hw, y: obj.position.y - hd },
+    { x: obj.position.x + hw, y: obj.position.y - hd },
+    { x: obj.position.x + hw, y: obj.position.y + hd },
+    { x: obj.position.x - hw, y: obj.position.y + hd },
+  ];
 }
 
 export function CadWorkspace({
@@ -91,42 +118,37 @@ export function CadWorkspace({
   initialDesign,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const dragOriginRef = useRef<DesignDocument | null>(null);
+  const designRef = useRef<DesignDocument>(initialDesign);
   const [view, setView] = useState<WorkspaceView>("design");
-  const [design, setDesign] = useState<DesignDocument>(initialDesign);
+  const [design, setDesign] = useState<DesignDocument>(() => ({
+    ...initialDesign,
+    objects: initialDesign.objects ?? [],
+  }));
+  designRef.current = design;
   const [past, setPast] = useState<DesignDocument[]>([]);
   const [future, setFuture] = useState<DesignDocument[]>([]);
+  const [vp, setVp] = useState<Viewport>(DEFAULT_VIEWPORT);
   const [tool, setTool] = useState<Tool>("pool_rect");
   const [placeItemId, setPlaceItemId] = useState<string | null>(null);
   const [ortho, setOrtho] = useState(true);
+  const [angleSnap, setAngleSnap] = useState(false);
+  const [spaceDown, setSpaceDown] = useState(false);
   const [draftPoints, setDraftPoints] = useState<PointMm[]>([]);
   const [cursor, setCursor] = useState<PointMm | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const [lengthBuffer, setLengthBuffer] = useState("");
+  const [showHelp, setShowHelp] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
   );
 
-  const library = useMemo(
-    () => objectLibraryForLevel(designLevel),
-    [designLevel],
-  );
+  const library = useMemo(() => objectLibraryForLevel(designLevel), [designLevel]);
   const placeItem = useMemo(
     () => library.find((i) => i.id === placeItemId) ?? null,
     [library, placeItemId],
   );
-
-  const previewPoint = cursor;
-
-  const draftSegmentMm =
-    draftPoints.length > 0 && previewPoint
-      ? segmentLengthMm(draftPoints[draftPoints.length - 1], previewPoint)
-      : 0;
-
-  const draftTotalMm = useMemo(() => {
-    if (draftPoints.length === 0) return 0;
-    const open = polylineLengthMm(draftPoints);
-    if (!previewPoint) return open;
-    return open + draftSegmentMm;
-  }, [draftPoints, previewPoint, draftSegmentMm]);
 
   const selectedPool = useMemo(
     () =>
@@ -135,7 +157,6 @@ export function CadWorkspace({
         : null,
     [design.poolBodies, selection],
   );
-
   const selectedPatio = useMemo(
     () =>
       selection?.kind === "patio"
@@ -143,7 +164,6 @@ export function CadWorkspace({
         : null,
     [design.patios, selection],
   );
-
   const selectedRun = useMemo(
     () =>
       selection?.kind === "run"
@@ -151,7 +171,6 @@ export function CadWorkspace({
         : null,
     [design.plumbingRuns, selection],
   );
-
   const selectedObject = useMemo(
     () =>
       selection?.kind === "object"
@@ -159,6 +178,31 @@ export function CadWorkspace({
         : null,
     [design.objects, selection],
   );
+
+  const constrainPoint = useCallback(
+    (from: PointMm | null, to: PointMm, shiftKey: boolean) => {
+      if (!from) return to;
+      let next = to;
+      if (ortho || shiftKey) next = applyOrtho(from, next);
+      else if (angleSnap) next = applyAngleSnap(from, next, 15);
+      return {
+        x: snapMm(next.x, unitSystem),
+        y: snapMm(next.y, unitSystem),
+      };
+    },
+    [angleSnap, ortho, unitSystem],
+  );
+
+  const previewPoint = useMemo(() => {
+    if (!cursor) return null;
+    if (draftPoints.length === 0) return cursor;
+    return constrainPoint(draftPoints[draftPoints.length - 1], cursor, false);
+  }, [constrainPoint, cursor, draftPoints]);
+
+  const draftSegmentMm =
+    draftPoints.length > 0 && previewPoint
+      ? segmentLengthMm(draftPoints[draftPoints.length - 1], previewPoint)
+      : 0;
 
   const persist = useCallback(
     async (next: DesignDocument) => {
@@ -190,7 +234,7 @@ export function CadWorkspace({
 
   const undo = useCallback(() => {
     setPast((p) => {
-      if (p.length === 0) return p;
+      if (!p.length) return p;
       const prev = p[p.length - 1];
       setFuture((f) => [design, ...f].slice(0, 50));
       setDesign(prev);
@@ -201,7 +245,7 @@ export function CadWorkspace({
 
   const redo = useCallback(() => {
     setFuture((f) => {
-      if (f.length === 0) return f;
+      if (!f.length) return f;
       const [next, ...rest] = f;
       setPast((p) => [...p, design].slice(-50));
       setDesign(next);
@@ -215,42 +259,26 @@ export function CadWorkspace({
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    ctx.fillStyle = "#eef3f1";
-    ctx.fillRect(0, 0, rect.width, rect.height);
-
-    const gridMm = unitSystem === "imperial" ? 304.8 : 250;
-    ctx.strokeStyle = "rgba(20,32,41,0.06)";
-    ctx.lineWidth = 1;
-    for (let x = ORIGIN.x; x < rect.width; x += gridMm * PX_PER_MM) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, rect.height);
-      ctx.stroke();
-    }
-    for (let y = ORIGIN.y; y < rect.height; y += gridMm * PX_PER_MM) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(rect.width, y);
-      ctx.stroke();
-    }
+    drawGrid(ctx, rect.width, rect.height, vp, unitSystem);
 
     if (layerVisible(design, "patio") || layerVisible(design, "deck")) {
       for (const patio of design.patios) {
         drawPolygon(
           ctx,
+          vp,
           patio.outline,
           selection?.kind === "patio" && selection.id === patio.id,
           "#c4a574",
           "rgba(196,165,116,0.28)",
           unitSystem,
           true,
+          selection?.kind === "patio" && selection.id === patio.id,
         );
       }
     }
@@ -259,12 +287,14 @@ export function CadWorkspace({
       for (const pool of design.poolBodies) {
         drawPolygon(
           ctx,
+          vp,
           pool.outline,
           selection?.kind === "pool" && selection.id === pool.id,
           "#1f8a70",
           "rgba(31,138,112,0.28)",
           unitSystem,
           true,
+          selection?.kind === "pool" && selection.id === pool.id,
         );
       }
     }
@@ -273,9 +303,11 @@ export function CadWorkspace({
       for (const run of design.plumbingRuns) {
         drawRun(
           ctx,
+          vp,
           run,
           selection?.kind === "run" && selection.id === run.id,
           unitSystem,
+          selection?.kind === "run" && selection.id === run.id,
         );
       }
     }
@@ -285,6 +317,7 @@ export function CadWorkspace({
       if (hasLayer && !layerVisible(design, obj.layerId)) continue;
       drawPlacedObject(
         ctx,
+        vp,
         obj,
         selection?.kind === "object" && selection.id === obj.id,
       );
@@ -293,6 +326,7 @@ export function CadWorkspace({
     if (tool === "place" && placeItem && previewPoint) {
       drawPlacedObject(
         ctx,
+        vp,
         {
           id: "preview",
           catalogItemId: placeItem.id,
@@ -308,70 +342,51 @@ export function CadWorkspace({
       );
     }
 
-    if (draftPoints.length) {
-      const draftClosed =
-        tool === "pool_poly" || tool === "patio" || tool === "pool_rect";
-      ctx.strokeStyle = tool === "patio" ? "#8a6a2f" : "#146353";
-      ctx.lineWidth = 2.5;
-      ctx.setLineDash(tool === "plumbing" ? [] : [7, 5]);
-      ctx.beginPath();
-      const pts =
-        tool === "pool_rect" && draftPoints.length === 1 && previewPoint
-          ? axisAlignedRect(draftPoints[0], previewPoint)
-          : draftPoints;
-      pts.forEach((p, i) => {
-        const c = toCanvas(p);
-        if (i === 0) ctx.moveTo(c.x, c.y);
-        else ctx.lineTo(c.x, c.y);
-      });
-      if (tool === "pool_rect" && draftPoints.length === 1 && previewPoint) {
-        ctx.closePath();
-      } else if (previewPoint && tool !== "pool_rect") {
-        const c = toCanvas(previewPoint);
-        ctx.lineTo(c.x, c.y);
-        if (draftClosed && draftPoints.length >= 2) {
-          const first = toCanvas(draftPoints[0]);
-          ctx.lineTo(first.x, first.y);
-        }
-      }
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      for (const p of draftPoints) {
-        const c = toCanvas(p);
-        ctx.fillStyle = ctx.strokeStyle;
-        ctx.beginPath();
-        ctx.arc(c.x, c.y, 3.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
+    if (tool === "pool_rect" && draftPoints.length === 1 && previewPoint) {
+      const rectPts = axisAlignedRect(draftPoints[0], previewPoint);
+      drawPolygon(
+        ctx,
+        vp,
+        rectPts,
+        true,
+        "#146353",
+        "rgba(31,138,112,0.15)",
+        unitSystem,
+        true,
+        false,
+      );
+    } else if (draftPoints.length) {
+      drawDraft(
+        ctx,
+        vp,
+        draftPoints,
+        previewPoint,
+        tool === "patio" ? "#8a6a2f" : "#146353",
+        tool !== "plumbing",
+        tool === "pool_poly" || tool === "patio",
+      );
       if (draftPoints.length > 0 && previewPoint && tool !== "pool_rect") {
         drawEdgeLabel(
           ctx,
+          vp,
           draftPoints[draftPoints.length - 1],
           previewPoint,
           unitSystem,
         );
       }
-      if (tool === "pool_rect" && draftPoints.length === 1 && previewPoint) {
-        const rectPts = axisAlignedRect(draftPoints[0], previewPoint);
-        for (let i = 0; i < 4; i++) {
-          drawEdgeLabel(ctx, rectPts[i], rectPts[(i + 1) % 4], unitSystem);
-        }
-      }
     }
 
     if (
-      design.poolBodies.length === 0 &&
-      design.patios.length === 0 &&
-      draftPoints.length === 0
+      !design.poolBodies.length &&
+      !design.patios.length &&
+      !draftPoints.length
     ) {
       ctx.fillStyle = "rgba(20,32,41,0.45)";
       ctx.font = "14px Source Sans 3, sans-serif";
       ctx.fillText(
-        "Choose Pool rectangle and click two opposite corners to start",
-        ORIGIN.x,
-        ORIGIN.y - 16,
+        "Start with Pool rect — scroll to zoom, hold Space + drag to pan",
+        16,
+        28,
       );
     }
   }, [
@@ -382,6 +397,7 @@ export function CadWorkspace({
     selection,
     tool,
     unitSystem,
+    vp,
   ]);
 
   useEffect(() => {
@@ -391,18 +407,18 @@ export function CadWorkspace({
     return () => window.removeEventListener("resize", onResize);
   }, [drawScene]);
 
-  function pointerPoint(e: React.PointerEvent<HTMLCanvasElement>): PointMm {
+  function canvasLocal(e: { clientX: number; clientY: number }) {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    let point = fromCanvas(e.clientX - rect.left, e.clientY - rect.top, unitSystem);
-    const useOrtho = ortho || e.shiftKey;
-    if (useOrtho && draftPoints.length > 0 && tool !== "pool_rect") {
-      point = applyOrtho(draftPoints[draftPoints.length - 1], point);
-    }
-    if (useOrtho && tool === "pool_rect" && draftPoints.length === 1) {
-      // free second corner; ortho not needed for axis-aligned rect
-    }
-    return point;
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  function worldFromEvent(
+    e: { clientX: number; clientY: number },
+    snap = true,
+  ): PointMm {
+    const { x, y } = canvasLocal(e);
+    return screenToWorld(x, y, vp, unitSystem, snap);
   }
 
   function finishPolygon(kind: "pool" | "patio") {
@@ -418,8 +434,7 @@ export function CadWorkspace({
         depthShallowMm: DEFAULT_POOL_SHALLOW_MM,
         depthDeepMm: DEFAULT_POOL_DEEP_MM,
       };
-      const next = { ...design, poolBodies: [...design.poolBodies, pool] };
-      commitDesign(next);
+      commitDesign({ ...design, poolBodies: [...design.poolBodies, pool] });
       setSelection({ kind: "pool", id: pool.id });
     } else {
       const patio: PatioRegion = {
@@ -427,11 +442,11 @@ export function CadWorkspace({
         name: `Patio ${design.patios.length + 1}`,
         outline: draftPoints,
       };
-      const next = { ...design, patios: [...design.patios, patio] };
-      commitDesign(next);
+      commitDesign({ ...design, patios: [...design.patios, patio] });
       setSelection({ kind: "patio", id: patio.id });
     }
     setDraftPoints([]);
+    setLengthBuffer("");
   }
 
   function finishPlumbing() {
@@ -445,13 +460,13 @@ export function CadWorkspace({
       circuit: "return",
       points: draftPoints,
     };
-    const next = {
+    commitDesign({
       ...design,
       plumbingRuns: [...design.plumbingRuns, run],
-    };
-    commitDesign(next);
+    });
     setSelection({ kind: "run", id: run.id });
     setDraftPoints([]);
+    setLengthBuffer("");
   }
 
   function finishDraft() {
@@ -460,79 +475,71 @@ export function CadWorkspace({
     else if (tool === "patio") finishPolygon("patio");
   }
 
-  function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    const point = pointerPoint(e);
-
-    if (tool === "select") {
-      const hit = hitTest(design, point);
-      setSelection(hit);
-      return;
-    }
-
-    if (tool === "place") {
-      if (!placeItem) return;
-      const placed = placeLibraryItem(design, placeItem, point);
-      commitDesign(placed.design);
-      setSelection({ kind: "object", id: placed.object.id });
-      return;
-    }
-
-    if (tool === "pool_rect") {
-      if (draftPoints.length === 0) {
-        setDraftPoints([point]);
-        return;
-      }
-      const outline = axisAlignedRect(draftPoints[0], point);
-      const pool: PoolBody = {
-        id: newId("pool"),
-        name: `Pool ${design.poolBodies.length + 1}`,
-        outline,
-        depthShallowMm: DEFAULT_POOL_SHALLOW_MM,
-        depthDeepMm: DEFAULT_POOL_DEEP_MM,
-      };
-      commitDesign({ ...design, poolBodies: [...design.poolBodies, pool] });
-      setSelection({ kind: "pool", id: pool.id });
-      setDraftPoints([]);
-      return;
-    }
-
-    if (tool === "pool_poly" || tool === "patio" || tool === "plumbing") {
-      if (
-        (tool === "pool_poly" || tool === "patio") &&
-        draftPoints.length >= 3 &&
-        segmentLengthMm(point, draftPoints[0]) <= CLOSE_TOLERANCE_MM
-      ) {
-        finishPolygon(tool === "patio" ? "patio" : "pool");
-        return;
-      }
-      setDraftPoints((pts) => [...pts, point]);
-    }
+  function commitTypedLength() {
+    if (!lengthBuffer || draftPoints.length === 0 || !previewPoint) return;
+    const mm = parseLengthToMm(lengthBuffer, unitSystem);
+    if (mm == null || mm <= 0) return;
+    const from = draftPoints[draftPoints.length - 1];
+    const toward = constrainPoint(from, previewPoint, false);
+    const point = {
+      x: snapMm(pointAtLength(from, toward, mm).x, unitSystem),
+      y: snapMm(pointAtLength(from, toward, mm).y, unitSystem),
+    };
+    setDraftPoints((pts) => [...pts, point]);
+    setLengthBuffer("");
   }
 
-  function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
-    setCursor(pointerPoint(e));
+  function hitVertex(
+    point: PointMm,
+  ): { kind: "pool" | "patio" | "run"; id: string; index: number } | null {
+    const tol = VERTEX_HIT_PX / vp.scale;
+    const check = (kind: "pool" | "patio" | "run", id: string, pts: PointMm[]) => {
+      for (let i = 0; i < pts.length; i++) {
+        if (segmentLengthMm(point, pts[i]) <= tol) return { kind, id, index: i };
+      }
+      return null;
+    };
+    if (selection?.kind === "pool" && selectedPool) {
+      const hit = check("pool", selectedPool.id, selectedPool.outline);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "patio" && selectedPatio) {
+      const hit = check("patio", selectedPatio.id, selectedPatio.outline);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "run" && selectedRun) {
+      const hit = check("run", selectedRun.id, selectedRun.points);
+      if (hit) return hit;
+    }
+    return null;
   }
 
-  function onKeyDown(e: React.KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
-      e.preventDefault();
-      if (e.shiftKey) redo();
-      else undo();
-      return;
+  function hitTest(point: PointMm): Selection {
+    for (let i = (design.objects ?? []).length - 1; i >= 0; i--) {
+      const obj = design.objects[i];
+      if (pointInPolygon(point, objectFootprint(obj))) {
+        return { kind: "object", id: obj.id };
+      }
     }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
-      e.preventDefault();
-      redo();
-      return;
+    for (let i = design.plumbingRuns.length - 1; i >= 0; i--) {
+      const run = design.plumbingRuns[i];
+      for (let j = 1; j < run.points.length; j++) {
+        if (distToSegment(point, run.points[j - 1], run.points[j]) <= 120) {
+          return { kind: "run", id: run.id };
+        }
+      }
     }
-    if (e.key === "Escape") setDraftPoints([]);
-    if (e.key === "Enter") finishDraft();
-    if (e.key === "o" || e.key === "O") setOrtho((v) => !v);
-    if (e.key === "Delete" || e.key === "Backspace") {
-      if (!selection || draftPoints.length > 0) return;
-      e.preventDefault();
-      deleteSelection();
+    for (let i = design.poolBodies.length - 1; i >= 0; i--) {
+      if (pointInPolygon(point, design.poolBodies[i].outline)) {
+        return { kind: "pool", id: design.poolBodies[i].id };
+      }
     }
+    for (let i = design.patios.length - 1; i >= 0; i--) {
+      if (pointInPolygon(point, design.patios[i].outline)) {
+        return { kind: "patio", id: design.patios[i].id };
+      }
+    }
+    return null;
   }
 
   function deleteSelection() {
@@ -552,7 +559,7 @@ export function CadWorkspace({
         ...design,
         plumbingRuns: design.plumbingRuns.filter((r) => r.id !== selection.id),
       });
-    } else if (selection.kind === "object") {
+    } else {
       commitDesign({
         ...design,
         objects: design.objects.filter((o) => o.id !== selection.id),
@@ -561,39 +568,255 @@ export function CadWorkspace({
     setSelection(null);
   }
 
-  function toggleLayer(layerId: string) {
-    const next = {
-      ...design,
-      layers: design.layers.map((l) =>
-        l.id === layerId ? { ...l, visible: !l.visible } : l,
-      ),
-    };
-    commitDesign(next);
+  function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    const local = canvasLocal(e);
+    const point = worldFromEvent(e);
+
+    if (e.button === 1 || spaceDown || (e.button === 0 && e.altKey)) {
+      setDrag({
+        mode: "pan",
+        startX: local.x,
+        startY: local.y,
+        originPanX: vp.panX,
+        originPanY: vp.panY,
+      });
+      return;
+    }
+
+    if (tool === "select") {
+      const vertex = hitVertex(point);
+      if (vertex) {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({ mode: "vertex", ...vertex });
+        return;
+      }
+      const hit = hitTest(point);
+      setSelection(hit);
+      if (hit) {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({ mode: "move", kind: hit.kind, id: hit.id, last: point });
+      }
+      return;
+    }
+
+    if (tool === "place") {
+      if (!placeItem) return;
+      const placed = placeLibraryItem(design, placeItem, point);
+      commitDesign(placed.design);
+      setSelection({ kind: "object", id: placed.object.id });
+      return;
+    }
+
+    if (tool === "pool_rect") {
+      if (!draftPoints.length) {
+        setDraftPoints([point]);
+        return;
+      }
+      const outline = axisAlignedRect(draftPoints[0], point);
+      const pool: PoolBody = {
+        id: newId("pool"),
+        name: `Pool ${design.poolBodies.length + 1}`,
+        outline,
+        depthShallowMm: DEFAULT_POOL_SHALLOW_MM,
+        depthDeepMm: DEFAULT_POOL_DEEP_MM,
+      };
+      commitDesign({ ...design, poolBodies: [...design.poolBodies, pool] });
+      setSelection({ kind: "pool", id: pool.id });
+      setDraftPoints([]);
+      return;
+    }
+
+    if (tool === "pool_poly" || tool === "patio" || tool === "plumbing") {
+      const from = draftPoints[draftPoints.length - 1] ?? null;
+      const next = constrainPoint(from, point, e.shiftKey);
+      if (
+        (tool === "pool_poly" || tool === "patio") &&
+        draftPoints.length >= 3 &&
+        segmentLengthMm(next, draftPoints[0]) <= CLOSE_TOLERANCE_MM
+      ) {
+        finishPolygon(tool === "patio" ? "patio" : "pool");
+        return;
+      }
+      setDraftPoints((pts) => [...pts, next]);
+      setLengthBuffer("");
+    }
   }
 
-  function updateSelectedPoolDepths(shallowMm: number, deepMm: number) {
-    if (!selectedPool) return;
-    const next = {
-      ...design,
-      poolBodies: design.poolBodies.map((p) =>
-        p.id === selectedPool.id
-          ? { ...p, depthShallowMm: shallowMm, depthDeepMm: deepMm }
-          : p,
-      ),
-    };
-    commitDesign(next);
+  function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
+    const local = canvasLocal(e);
+    const raw = worldFromEvent(e, false);
+    const point = worldFromEvent(e, true);
+    setCursor(point);
+
+    if (!drag) return;
+
+    if (drag.mode === "pan") {
+      setVp((v) => ({
+        ...v,
+        panX: drag.originPanX + (local.x - drag.startX),
+        panY: drag.originPanY + (local.y - drag.startY),
+      }));
+      return;
+    }
+
+    if (drag.mode === "vertex") {
+      const snapped = {
+        x: snapMm(raw.x, unitSystem),
+        y: snapMm(raw.y, unitSystem),
+      };
+      // live update without flooding history: temporary setDesign
+      setDesign((d) => {
+        if (drag.kind === "pool") {
+          return {
+            ...d,
+            poolBodies: d.poolBodies.map((p) =>
+              p.id === drag.id
+                ? {
+                    ...p,
+                    outline: p.outline.map((pt, i) =>
+                      i === drag.index ? snapped : pt,
+                    ),
+                  }
+                : p,
+            ),
+          };
+        }
+        if (drag.kind === "patio") {
+          return {
+            ...d,
+            patios: d.patios.map((p) =>
+              p.id === drag.id
+                ? {
+                    ...p,
+                    outline: p.outline.map((pt, i) =>
+                      i === drag.index ? snapped : pt,
+                    ),
+                  }
+                : p,
+            ),
+          };
+        }
+        return {
+          ...d,
+          plumbingRuns: d.plumbingRuns.map((r) =>
+            r.id === drag.id
+              ? {
+                  ...r,
+                  points: r.points.map((pt, i) =>
+                    i === drag.index ? snapped : pt,
+                  ),
+                }
+              : r,
+          ),
+        };
+      });
+      return;
+    }
+
+    if (drag.mode === "move") {
+      const dx = point.x - drag.last.x;
+      const dy = point.y - drag.last.y;
+      if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return;
+      setDesign((d) => translateDesign(d, drag.kind, drag.id, dx, dy, unitSystem));
+      setDrag({ ...drag, last: point });
+    }
+  }
+
+  function onPointerUp() {
+    if (drag?.mode === "vertex" || drag?.mode === "move") {
+      const origin = dragOriginRef.current;
+      if (origin) {
+        setPast((p) => [...p.slice(-49), origin]);
+        setFuture([]);
+      }
+      dragOriginRef.current = null;
+      void persist(designRef.current);
+    }
+    setDrag(null);
+  }
+
+  function onWheel(e: React.WheelEvent<HTMLCanvasElement>) {
+    e.preventDefault();
+    const local = canvasLocal(e);
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    setVp((v) => zoomAt(v, local.x, local.y, factor));
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.code === "Space") {
+      e.preventDefault();
+      setSpaceDown(true);
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      redo();
+      return;
+    }
+    if (e.key === "Escape") {
+      setDraftPoints([]);
+      setLengthBuffer("");
+      return;
+    }
+    if (e.key === "Enter") {
+      if (lengthBuffer) {
+        e.preventDefault();
+        commitTypedLength();
+        return;
+      }
+      finishDraft();
+      return;
+    }
+    if (e.key === "o" || e.key === "O") setOrtho((v) => !v);
+    if (e.key === "a" || e.key === "A") setAngleSnap((v) => !v);
+    if (e.key === "?" || (e.shiftKey && e.key === "/")) setShowHelp((v) => !v);
+    if (e.key === "Delete" || e.key === "Backspace") {
+      if (lengthBuffer) {
+        setLengthBuffer((b) => b.slice(0, -1));
+        return;
+      }
+      if (!selection || draftPoints.length > 0) return;
+      e.preventDefault();
+      deleteSelection();
+      return;
+    }
+
+    // Typed length while drawing
+    if (
+      draftPoints.length > 0 &&
+      (tool === "plumbing" || tool === "pool_poly" || tool === "patio") &&
+      !e.metaKey &&
+      !e.ctrlKey
+    ) {
+      if (/^[0-9.'"/mcm\-]$/i.test(e.key) || e.key === "Backspace") {
+        e.preventDefault();
+        if (e.key === "Backspace") setLengthBuffer((b) => b.slice(0, -1));
+        else setLengthBuffer((b) => b + e.key);
+      }
+    }
+  }
+
+  function onKeyUp(e: React.KeyboardEvent) {
+    if (e.code === "Space") setSpaceDown(false);
   }
 
   const toolHelp =
     tool === "pool_rect"
-      ? "Click two opposite corners for an axis-aligned pool."
+      ? "Click two opposite corners. Scroll zoom · Space-drag pan."
       : tool === "pool_poly" || tool === "patio"
-        ? "Click corners. Click near the first point (or Enter) to close."
+        ? "Click corners. Type a length + Enter for exact segment. Close near start."
         : tool === "plumbing"
-          ? "Click segments. Enter finishes the run. Ortho/Shift for straight lines."
+          ? "Click segments. Type length + Enter. Ortho/Shift for straight lines."
           : tool === "place"
-            ? "Pick a library item, then click the canvas to place it."
-            : "Click a pool, patio, object, or plumbing run to select it.";
+            ? "Pick a library item, then click to place."
+            : "Select to move shapes or drag white vertex handles to edit.";
 
   return (
     <div className="stack" style={{ gap: "0.85rem" }}>
@@ -628,344 +851,404 @@ export function CadWorkspace({
           unitSystem={unitSystem}
         />
       ) : (
-    <div className="cad-layout" onKeyDown={onKeyDown} tabIndex={0}>
-      <aside className="panel stack">
-        <div>
-          <div className="muted">Drawing tools</div>
-        </div>
+        <div
+          className="cad-layout"
+          onKeyDown={onKeyDown}
+          onKeyUp={onKeyUp}
+          tabIndex={0}
+        >
+          <aside className="panel stack">
+            <div className="muted">Drawing tools</div>
+            <div className="cad-toolbar">
+              {(
+                [
+                  ["select", "Select / edit"],
+                  ["pool_rect", "Pool rect"],
+                  ["pool_poly", "Pool poly"],
+                  ["patio", "Patio"],
+                  ["plumbing", "Plumbing"],
+                  ["place", "Library"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`btn ${tool === id ? "" : "secondary"}`}
+                  onClick={() => {
+                    setTool(id);
+                    setDraftPoints([]);
+                    setLengthBuffer("");
+                    if (id === "place" && !placeItemId && library[0]) {
+                      setPlaceItemId(library[0].id);
+                    }
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
 
-        <div className="cad-toolbar">
-          {(
-            [
-              ["select", "Select"],
-              ["pool_rect", "Pool rect"],
-              ["pool_poly", "Pool poly"],
-              ["patio", "Patio"],
-              ["plumbing", "Plumbing"],
-              ["place", "Library"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`btn ${tool === id ? "" : "secondary"}`}
-              onClick={() => {
-                setTool(id);
-                setDraftPoints([]);
-                if (id === "place" && !placeItemId && library[0]) {
-                  setPlaceItemId(library[0].id);
-                }
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {tool === "place" && (
-          <div className="stack">
-            <strong>Object library</strong>
-            <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>
-              Filtered for {DESIGN_LEVEL_LABELS[designLevel].toLowerCase()} jobs.
-            </p>
-            {library.map((item) => (
+            <div className="row">
               <button
-                key={item.id}
                 type="button"
-                className="card-link"
-                style={{
-                  textAlign: "left",
-                  borderColor: placeItemId === item.id ? "var(--accent)" : undefined,
-                }}
-                onClick={() => setPlaceItemId(item.id)}
+                className={`btn ${ortho ? "" : "secondary"}`}
+                onClick={() => setOrtho((v) => !v)}
               >
-                <strong>{item.name}</strong>
-                <div className="muted" style={{ textTransform: "capitalize" }}>
-                  {item.category} · {formatMoney(item.unitPriceCents)}
-                </div>
+                Ortho {ortho ? "ON" : "OFF"}
               </button>
-            ))}
-          </div>
-        )}
+              <button
+                type="button"
+                className={`btn ${angleSnap ? "" : "secondary"}`}
+                onClick={() => setAngleSnap((v) => !v)}
+              >
+                15° snap {angleSnap ? "ON" : "OFF"}
+              </button>
+            </div>
+            <div className="row">
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={undo}
+                disabled={!past.length}
+              >
+                Undo
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={redo}
+                disabled={!future.length}
+              >
+                Redo
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setVp(DEFAULT_VIEWPORT)}
+              >
+                Reset view
+              </button>
+            </div>
 
-        <div className="row">
-          <button
-            type="button"
-            className={`btn ${ortho ? "" : "secondary"}`}
-            onClick={() => setOrtho((v) => !v)}
-          >
-            Ortho {ortho ? "ON" : "OFF"}
-          </button>
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={undo}
-            disabled={past.length === 0}
-          >
-            Undo
-          </button>
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={redo}
-            disabled={future.length === 0}
-          >
-            Redo
-          </button>
-        </div>
+            <p className="muted" style={{ fontSize: "0.9rem" }}>
+              {toolHelp}
+            </p>
 
-        <p className="muted" style={{ fontSize: "0.9rem" }}>
-          {toolHelp}
-        </p>
+            {lengthBuffer && (
+              <div className="badge warn">Length: {lengthBuffer}_</div>
+            )}
 
-        {(tool === "pool_poly" || tool === "patio" || tool === "plumbing") && (
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={finishDraft}
-            disabled={
-              tool === "plumbing" ? draftPoints.length < 2 : draftPoints.length < 3
-            }
-          >
-            {tool === "plumbing" ? "Finish run" : "Close shape"}
-          </button>
-        )}
+            {(tool === "pool_poly" || tool === "patio" || tool === "plumbing") && (
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={finishDraft}
+                disabled={
+                  tool === "plumbing"
+                    ? draftPoints.length < 2
+                    : draftPoints.length < 3
+                }
+              >
+                {tool === "plumbing" ? "Finish run" : "Close shape"}
+              </button>
+            )}
 
-        <div>
-          <strong>Layers</strong>
-          <div className="stack" style={{ marginTop: "0.5rem" }}>
-            {design.layers.map((layer) => (
-              <label key={layer.id} className="row" style={{ gap: "0.5rem" }}>
-                <input
-                  type="checkbox"
-                  checked={layer.visible}
-                  onChange={() => toggleLayer(layer.id)}
+            {tool === "place" && (
+              <div className="stack">
+                <strong>Object library</strong>
+                {library.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="card-link"
+                    style={{
+                      textAlign: "left",
+                      borderColor:
+                        placeItemId === item.id ? "var(--accent)" : undefined,
+                    }}
+                    onClick={() => setPlaceItemId(item.id)}
+                  >
+                    <strong>{item.name}</strong>
+                    <div className="muted" style={{ textTransform: "capitalize" }}>
+                      {item.category} · {formatMoney(item.unitPriceCents)}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div>
+              <strong>Layers</strong>
+              <div className="stack" style={{ marginTop: "0.5rem" }}>
+                {design.layers.map((layer) => (
+                  <label key={layer.id} className="row" style={{ gap: "0.5rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={layer.visible}
+                      onChange={() =>
+                        commitDesign({
+                          ...design,
+                          layers: design.layers.map((l) =>
+                            l.id === layer.id
+                              ? { ...l, visible: !l.visible }
+                              : l,
+                          ),
+                        })
+                      }
+                    />
+                    <span style={{ textTransform: "capitalize" }}>{layer.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => setShowHelp((v) => !v)}
+            >
+              {showHelp ? "Hide shortcuts" : "Shortcuts"}
+            </button>
+            {showHelp && (
+              <div className="muted" style={{ fontSize: "0.85rem" }}>
+                <div>Scroll — zoom</div>
+                <div>Space + drag / Alt + drag — pan</div>
+                <div>O — ortho · A — 15° angle snap</div>
+                <div>Type length + Enter — exact segment</div>
+                <div>Select — drag shape or vertex handles</div>
+                <div>⌘/Ctrl+Z — undo · Shift+⌘/Ctrl+Z — redo</div>
+                <div>Esc — cancel draft · Delete — remove selection</div>
+              </div>
+            )}
+
+            <div className="muted" style={{ fontSize: "0.85rem" }}>
+              Units: {unitSystem} · Zoom: {(vp.scale / DEFAULT_VIEWPORT.scale).toFixed(1)}x
+              <br />
+              Save: {saveState}
+            </div>
+          </aside>
+
+          <section className="panel" style={{ padding: "0.85rem" }}>
+            <div
+              className="cad-canvas-wrap"
+              style={{ cursor: spaceDown || drag?.mode === "pan" ? "grab" : "crosshair" }}
+            >
+              <canvas
+                ref={canvasRef}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerLeave={onPointerUp}
+                onWheel={onWheel}
+                onDoubleClick={() => {
+                  if (
+                    tool === "plumbing" ||
+                    tool === "pool_poly" ||
+                    tool === "patio"
+                  ) {
+                    finishDraft();
+                  }
+                }}
+              />
+              <div className="hud">
+                <div>
+                  Segment:{" "}
+                  {draftPoints.length > 0
+                    ? formatLength(draftSegmentMm, unitSystem)
+                    : "—"}
+                </div>
+                <div>
+                  {tool === "plumbing" ? "Run total" : "Path"}:{" "}
+                  {draftPoints.length > 0
+                    ? formatLength(
+                        polylineLengthMm(draftPoints) + draftSegmentMm,
+                        unitSystem,
+                      )
+                    : selectedRun
+                      ? formatLength(
+                          polylineLengthMm(selectedRun.points),
+                          unitSystem,
+                        )
+                      : "—"}
+                </div>
+                {lengthBuffer && <div>Typed: {lengthBuffer}</div>}
+              </div>
+            </div>
+          </section>
+
+          <aside className="panel stack">
+            <h2>Properties</h2>
+            {!selection && (
+              <p className="muted">
+                Select a pool, patio, object, or run. Drag handles to edit corners.
+              </p>
+            )}
+            {selectedPool && (
+              <div className="stack">
+                <strong>{selectedPool.name}</strong>
+                <div className="muted">
+                  Perimeter{" "}
+                  {formatLength(
+                    polygonPerimeterMm(selectedPool.outline),
+                    unitSystem,
+                  )}
+                  <br />
+                  Area {formatArea(polygonAreaMm2(selectedPool.outline), unitSystem)}
+                </div>
+                <DepthFields
+                  key={selectedPool.id}
+                  shallowMm={selectedPool.depthShallowMm}
+                  deepMm={selectedPool.depthDeepMm}
+                  unitSystem={unitSystem}
+                  onChange={(shallowMm, deepMm) =>
+                    commitDesign({
+                      ...design,
+                      poolBodies: design.poolBodies.map((p) =>
+                        p.id === selectedPool.id
+                          ? { ...p, depthShallowMm: shallowMm, depthDeepMm: deepMm }
+                          : p,
+                      ),
+                    })
+                  }
                 />
-                <span style={{ textTransform: "capitalize" }}>{layer.name}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div className="muted" style={{ fontSize: "0.85rem" }}>
-          Units: {unitSystem} · Snap:{" "}
-          {unitSystem === "imperial" ? '1/32"' : "1 mm"}
-          <br />
-          Save: {saveState}
-        </div>
-      </aside>
-
-      <section className="panel" style={{ padding: "0.85rem" }}>
-        <div className="cad-canvas-wrap">
-          <canvas
-            ref={canvasRef}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onDoubleClick={() => {
-              if (tool === "plumbing" || tool === "pool_poly" || tool === "patio") {
-                finishDraft();
-              }
-            }}
-          />
-          <div className="hud">
-            <div>
-              Segment:{" "}
-              {draftPoints.length > 0
-                ? formatLength(draftSegmentMm, unitSystem)
-                : "—"}
-            </div>
-            <div>
-              {tool === "plumbing" ? "Run total" : "Path"}:{" "}
-              {draftPoints.length > 0
-                ? formatLength(draftTotalMm, unitSystem)
-                : selectedRun
-                  ? formatLength(polylineLengthMm(selectedRun.points), unitSystem)
-                  : "—"}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <aside className="panel stack">
-        <h2>Properties</h2>
-        {!selection && (
-          <p className="muted">Select a pool, patio, or plumbing run.</p>
-        )}
-
-        {selectedPool && (
-          <div className="stack">
-            <strong>{selectedPool.name}</strong>
-            <div className="muted">
-              Perimeter {formatLength(polygonPerimeterMm(selectedPool.outline), unitSystem)}
-              <br />
-              Area {formatArea(polygonAreaMm2(selectedPool.outline), unitSystem)}
-            </div>
-            <div className="field">
-              <label htmlFor="shallow">Shallow depth</label>
-              <input
-                id="shallow"
-                defaultValue={formatLength(selectedPool.depthShallowMm, unitSystem)}
-                key={`shallow-${selectedPool.id}-${selectedPool.depthShallowMm}`}
-                onBlur={(e) => {
-                  const mm = parseDepthInput(e.target.value, unitSystem);
-                  if (mm != null) {
-                    updateSelectedPoolDepths(mm, selectedPool.depthDeepMm);
-                  }
-                }}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="deep">Deep depth</label>
-              <input
-                id="deep"
-                defaultValue={formatLength(selectedPool.depthDeepMm, unitSystem)}
-                key={`deep-${selectedPool.id}-${selectedPool.depthDeepMm}`}
-                onBlur={(e) => {
-                  const mm = parseDepthInput(e.target.value, unitSystem);
-                  if (mm != null) {
-                    updateSelectedPoolDepths(selectedPool.depthShallowMm, mm);
-                  }
-                }}
-              />
-            </div>
-            <button type="button" className="btn danger" onClick={deleteSelection}>
-              Delete pool
-            </button>
-          </div>
-        )}
-
-        {selectedPatio && (
-          <div className="stack">
-            <strong>{selectedPatio.name}</strong>
-            <div className="muted">
-              Perimeter{" "}
-              {formatLength(polygonPerimeterMm(selectedPatio.outline), unitSystem)}
-              <br />
-              Area {formatArea(polygonAreaMm2(selectedPatio.outline), unitSystem)}
-            </div>
-            <button type="button" className="btn danger" onClick={deleteSelection}>
-              Delete patio
-            </button>
-          </div>
-        )}
-
-        {selectedRun && (
-          <div className="stack">
-            <strong>{selectedRun.name}</strong>
-            <div className="muted">{selectedRun.circuit}</div>
-            <div>
-              Total length{" "}
-              {formatLength(polylineLengthMm(selectedRun.points), unitSystem)}
-            </div>
-            <button type="button" className="btn danger" onClick={deleteSelection}>
-              Delete run
-            </button>
-          </div>
-        )}
-
-        {selectedObject && (
-          <div className="stack">
-            <strong>{selectedObject.name}</strong>
-            <div className="muted">
-              {formatLength(selectedObject.widthMm, unitSystem)} ×{" "}
-              {formatLength(selectedObject.depthMm, unitSystem)} footprint
-            </div>
-            <button type="button" className="btn danger" onClick={deleteSelection}>
-              Delete object
-            </button>
-          </div>
-        )}
-
-        <hr style={{ border: 0, borderTop: "1px solid var(--line)", width: "100%" }} />
-
-        <h2>On drawing</h2>
-        <div className="stack">
-          {design.poolBodies.map((pool) => (
-            <button
-              key={pool.id}
-              type="button"
-              className="card-link"
-              style={{
-                textAlign: "left",
-                borderColor:
-                  selection?.kind === "pool" && selection.id === pool.id
-                    ? "var(--accent)"
-                    : undefined,
-              }}
-              onClick={() => setSelection({ kind: "pool", id: pool.id })}
-            >
-              <strong>{pool.name}</strong>
-              <div className="muted">
-                {formatArea(polygonAreaMm2(pool.outline), unitSystem)}
+                <button type="button" className="btn danger" onClick={deleteSelection}>
+                  Delete pool
+                </button>
               </div>
-            </button>
-          ))}
-          {design.patios.map((patio) => (
-            <button
-              key={patio.id}
-              type="button"
-              className="card-link"
-              style={{
-                textAlign: "left",
-                borderColor:
-                  selection?.kind === "patio" && selection.id === patio.id
-                    ? "var(--accent)"
-                    : undefined,
-              }}
-              onClick={() => setSelection({ kind: "patio", id: patio.id })}
-            >
-              <strong>{patio.name}</strong>
-              <div className="muted">Patio</div>
-            </button>
-          ))}
-          {design.plumbingRuns.map((run) => (
-            <button
-              key={run.id}
-              type="button"
-              className="card-link"
-              style={{
-                textAlign: "left",
-                borderColor:
-                  selection?.kind === "run" && selection.id === run.id
-                    ? "var(--accent)"
-                    : undefined,
-              }}
-              onClick={() => setSelection({ kind: "run", id: run.id })}
-            >
-              <strong>{run.name}</strong>
-              <div>
-                {formatLength(polylineLengthMm(run.points), unitSystem)}
+            )}
+            {selectedPatio && (
+              <div className="stack">
+                <strong>{selectedPatio.name}</strong>
+                <div className="muted">
+                  {formatArea(polygonAreaMm2(selectedPatio.outline), unitSystem)}
+                </div>
+                <button type="button" className="btn danger" onClick={deleteSelection}>
+                  Delete patio
+                </button>
               </div>
-            </button>
-          ))}
-          {design.objects.map((obj) => (
-            <button
-              key={obj.id}
-              type="button"
-              className="card-link"
-              style={{
-                textAlign: "left",
-                borderColor:
-                  selection?.kind === "object" && selection.id === obj.id
-                    ? "var(--accent)"
-                    : undefined,
-              }}
-              onClick={() => setSelection({ kind: "object", id: obj.id })}
-            >
-              <strong>{obj.name}</strong>
-              <div className="muted">Library object</div>
-            </button>
-          ))}
+            )}
+            {selectedRun && (
+              <div className="stack">
+                <strong>{selectedRun.name}</strong>
+                <div>
+                  {formatLength(polylineLengthMm(selectedRun.points), unitSystem)}
+                </div>
+                <button type="button" className="btn danger" onClick={deleteSelection}>
+                  Delete run
+                </button>
+              </div>
+            )}
+            {selectedObject && (
+              <div className="stack">
+                <strong>{selectedObject.name}</strong>
+                <div className="muted">
+                  {formatLength(selectedObject.widthMm, unitSystem)} ×{" "}
+                  {formatLength(selectedObject.depthMm, unitSystem)}
+                </div>
+                <button type="button" className="btn danger" onClick={deleteSelection}>
+                  Delete object
+                </button>
+              </div>
+            )}
+
+            <hr style={{ border: 0, borderTop: "1px solid var(--line)", width: "100%" }} />
+            <h2>On drawing</h2>
+            <div className="stack">
+              {design.poolBodies.map((pool) => (
+                <button
+                  key={pool.id}
+                  type="button"
+                  className="card-link"
+                  style={{
+                    textAlign: "left",
+                    borderColor:
+                      selection?.kind === "pool" && selection.id === pool.id
+                        ? "var(--accent)"
+                        : undefined,
+                  }}
+                  onClick={() => setSelection({ kind: "pool", id: pool.id })}
+                >
+                  <strong>{pool.name}</strong>
+                </button>
+              ))}
+              {design.patios.map((patio) => (
+                <button
+                  key={patio.id}
+                  type="button"
+                  className="card-link"
+                  style={{ textAlign: "left" }}
+                  onClick={() => setSelection({ kind: "patio", id: patio.id })}
+                >
+                  <strong>{patio.name}</strong>
+                </button>
+              ))}
+              {design.plumbingRuns.map((run) => (
+                <button
+                  key={run.id}
+                  type="button"
+                  className="card-link"
+                  style={{ textAlign: "left" }}
+                  onClick={() => setSelection({ kind: "run", id: run.id })}
+                >
+                  <strong>{run.name}</strong>
+                </button>
+              ))}
+              {(design.objects ?? []).map((obj) => (
+                <button
+                  key={obj.id}
+                  type="button"
+                  className="card-link"
+                  style={{ textAlign: "left" }}
+                  onClick={() => setSelection({ kind: "object", id: obj.id })}
+                >
+                  <strong>{obj.name}</strong>
+                </button>
+              ))}
+            </div>
+          </aside>
         </div>
-      </aside>
-    </div>
       )}
     </div>
   );
 }
 
-function parseDepthInput(input: string, unitSystem: UnitSystem): number | null {
-  return parseLengthToMm(input, unitSystem);
+function DepthFields({
+  shallowMm,
+  deepMm,
+  unitSystem,
+  onChange,
+}: {
+  shallowMm: number;
+  deepMm: number;
+  unitSystem: UnitSystem;
+  onChange: (shallowMm: number, deepMm: number) => void;
+}) {
+  return (
+    <>
+      <div className="field">
+        <label htmlFor="shallow">Shallow depth</label>
+        <input
+          id="shallow"
+          defaultValue={formatLength(shallowMm, unitSystem)}
+          onBlur={(e) => {
+            const mm = parseLengthToMm(e.target.value, unitSystem);
+            if (mm != null) onChange(mm, deepMm);
+          }}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="deep">Deep depth</label>
+        <input
+          id="deep"
+          defaultValue={formatLength(deepMm, unitSystem)}
+          onBlur={(e) => {
+            const mm = parseLengthToMm(e.target.value, unitSystem);
+            if (mm != null) onChange(shallowMm, mm);
+          }}
+        />
+      </div>
+    </>
+  );
 }
 
 function placeLibraryItem(
@@ -983,86 +1266,58 @@ function placeLibraryItem(
     widthMm: item.widthMm,
     depthMm: item.depthMm,
   };
-
   let layers = design.layers;
   if (!layers.some((l) => l.id === item.layerId)) {
     layers = [...layers, { id: item.layerId, name: item.layerId, visible: true }];
   }
-
   return {
     object,
-    design: {
-      ...design,
-      layers,
-      objects: [...design.objects, object],
-    },
+    design: { ...design, layers, objects: [...(design.objects ?? []), object] },
   };
 }
 
-function objectFootprint(obj: PlacedObject): PointMm[] {
-  const hw = obj.widthMm / 2;
-  const hd = obj.depthMm / 2;
-  return [
-    { x: obj.position.x - hw, y: obj.position.y - hd },
-    { x: obj.position.x + hw, y: obj.position.y - hd },
-    { x: obj.position.x + hw, y: obj.position.y + hd },
-    { x: obj.position.x - hw, y: obj.position.y + hd },
-  ];
-}
-
-function hitTest(design: DesignDocument, point: PointMm): Selection {
-  const tol = 120;
-  for (let i = design.objects.length - 1; i >= 0; i--) {
-    if (pointInPolygon(point, objectFootprint(design.objects[i]))) {
-      return { kind: "object", id: design.objects[i].id };
-    }
-  }
-  for (let i = design.plumbingRuns.length - 1; i >= 0; i--) {
-    const run = design.plumbingRuns[i];
-    for (let j = 1; j < run.points.length; j++) {
-      if (distToSegment(point, run.points[j - 1], run.points[j]) <= tol) {
-        return { kind: "run", id: run.id };
-      }
-    }
-  }
-  for (let i = design.poolBodies.length - 1; i >= 0; i--) {
-    if (pointInPolygon(point, design.poolBodies[i].outline)) {
-      return { kind: "pool", id: design.poolBodies[i].id };
-    }
-  }
-  for (let i = design.patios.length - 1; i >= 0; i--) {
-    if (pointInPolygon(point, design.patios[i].outline)) {
-      return { kind: "patio", id: design.patios[i].id };
-    }
-  }
-  return null;
-}
-
-function drawPlacedObject(
-  ctx: CanvasRenderingContext2D,
-  obj: PlacedObject,
-  selected: boolean,
-  preview = false,
-) {
-  const outline = objectFootprint(obj);
-  ctx.beginPath();
-  outline.forEach((p, i) => {
-    const c = toCanvas(p);
-    if (i === 0) ctx.moveTo(c.x, c.y);
-    else ctx.lineTo(c.x, c.y);
+function translateDesign(
+  d: DesignDocument,
+  kind: "pool" | "patio" | "run" | "object",
+  id: string,
+  dx: number,
+  dy: number,
+  unitSystem: UnitSystem,
+): DesignDocument {
+  const shift = (p: PointMm): PointMm => ({
+    x: snapMm(p.x + dx, unitSystem),
+    y: snapMm(p.y + dy, unitSystem),
   });
-  ctx.closePath();
-  ctx.fillStyle = preview ? "rgba(196,122,44,0.25)" : "rgba(196,122,44,0.35)";
-  ctx.fill();
-  ctx.strokeStyle = selected || preview ? "#8a4f12" : "#c47a2c";
-  ctx.lineWidth = selected ? 2.5 : 1.5;
-  if (preview) ctx.setLineDash([5, 4]);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  const label = toCanvas(obj.position);
-  ctx.fillStyle = "rgba(20,32,41,0.8)";
-  ctx.font = "11px Source Sans 3, sans-serif";
-  ctx.fillText(obj.name, label.x - 24, label.y + 4);
+  if (kind === "pool") {
+    return {
+      ...d,
+      poolBodies: d.poolBodies.map((p) =>
+        p.id === id ? { ...p, outline: p.outline.map(shift) } : p,
+      ),
+    };
+  }
+  if (kind === "patio") {
+    return {
+      ...d,
+      patios: d.patios.map((p) =>
+        p.id === id ? { ...p, outline: p.outline.map(shift) } : p,
+      ),
+    };
+  }
+  if (kind === "run") {
+    return {
+      ...d,
+      plumbingRuns: d.plumbingRuns.map((r) =>
+        r.id === id ? { ...r, points: r.points.map(shift) } : r,
+      ),
+    };
+  }
+  return {
+    ...d,
+    objects: d.objects.map((o) =>
+      o.id === id ? { ...o, position: shift(o.position) } : o,
+    ),
+  };
 }
 
 function distToSegment(p: PointMm, a: PointMm, b: PointMm): number {
@@ -1085,78 +1340,8 @@ function pointInPolygon(point: PointMm, polygon: PointMm[]): boolean {
     const yj = polygon[j].y;
     const intersect =
       yi > point.y !== yj > point.y &&
-      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi + 0.0) + xi;
+      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi || 1e-12) + xi;
     if (intersect) inside = !inside;
   }
   return inside;
-}
-
-function drawPolygon(
-  ctx: CanvasRenderingContext2D,
-  outline: PointMm[],
-  selected: boolean,
-  stroke: string,
-  fill: string,
-  unitSystem: UnitSystem,
-  withDims: boolean,
-) {
-  if (outline.length < 2) return;
-  ctx.beginPath();
-  outline.forEach((p, i) => {
-    const c = toCanvas(p);
-    if (i === 0) ctx.moveTo(c.x, c.y);
-    else ctx.lineTo(c.x, c.y);
-  });
-  ctx.closePath();
-  ctx.fillStyle = fill;
-  ctx.fill();
-  ctx.strokeStyle = selected ? "#0f5c4a" : stroke;
-  ctx.lineWidth = selected ? 3 : 2;
-  ctx.stroke();
-  if (withDims) {
-    for (let i = 0; i < outline.length; i++) {
-      drawEdgeLabel(
-        ctx,
-        outline[i],
-        outline[(i + 1) % outline.length],
-        unitSystem,
-      );
-    }
-  }
-}
-
-function drawRun(
-  ctx: CanvasRenderingContext2D,
-  run: PlumbingRun,
-  selected: boolean,
-  unitSystem: UnitSystem,
-) {
-  if (run.points.length < 2) return;
-  ctx.strokeStyle = selected ? "#0f5c4a" : "#1f8a70";
-  ctx.lineWidth = selected ? 3 : 2;
-  ctx.beginPath();
-  run.points.forEach((p, i) => {
-    const c = toCanvas(p);
-    if (i === 0) ctx.moveTo(c.x, c.y);
-    else ctx.lineTo(c.x, c.y);
-  });
-  ctx.stroke();
-  for (let i = 1; i < run.points.length; i++) {
-    drawEdgeLabel(ctx, run.points[i - 1], run.points[i], unitSystem);
-  }
-}
-
-function drawEdgeLabel(
-  ctx: CanvasRenderingContext2D,
-  a: PointMm,
-  b: PointMm,
-  unitSystem: UnitSystem,
-) {
-  const len = segmentLengthMm(a, b);
-  if (len < 80) return;
-  const mid = toCanvas({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-  const label = formatLength(len, unitSystem);
-  ctx.font = "11px Source Sans 3, sans-serif";
-  ctx.fillStyle = "rgba(20,32,41,0.75)";
-  ctx.fillText(label, mid.x + 4, mid.y - 4);
 }
