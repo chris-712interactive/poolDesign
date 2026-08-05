@@ -21,7 +21,9 @@ import {
   type PlumbingRun,
   type UnitSystem,
 } from "@pool-design/shared";
+import { EstimatePanel } from "@/components/EstimatePanel";
 
+type WorkspaceView = "design" | "estimate";
 type Tool = "select" | "pool_rect" | "pool_poly" | "patio" | "plumbing";
 type Selection =
   | { kind: "pool"; id: string }
@@ -84,6 +86,7 @@ export function CadWorkspace({
   initialDesign,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [view, setView] = useState<WorkspaceView>("design");
   const [design, setDesign] = useState<DesignDocument>(initialDesign);
   const [past, setPast] = useState<DesignDocument[]>([]);
   const [future, setFuture] = useState<DesignDocument[]>([]);
@@ -519,14 +522,42 @@ export function CadWorkspace({
           : "Click a pool, patio, or plumbing run to select it.";
 
   return (
+    <div className="stack" style={{ gap: "0.85rem" }}>
+      <div className="panel row" style={{ justifyContent: "space-between" }}>
+        <div>
+          <div className="muted">Project</div>
+          <strong>{projectName}</strong>{" "}
+          <span className="badge">{DESIGN_LEVEL_LABELS[designLevel]}</span>
+        </div>
+        <div className="row">
+          <button
+            type="button"
+            className={`btn ${view === "design" ? "" : "secondary"}`}
+            onClick={() => setView("design")}
+          >
+            Design
+          </button>
+          <button
+            type="button"
+            className={`btn ${view === "estimate" ? "" : "secondary"}`}
+            onClick={() => setView("estimate")}
+          >
+            Estimate / BOM
+          </button>
+        </div>
+      </div>
+
+      {view === "estimate" ? (
+        <EstimatePanel
+          projectId={projectId}
+          design={design}
+          unitSystem={unitSystem}
+        />
+      ) : (
     <div className="cad-layout" onKeyDown={onKeyDown} tabIndex={0}>
       <aside className="panel stack">
         <div>
-          <div className="muted">Project</div>
-          <strong>{projectName}</strong>
-          <div>
-            <span className="badge">{DESIGN_LEVEL_LABELS[designLevel]}</span>
-          </div>
+          <div className="muted">Drawing tools</div>
         </div>
 
         <div className="cad-toolbar">
@@ -792,6 +823,8 @@ export function CadWorkspace({
           ))}
         </div>
       </aside>
+    </div>
+      )}
     </div>
   );
 }

@@ -29,6 +29,7 @@ Open [http://localhost:3000](http://localhost:3000) (or the port shown in the te
 - Company projects with **residential / commercial / water park** levels
 - Designer **imperial / metric** setting
 - CAD workspace: pool rectangle/polygon, patio regions, plumbing runs, ortho + unit snap (`1/32"` / `1 mm`), edge dimensions, shallow/deep depths, layers, undo/redo, save to project
+- **Estimate / BOM**: automatic takeoffs (finish, coping, patio, pipe LF, equipment, labor) with starter catalog pricing
 
 ### Seed logins
 
