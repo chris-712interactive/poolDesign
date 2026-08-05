@@ -4,6 +4,7 @@ import {
   polygonAreaMm2,
   polygonPerimeterMm,
   polylineLengthMm,
+  segmentLengthMm,
 } from "./design-model";
 import { getPlaceableItem } from "./object-library";
 import type { UnitSystem } from "./units";
@@ -136,13 +137,34 @@ export function buildTakeoff(
     push("equip_commercial_kit", poolCount, "ea", "One package per pool body");
   }
 
+  const features = design.features ?? [];
+  const stepsCount = features.filter((f) => f.kind === "steps").length;
+  const benchLf = features
+    .filter((f) => f.kind === "bench")
+    .reduce((sum, f) => {
+      if (f.outline.length < 2) return sum;
+      let longest = 0;
+      for (let i = 0; i < f.outline.length; i++) {
+        const len = segmentLengthMm(
+          f.outline[i],
+          f.outline[(i + 1) % f.outline.length],
+        );
+        if (len > longest) longest = len;
+      }
+      return sum + mmToLf(longest);
+    }, 0);
+  push("steps_assembly", stepsCount, "ea", "One assembly per steps feature");
+  push("bench_assembly", benchLf, "lf", "Longest side of each bench");
+
   const laborHrs =
     mm2ToSf(poolAreaMm2) * 0.08 +
     mm2ToSf(patioAreaMm2) * 0.03 +
     mmToLf(pipeMm) * 0.15 +
     poolCount * 24 +
     avgDepthIn * 0.5 +
-    design.objects.length * 0.5;
+    (design.objects ?? []).length * 0.5 +
+    stepsCount * 4 +
+    benchLf * 0.4;
   push("labor_install", roundQty(laborHrs, 1), "hr", "Estimated install hours");
 
   // Group placed library objects

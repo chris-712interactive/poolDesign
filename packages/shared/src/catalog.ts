@@ -90,6 +90,23 @@ export const DEFAULT_CATALOG: CatalogItem[] = [
     unitPriceCents: 8500,
     levels: ["residential", "commercial", "water_park"],
   },
+  {
+    id: "steps_assembly",
+    name: "Pool steps assembly",
+    category: "structure",
+    unit: "ea",
+    unitPriceCents: 280000,
+    levels: ["residential", "commercial", "water_park"],
+  },
+  {
+    id: "bench_assembly",
+    name: "In-pool bench",
+    category: "structure",
+    unit: "lf",
+    unitPriceCents: 9500,
+    levels: ["residential", "commercial", "water_park"],
+    description: "Bench length based on longest side of bench outline",
+  },
 ];
 
 export function catalogForLevel(level: DesignLevel): CatalogItem[] {

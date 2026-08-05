@@ -28,7 +28,7 @@ Open [http://localhost:3000](http://localhost:3000) (or the port shown in the te
 - Platform owner console with milestone complete/dismiss
 - Company projects with **residential / commercial / water park** levels
 - Designer **imperial / metric** setting
-- CAD workspace (design-platform focus): pool/patio/plumbing/library, zoom/pan, vertex edit + move, typed length entry, ortho + 15° snap, edge dimensions, layers, undo/redo
+- CAD workspace (design-platform focus): pool/patio/steps/bench/plumbing/library, zoom/pan, vertex edit + move, rotate furniture, measure tool, typed length entry, ortho + 15° snap, design checklist, layers, undo/redo
 - **Estimate / BOM**: automatic takeoffs with starter catalog pricing
 - **Object library**: furniture/amenities filtered by design level; counts roll into the BOM
 - **Priority:** polish the 2D design platform before client portal / contracts

@@ -1,9 +1,11 @@
 import {
   formatLength,
+  objectFootprint,
   segmentLengthMm,
   type PlacedObject,
   type PlumbingRun,
   type PointMm,
+  type PoolFeature,
   type UnitSystem,
 } from "@pool-design/shared";
 import { type Viewport, worldToScreen } from "@/lib/cad/math";
@@ -127,14 +129,7 @@ export function drawPlacedObject(
   selected: boolean,
   preview = false,
 ) {
-  const hw = obj.widthMm / 2;
-  const hd = obj.depthMm / 2;
-  const outline: PointMm[] = [
-    { x: obj.position.x - hw, y: obj.position.y - hd },
-    { x: obj.position.x + hw, y: obj.position.y - hd },
-    { x: obj.position.x + hw, y: obj.position.y + hd },
-    { x: obj.position.x - hw, y: obj.position.y + hd },
-  ];
+  const outline = objectFootprint(obj);
   ctx.beginPath();
   outline.forEach((p, i) => {
     const c = worldToScreen(p, vp);
@@ -153,6 +148,85 @@ export function drawPlacedObject(
   ctx.fillStyle = "rgba(20,32,41,0.8)";
   ctx.font = "11px Source Sans 3, sans-serif";
   ctx.fillText(obj.name, label.x - 24, label.y + 4);
+
+  if (selected && !preview) {
+    const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
+    const dist = obj.depthMm / 2 + 400;
+    const handle = worldToScreen(
+      {
+        x: obj.position.x - Math.sin(rad) * dist,
+        y: obj.position.y - Math.cos(rad) * dist,
+      },
+      vp,
+    );
+    const center = worldToScreen(obj.position, vp);
+    ctx.strokeStyle = "#8a4f12";
+    ctx.beginPath();
+    ctx.moveTo(center.x, center.y);
+    ctx.lineTo(handle.x, handle.y);
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(handle.x, handle.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+export function drawFeature(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  feature: PoolFeature,
+  selected: boolean,
+  unitSystem: UnitSystem,
+) {
+  const stroke = feature.kind === "steps" ? "#2f6f9f" : "#6b4f9a";
+  const fill =
+    feature.kind === "steps"
+      ? "rgba(47,111,159,0.28)"
+      : "rgba(107,79,154,0.28)";
+  drawPolygon(
+    ctx,
+    vp,
+    feature.outline,
+    selected,
+    stroke,
+    fill,
+    unitSystem,
+    true,
+    selected,
+  );
+  if (feature.outline.length) {
+    const c = worldToScreen(feature.outline[0], vp);
+    ctx.fillStyle = "rgba(20,32,41,0.8)";
+    ctx.font = "11px Source Sans 3, sans-serif";
+    ctx.fillText(feature.name, c.x + 4, c.y - 6);
+  }
+}
+
+export function drawMeasure(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  a: PointMm,
+  b: PointMm,
+  unitSystem: UnitSystem,
+) {
+  const sa = worldToScreen(a, vp);
+  const sb = worldToScreen(b, vp);
+  ctx.strokeStyle = "#b33a3a";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(sa.x, sa.y);
+  ctx.lineTo(sb.x, sb.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#b33a3a";
+  ctx.beginPath();
+  ctx.arc(sa.x, sa.y, 4, 0, Math.PI * 2);
+  ctx.arc(sb.x, sb.y, 4, 0, Math.PI * 2);
+  ctx.fill();
+  drawEdgeLabel(ctx, vp, a, b, unitSystem);
 }
 
 export function drawEdgeLabel(

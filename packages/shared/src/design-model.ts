@@ -44,6 +44,20 @@ export type PlumbingRun = {
   pipeDiameterMm?: number;
 };
 
+export type PoolFeatureKind = "steps" | "bench";
+
+/** In-pool features (steps, benches) drawn as closed polygons */
+export type PoolFeature = {
+  id: string;
+  kind: PoolFeatureKind;
+  name: string;
+  outline: PointMm[];
+  /** Optional link to a pool body */
+  poolBodyId?: string;
+  /** Step risers (steps only) */
+  riserCount?: number;
+};
+
 export type DesignDocument = {
   version: 1;
   designLevel: DesignLevel;
@@ -54,12 +68,20 @@ export type DesignDocument = {
   patios: PatioRegion[];
   objects: PlacedObject[];
   plumbingRuns: PlumbingRun[];
+  features: PoolFeature[];
 };
 
 export function emptyDesignDocument(
   designLevel: DesignLevel,
   unitSystem: UnitSystem = "imperial",
-  layerNames: string[] = ["pool", "patio", "plumbing", "furniture", "notes"],
+  layerNames: string[] = [
+    "pool",
+    "patio",
+    "plumbing",
+    "furniture",
+    "features",
+    "notes",
+  ],
 ): DesignDocument {
   return {
     version: 1,
@@ -74,6 +96,7 @@ export function emptyDesignDocument(
     patios: [],
     objects: [],
     plumbingRuns: [],
+    features: [],
   };
 }
 
@@ -132,5 +155,86 @@ export function axisAlignedRect(
     { x: maxX, y: minY },
     { x: maxX, y: maxY },
     { x: minX, y: maxY },
+  ];
+}
+
+/** Axis-aligned footprint corners for a placed object (ignores rotation). */
+export function objectFootprintAxis(obj: PlacedObject): PointMm[] {
+  const hw = obj.widthMm / 2;
+  const hd = obj.depthMm / 2;
+  return [
+    { x: obj.position.x - hw, y: obj.position.y - hd },
+    { x: obj.position.x + hw, y: obj.position.y - hd },
+    { x: obj.position.x + hw, y: obj.position.y + hd },
+    { x: obj.position.x - hw, y: obj.position.y + hd },
+  ];
+}
+
+/** Rotated footprint corners around object center. */
+export function objectFootprint(obj: PlacedObject): PointMm[] {
+  const hw = obj.widthMm / 2;
+  const hd = obj.depthMm / 2;
+  const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const corners: PointMm[] = [
+    { x: -hw, y: -hd },
+    { x: hw, y: -hd },
+    { x: hw, y: hd },
+    { x: -hw, y: hd },
+  ];
+  return corners.map((c) => ({
+    x: obj.position.x + c.x * cos - c.y * sin,
+    y: obj.position.y + c.x * sin + c.y * cos,
+  }));
+}
+
+export type DesignGuideStep = {
+  id: string;
+  title: string;
+  done: boolean;
+  hint: string;
+};
+
+/** Simple guided checklist for designers building out a job */
+export function designGuideSteps(design: DesignDocument): DesignGuideStep[] {
+  const features = design.features ?? [];
+  return [
+    {
+      id: "pool",
+      title: "Draw the pool",
+      done: design.poolBodies.length > 0,
+      hint: "Use Pool rect for a quick start",
+    },
+    {
+      id: "features",
+      title: "Add steps or a bench",
+      done: features.some((f) => f.kind === "steps" || f.kind === "bench"),
+      hint: "Use Steps / Bench tools",
+    },
+    {
+      id: "patio",
+      title: "Add patio / deck",
+      done: design.patios.length > 0,
+      hint: "Trace the surround with Patio",
+    },
+    {
+      id: "plumbing",
+      title: "Draw plumbing runs",
+      done: design.plumbingRuns.length > 0,
+      hint: "Plumbing tool with Ortho on",
+    },
+    {
+      id: "furniture",
+      title: "Place furniture / amenities",
+      done: (design.objects ?? []).length > 0,
+      hint: "Library tool — click to place",
+    },
+    {
+      id: "estimate",
+      title: "Review the estimate",
+      done: false,
+      hint: "Open Estimate / BOM when ready",
+    },
   ];
 }

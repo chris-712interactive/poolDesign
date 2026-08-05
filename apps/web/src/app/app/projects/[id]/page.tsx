@@ -21,6 +21,7 @@ function parseDesign(
       return {
         ...parsed,
         objects: Array.isArray(parsed.objects) ? parsed.objects : [],
+        features: Array.isArray(parsed.features) ? parsed.features : [],
         patios: Array.isArray(parsed.patios) ? parsed.patios : [],
         poolBodies: Array.isArray(parsed.poolBodies) ? parsed.poolBodies : [],
       };

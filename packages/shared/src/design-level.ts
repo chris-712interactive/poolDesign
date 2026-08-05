@@ -31,13 +31,22 @@ export const DESIGN_LEVEL_CONFIG: Record<DesignLevel, DesignLevelConfig> = {
   residential: {
     level: "residential",
     clientLabel: "Homeowner",
-    defaultLayers: ["pool", "patio", "furniture", "plumbing", "equipment", "notes"],
+    defaultLayers: [
+      "pool",
+      "features",
+      "patio",
+      "furniture",
+      "plumbing",
+      "equipment",
+      "notes",
+    ],
   },
   commercial: {
     level: "commercial",
     clientLabel: "Owner / operator",
     defaultLayers: [
       "pool",
+      "features",
       "deck",
       "amenities",
       "plumbing",
@@ -52,6 +61,7 @@ export const DESIGN_LEVEL_CONFIG: Record<DesignLevel, DesignLevelConfig> = {
     defaultLayers: [
       "attractions",
       "pools",
+      "features",
       "guest_flow",
       "mechanical",
       "plumbing",

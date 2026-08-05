@@ -6,8 +6,10 @@ import {
   DEFAULT_POOL_SHALLOW_MM,
   DESIGN_LEVEL_LABELS,
   axisAlignedRect,
+  designGuideSteps,
   formatLength,
   formatMoney,
+  objectFootprint,
   objectLibraryForLevel,
   parseLengthToMm,
   polygonAreaMm2,
@@ -22,6 +24,7 @@ import {
   type PlacedObject,
   type PointMm,
   type PoolBody,
+  type PoolFeature,
   type PlumbingRun,
   type UnitSystem,
 } from "@pool-design/shared";
@@ -38,7 +41,9 @@ import {
 } from "@/lib/cad/math";
 import {
   drawDraft,
+  drawFeature,
   drawGrid,
+  drawMeasure,
   drawPlacedObject,
   drawPolygon,
   drawRun,
@@ -46,12 +51,22 @@ import {
 } from "@/lib/cad/draw";
 
 type WorkspaceView = "design" | "estimate";
-type Tool = "select" | "pool_rect" | "pool_poly" | "patio" | "plumbing" | "place";
+type Tool =
+  | "select"
+  | "pool_rect"
+  | "pool_poly"
+  | "steps"
+  | "bench"
+  | "patio"
+  | "plumbing"
+  | "place"
+  | "measure";
 type Selection =
   | { kind: "pool"; id: string }
   | { kind: "patio"; id: string }
   | { kind: "run"; id: string }
   | { kind: "object"; id: string }
+  | { kind: "feature"; id: string }
   | null;
 
 type DragState =
@@ -64,15 +79,19 @@ type DragState =
     }
   | {
       mode: "vertex";
-      kind: "pool" | "patio" | "run";
+      kind: "pool" | "patio" | "run" | "feature";
       id: string;
       index: number;
     }
   | {
       mode: "move";
-      kind: "pool" | "patio" | "run" | "object";
+      kind: "pool" | "patio" | "run" | "object" | "feature";
       id: string;
       last: PointMm;
+    }
+  | {
+      mode: "rotate";
+      id: string;
     };
 
 type Props = {
@@ -99,15 +118,24 @@ function layerVisible(design: DesignDocument, id: string): boolean {
   return design.layers.find((l) => l.id === id)?.visible !== false;
 }
 
-function objectFootprint(obj: PlacedObject): PointMm[] {
-  const hw = obj.widthMm / 2;
-  const hd = obj.depthMm / 2;
-  return [
-    { x: obj.position.x - hw, y: obj.position.y - hd },
-    { x: obj.position.x + hw, y: obj.position.y - hd },
-    { x: obj.position.x + hw, y: obj.position.y + hd },
-    { x: obj.position.x - hw, y: obj.position.y + hd },
-  ];
+function normalizeDesign(doc: DesignDocument): DesignDocument {
+  return {
+    ...doc,
+    objects: doc.objects ?? [],
+    features: doc.features ?? [],
+    layers: doc.layers.some((l) => l.id === "features")
+      ? doc.layers
+      : [...doc.layers, { id: "features", name: "features", visible: true }],
+  };
+}
+
+function rotationHandleWorld(obj: PlacedObject): PointMm {
+  const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
+  const dist = obj.depthMm / 2 + 400;
+  return {
+    x: obj.position.x - Math.sin(rad) * dist,
+    y: obj.position.y - Math.cos(rad) * dist,
+  };
 }
 
 export function CadWorkspace({
@@ -121,11 +149,11 @@ export function CadWorkspace({
   const dragOriginRef = useRef<DesignDocument | null>(null);
   const designRef = useRef<DesignDocument>(initialDesign);
   const [view, setView] = useState<WorkspaceView>("design");
-  const [design, setDesign] = useState<DesignDocument>(() => ({
-    ...initialDesign,
-    objects: initialDesign.objects ?? [],
-  }));
+  const [design, setDesign] = useState<DesignDocument>(() =>
+    normalizeDesign(initialDesign),
+  );
   designRef.current = design;
+  const [measurePoints, setMeasurePoints] = useState<PointMm[]>([]);
   const [past, setPast] = useState<DesignDocument[]>([]);
   const [future, setFuture] = useState<DesignDocument[]>([]);
   const [vp, setVp] = useState<Viewport>(DEFAULT_VIEWPORT);
@@ -178,6 +206,14 @@ export function CadWorkspace({
         : null,
     [design.objects, selection],
   );
+  const selectedFeature = useMemo(
+    () =>
+      selection?.kind === "feature"
+        ? (design.features ?? []).find((f) => f.id === selection.id) ?? null
+        : null,
+    [design.features, selection],
+  );
+  const guideSteps = useMemo(() => designGuideSteps(design), [design]);
 
   const constrainPoint = useCallback(
     (from: PointMm | null, to: PointMm, shiftKey: boolean) => {
@@ -299,6 +335,18 @@ export function CadWorkspace({
       }
     }
 
+    if (layerVisible(design, "features")) {
+      for (const feature of design.features ?? []) {
+        drawFeature(
+          ctx,
+          vp,
+          feature,
+          selection?.kind === "feature" && selection.id === feature.id,
+          unitSystem,
+        );
+      }
+    }
+
     if (layerVisible(design, "plumbing")) {
       for (const run of design.plumbingRuns) {
         drawRun(
@@ -342,14 +390,26 @@ export function CadWorkspace({
       );
     }
 
-    if (tool === "pool_rect" && draftPoints.length === 1 && previewPoint) {
+    if (measurePoints.length === 1 && previewPoint) {
+      drawMeasure(ctx, vp, measurePoints[0], previewPoint, unitSystem);
+    } else if (measurePoints.length === 2) {
+      drawMeasure(ctx, vp, measurePoints[0], measurePoints[1], unitSystem);
+    }
+
+    if (
+      (tool === "pool_rect" || tool === "steps" || tool === "bench") &&
+      draftPoints.length === 1 &&
+      previewPoint
+    ) {
       const rectPts = axisAlignedRect(draftPoints[0], previewPoint);
+      const stroke =
+        tool === "steps" ? "#2f6f9f" : tool === "bench" ? "#6b4f9a" : "#146353";
       drawPolygon(
         ctx,
         vp,
         rectPts,
         true,
-        "#146353",
+        stroke,
         "rgba(31,138,112,0.15)",
         unitSystem,
         true,
@@ -392,6 +452,7 @@ export function CadWorkspace({
   }, [
     design,
     draftPoints,
+    measurePoints,
     placeItem,
     previewPoint,
     selection,
@@ -491,9 +552,15 @@ export function CadWorkspace({
 
   function hitVertex(
     point: PointMm,
-  ): { kind: "pool" | "patio" | "run"; id: string; index: number } | null {
+  ):
+    | { kind: "pool" | "patio" | "run" | "feature"; id: string; index: number }
+    | null {
     const tol = VERTEX_HIT_PX / vp.scale;
-    const check = (kind: "pool" | "patio" | "run", id: string, pts: PointMm[]) => {
+    const check = (
+      kind: "pool" | "patio" | "run" | "feature",
+      id: string,
+      pts: PointMm[],
+    ) => {
       for (let i = 0; i < pts.length; i++) {
         if (segmentLengthMm(point, pts[i]) <= tol) return { kind, id, index: i };
       }
@@ -511,6 +578,18 @@ export function CadWorkspace({
       const hit = check("run", selectedRun.id, selectedRun.points);
       if (hit) return hit;
     }
+    if (selection?.kind === "feature" && selectedFeature) {
+      const hit = check("feature", selectedFeature.id, selectedFeature.outline);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function hitRotateHandle(point: PointMm): string | null {
+    if (!selectedObject) return null;
+    const handle = rotationHandleWorld(selectedObject);
+    const tol = (VERTEX_HIT_PX + 4) / vp.scale;
+    if (segmentLengthMm(point, handle) <= tol) return selectedObject.id;
     return null;
   }
 
@@ -519,6 +598,12 @@ export function CadWorkspace({
       const obj = design.objects[i];
       if (pointInPolygon(point, objectFootprint(obj))) {
         return { kind: "object", id: obj.id };
+      }
+    }
+    for (let i = (design.features ?? []).length - 1; i >= 0; i--) {
+      const feature = design.features[i];
+      if (pointInPolygon(point, feature.outline)) {
+        return { kind: "feature", id: feature.id };
       }
     }
     for (let i = design.plumbingRuns.length - 1; i >= 0; i--) {
@@ -559,13 +644,40 @@ export function CadWorkspace({
         ...design,
         plumbingRuns: design.plumbingRuns.filter((r) => r.id !== selection.id),
       });
-    } else {
+    } else if (selection.kind === "object") {
       commitDesign({
         ...design,
         objects: design.objects.filter((o) => o.id !== selection.id),
       });
+    } else if (selection.kind === "feature") {
+      commitDesign({
+        ...design,
+        features: (design.features ?? []).filter((f) => f.id !== selection.id),
+      });
     }
     setSelection(null);
+  }
+
+  function addRectFeature(kind: "steps" | "bench", a: PointMm, b: PointMm) {
+    const outline = axisAlignedRect(a, b);
+    const nearestPool = design.poolBodies[0]?.id;
+    const feature: PoolFeature = {
+      id: newId(kind),
+      kind,
+      name:
+        kind === "steps"
+          ? `Steps ${(design.features ?? []).filter((f) => f.kind === "steps").length + 1}`
+          : `Bench ${(design.features ?? []).filter((f) => f.kind === "bench").length + 1}`,
+      outline,
+      poolBodyId: nearestPool,
+      riserCount: kind === "steps" ? 3 : undefined,
+    };
+    commitDesign({
+      ...design,
+      features: [...(design.features ?? []), feature],
+    });
+    setSelection({ kind: "feature", id: feature.id });
+    setDraftPoints([]);
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -585,6 +697,12 @@ export function CadWorkspace({
     }
 
     if (tool === "select") {
+      const rotateId = hitRotateHandle(point);
+      if (rotateId) {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({ mode: "rotate", id: rotateId });
+        return;
+      }
       const vertex = hitVertex(point);
       if (vertex) {
         dragOriginRef.current = structuredClone(design);
@@ -600,6 +718,15 @@ export function CadWorkspace({
       return;
     }
 
+    if (tool === "measure") {
+      if (measurePoints.length >= 2) {
+        setMeasurePoints([point]);
+      } else {
+        setMeasurePoints((pts) => [...pts, point]);
+      }
+      return;
+    }
+
     if (tool === "place") {
       if (!placeItem) return;
       const placed = placeLibraryItem(design, placeItem, point);
@@ -608,9 +735,13 @@ export function CadWorkspace({
       return;
     }
 
-    if (tool === "pool_rect") {
+    if (tool === "pool_rect" || tool === "steps" || tool === "bench") {
       if (!draftPoints.length) {
         setDraftPoints([point]);
+        return;
+      }
+      if (tool === "steps" || tool === "bench") {
+        addRectFeature(tool, draftPoints[0], point);
         return;
       }
       const outline = axisAlignedRect(draftPoints[0], point);
@@ -660,12 +791,28 @@ export function CadWorkspace({
       return;
     }
 
+    if (drag.mode === "rotate") {
+      const obj = designRef.current.objects.find((o) => o.id === drag.id);
+      if (!obj) return;
+      const angle =
+        (Math.atan2(raw.y - obj.position.y, raw.x - obj.position.x) * 180) /
+          Math.PI +
+        90;
+      const snapped = Math.round(angle / 15) * 15;
+      setDesign((d) => ({
+        ...d,
+        objects: d.objects.map((o) =>
+          o.id === drag.id ? { ...o, rotationDeg: snapped } : o,
+        ),
+      }));
+      return;
+    }
+
     if (drag.mode === "vertex") {
       const snapped = {
         x: snapMm(raw.x, unitSystem),
         y: snapMm(raw.y, unitSystem),
       };
-      // live update without flooding history: temporary setDesign
       setDesign((d) => {
         if (drag.kind === "pool") {
           return {
@@ -697,6 +844,21 @@ export function CadWorkspace({
             ),
           };
         }
+        if (drag.kind === "feature") {
+          return {
+            ...d,
+            features: (d.features ?? []).map((f) =>
+              f.id === drag.id
+                ? {
+                    ...f,
+                    outline: f.outline.map((pt, i) =>
+                      i === drag.index ? snapped : pt,
+                    ),
+                  }
+                : f,
+            ),
+          };
+        }
         return {
           ...d,
           plumbingRuns: d.plumbingRuns.map((r) =>
@@ -724,7 +886,11 @@ export function CadWorkspace({
   }
 
   function onPointerUp() {
-    if (drag?.mode === "vertex" || drag?.mode === "move") {
+    if (
+      drag?.mode === "vertex" ||
+      drag?.mode === "move" ||
+      drag?.mode === "rotate"
+    ) {
       const origin = dragOriginRef.current;
       if (origin) {
         setPast((p) => [...p.slice(-49), origin]);
@@ -763,6 +929,19 @@ export function CadWorkspace({
     if (e.key === "Escape") {
       setDraftPoints([]);
       setLengthBuffer("");
+      setMeasurePoints([]);
+      return;
+    }
+    if ((e.key === "r" || e.key === "R") && selectedObject) {
+      e.preventDefault();
+      commitDesign({
+        ...design,
+        objects: design.objects.map((o) =>
+          o.id === selectedObject.id
+            ? { ...o, rotationDeg: (o.rotationDeg + 15) % 360 }
+            : o,
+        ),
+      });
       return;
     }
     if (e.key === "Enter") {
@@ -810,13 +989,17 @@ export function CadWorkspace({
   const toolHelp =
     tool === "pool_rect"
       ? "Click two opposite corners. Scroll zoom · Space-drag pan."
-      : tool === "pool_poly" || tool === "patio"
-        ? "Click corners. Type a length + Enter for exact segment. Close near start."
-        : tool === "plumbing"
-          ? "Click segments. Type length + Enter. Ortho/Shift for straight lines."
-          : tool === "place"
-            ? "Pick a library item, then click to place."
-            : "Select to move shapes or drag white vertex handles to edit.";
+      : tool === "steps" || tool === "bench"
+        ? "Click two corners for an in-pool steps or bench rectangle."
+        : tool === "pool_poly" || tool === "patio"
+          ? "Click corners. Type a length + Enter for exact segment. Close near start."
+          : tool === "plumbing"
+            ? "Click segments. Type length + Enter. Ortho/Shift for straight lines."
+            : tool === "place"
+              ? "Pick a library item, then click to place. R rotates selection 15°."
+              : tool === "measure"
+                ? "Click two points to measure distance. Esc clears."
+                : "Select to move/edit. Drag the circle handle to rotate furniture.";
 
   return (
     <div className="stack" style={{ gap: "0.85rem" }}>
@@ -865,9 +1048,12 @@ export function CadWorkspace({
                   ["select", "Select / edit"],
                   ["pool_rect", "Pool rect"],
                   ["pool_poly", "Pool poly"],
+                  ["steps", "Steps"],
+                  ["bench", "Bench"],
                   ["patio", "Patio"],
                   ["plumbing", "Plumbing"],
                   ["place", "Library"],
+                  ["measure", "Measure"],
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -878,6 +1064,7 @@ export function CadWorkspace({
                     setTool(id);
                     setDraftPoints([]);
                     setLengthBuffer("");
+                    if (id !== "measure") setMeasurePoints([]);
                     if (id === "place" && !placeItemId && library[0]) {
                       setPlaceItemId(library[0].id);
                     }
@@ -886,6 +1073,36 @@ export function CadWorkspace({
                   {label}
                 </button>
               ))}
+            </div>
+
+            <div>
+              <strong>Design checklist</strong>
+              <div className="stack" style={{ marginTop: "0.5rem" }}>
+                {guideSteps.map((step) => (
+                  <div key={step.id} className="row" style={{ gap: "0.45rem" }}>
+                    <span
+                      className={`dot ${step.done ? "completed" : "pending"}`}
+                      style={{ marginTop: 2 }}
+                    />
+                    <div>
+                      <div
+                        style={{
+                          fontWeight: 600,
+                          textDecoration: step.done ? "line-through" : "none",
+                          opacity: step.done ? 0.65 : 1,
+                        }}
+                      >
+                        {step.title}
+                      </div>
+                      {!step.done && (
+                        <div className="muted" style={{ fontSize: "0.8rem" }}>
+                          {step.hint}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="row">
@@ -1016,8 +1233,10 @@ export function CadWorkspace({
                 <div>O — ortho · A — 15° angle snap</div>
                 <div>Type length + Enter — exact segment</div>
                 <div>Select — drag shape or vertex handles</div>
+                <div>R — rotate selected library object 15°</div>
+                <div>Drag circle handle — free rotate (snaps 15°)</div>
                 <div>⌘/Ctrl+Z — undo · Shift+⌘/Ctrl+Z — redo</div>
-                <div>Esc — cancel draft · Delete — remove selection</div>
+                <div>Esc — cancel draft/measure · Delete — remove</div>
               </div>
             )}
 
@@ -1144,10 +1363,83 @@ export function CadWorkspace({
                 <div className="muted">
                   {formatLength(selectedObject.widthMm, unitSystem)} ×{" "}
                   {formatLength(selectedObject.depthMm, unitSystem)}
+                  <br />
+                  Rotation {Math.round(selectedObject.rotationDeg || 0)}°
                 </div>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() =>
+                    commitDesign({
+                      ...design,
+                      objects: design.objects.map((o) =>
+                        o.id === selectedObject.id
+                          ? { ...o, rotationDeg: (o.rotationDeg + 15) % 360 }
+                          : o,
+                      ),
+                    })
+                  }
+                >
+                  Rotate +15°
+                </button>
                 <button type="button" className="btn danger" onClick={deleteSelection}>
                   Delete object
                 </button>
+              </div>
+            )}
+            {selectedFeature && (
+              <div className="stack">
+                <strong>{selectedFeature.name}</strong>
+                <div className="muted" style={{ textTransform: "capitalize" }}>
+                  {selectedFeature.kind}
+                  {selectedFeature.riserCount
+                    ? ` · ${selectedFeature.riserCount} risers`
+                    : ""}
+                </div>
+                <div className="muted">
+                  {formatArea(
+                    polygonAreaMm2(selectedFeature.outline),
+                    unitSystem,
+                  )}
+                </div>
+                {selectedFeature.kind === "steps" && (
+                  <div className="field">
+                    <label htmlFor="risers">Riser count</label>
+                    <input
+                      id="risers"
+                      type="number"
+                      min={1}
+                      max={12}
+                      defaultValue={selectedFeature.riserCount ?? 3}
+                      onBlur={(e) => {
+                        const n = Number(e.target.value);
+                        if (!Number.isFinite(n) || n < 1) return;
+                        commitDesign({
+                          ...design,
+                          features: (design.features ?? []).map((f) =>
+                            f.id === selectedFeature.id
+                              ? { ...f, riserCount: Math.round(n) }
+                              : f,
+                          ),
+                        });
+                      }}
+                    />
+                  </div>
+                )}
+                <button type="button" className="btn danger" onClick={deleteSelection}>
+                  Delete feature
+                </button>
+              </div>
+            )}
+            {tool === "measure" && measurePoints.length === 2 && (
+              <div className="stack">
+                <strong>Measurement</strong>
+                <div>
+                  {formatLength(
+                    segmentLengthMm(measurePoints[0], measurePoints[1]),
+                    unitSystem,
+                  )}
+                </div>
               </div>
             )}
 
@@ -1191,6 +1483,19 @@ export function CadWorkspace({
                   onClick={() => setSelection({ kind: "run", id: run.id })}
                 >
                   <strong>{run.name}</strong>
+                </button>
+              ))}
+              {(design.features ?? []).map((feature) => (
+                <button
+                  key={feature.id}
+                  type="button"
+                  className="card-link"
+                  style={{ textAlign: "left" }}
+                  onClick={() =>
+                    setSelection({ kind: "feature", id: feature.id })
+                  }
+                >
+                  <strong>{feature.name}</strong>
                 </button>
               ))}
               {(design.objects ?? []).map((obj) => (
@@ -1278,7 +1583,7 @@ function placeLibraryItem(
 
 function translateDesign(
   d: DesignDocument,
-  kind: "pool" | "patio" | "run" | "object",
+  kind: "pool" | "patio" | "run" | "object" | "feature",
   id: string,
   dx: number,
   dy: number,
@@ -1309,6 +1614,14 @@ function translateDesign(
       ...d,
       plumbingRuns: d.plumbingRuns.map((r) =>
         r.id === id ? { ...r, points: r.points.map(shift) } : r,
+      ),
+    };
+  }
+  if (kind === "feature") {
+    return {
+      ...d,
+      features: (d.features ?? []).map((f) =>
+        f.id === id ? { ...f, outline: f.outline.map(shift) } : f,
       ),
     };
   }
