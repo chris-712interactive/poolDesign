@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  platform_owner
+  company_admin
+  designer
+  estimator
+}
+
+enum DesignLevel {
+  residential
+  commercial
+  water_park
+}
+
+enum UnitSystem {
+  imperial
+  metric
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  canceled
+  suspended
+}
+
+enum MilestoneState {
+  pending
+  in_progress
+  completed
+  dismissed
+}
+
+enum MilestoneSource {
+  system
+  owner
+}
+
+model Company {
+  id                   String             @id @default(cuid())
+  name                 String
+  slug                 String             @unique
+  customDomain         String?            @unique
+  defaultUnitSystem    UnitSystem         @default(imperial)
+  enabledDesignLevels  String             @default("residential,commercial,water_park")
+  logoUrl              String?
+  region               String?
+  subscriptionStatus   SubscriptionStatus @default(trialing)
+  planKey              String             @default("starter")
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  stripeConnectId      String?
+  trialEndsAt          DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  users              User[]
+  projects           Project[]
+  milestoneStatuses  CompanyMilestoneStatus[]
+}
+
+model User {
+  id              String     @id @default(cuid())
+  email           String     @unique
+  name            String
+  passwordHash    String
+  role            UserRole
+  companyId       String?
+  unitSystem      UnitSystem @default(imperial)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+model Project {
+  id          String      @id @default(cuid())
+  companyId   String
+  name        String
+  clientName  String?
+  address     String?
+  designLevel DesignLevel @default(residential)
+  unitSystem  UnitSystem  @default(imperial)
+  /** JSON DesignDocument */
+  designJson  String      @default("{}")
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+model OnboardingMilestone {
+  id          String @id @default(cuid())
+  key         String @unique
+  title       String
+  description String
+  sortOrder   Int
+
+  statuses CompanyMilestoneStatus[]
+}
+
+model CompanyMilestoneStatus {
+  id           String         @id @default(cuid())
+  companyId    String
+  milestoneId  String
+  state        MilestoneState @default(pending)
+  source       MilestoneSource?
+  note         String?
+  updatedBy    String?
+  completedAt  DateTime?
+  dismissedAt  DateTime?
+  updatedAt    DateTime       @updatedAt
+
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  milestone OnboardingMilestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, milestoneId])
+  @@index([companyId])
+}

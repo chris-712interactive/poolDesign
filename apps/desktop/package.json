@@ -1,0 +1,12 @@
+{
+  "name": "@pool-design/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron offline shell (scaffold) — wraps the web CAD client for field use without Wi‑Fi.",
+  "scripts": {
+    "dev": "echo \"Electron shell will load the web app in a later milestone\"",
+    "build": "echo \"noop\"",
+    "typecheck": "echo \"noop\"",
+    "lint": "echo \"noop\""
+  }
+}
