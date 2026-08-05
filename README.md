@@ -28,7 +28,7 @@ Open [http://localhost:3000](http://localhost:3000) (or the port shown in the te
 - Platform owner console with milestone complete/dismiss
 - Company projects with **residential / commercial / water park** levels
 - Designer **imperial / metric** setting
-- CAD workspace v0: ortho straight lines, unit snap (`1/32"` / `1 mm`), plumbing runs with **live segment + total length**, save to project
+- CAD workspace: pool rectangle/polygon, patio regions, plumbing runs, ortho + unit snap (`1/32"` / `1 mm`), edge dimensions, shallow/deep depths, layers, undo/redo, save to project
 
 ### Seed logins
 

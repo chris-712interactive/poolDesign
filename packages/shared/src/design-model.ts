@@ -88,3 +88,44 @@ export function polylineLengthMm(points: PointMm[]): number {
   }
   return total;
 }
+
+/** Closed polygon perimeter in mm */
+export function polygonPerimeterMm(points: PointMm[]): number {
+  if (points.length < 2) return 0;
+  return (
+    polylineLengthMm(points) +
+    segmentLengthMm(points[points.length - 1], points[0])
+  );
+}
+
+/** Polygon area in mm² (shoelace). Absolute value. */
+export function polygonAreaMm2(points: PointMm[]): number {
+  if (points.length < 3) return 0;
+  let sum = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(sum) / 2;
+}
+
+/** Default residential-ish depths: 3' shallow / 8' deep */
+export const DEFAULT_POOL_SHALLOW_MM = 914.4;
+export const DEFAULT_POOL_DEEP_MM = 2438.4;
+
+export function axisAlignedRect(
+  a: PointMm,
+  b: PointMm,
+): PointMm[] {
+  const minX = Math.min(a.x, b.x);
+  const maxX = Math.max(a.x, b.x);
+  const minY = Math.min(a.y, b.y);
+  const maxY = Math.max(a.y, b.y);
+  return [
+    { x: minX, y: minY },
+    { x: maxX, y: minY },
+    { x: maxX, y: maxY },
+    { x: minX, y: maxY },
+  ];
+}
