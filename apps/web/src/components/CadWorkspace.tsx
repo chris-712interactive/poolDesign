@@ -29,13 +29,13 @@ import {
   type UnitSystem,
 } from "@pool-design/shared";
 import { EstimatePanel } from "@/components/EstimatePanel";
+import { ACTION_ICONS, TOOL_META } from "@/components/CadToolIcons";
 import {
   DEFAULT_VIEWPORT,
   applyAngleSnap,
   applyOrtho,
   pointAtLength,
   screenToWorld,
-  worldToScreen,
   zoomAt,
   type Viewport,
 } from "@/lib/cad/math";
@@ -1040,217 +1040,12 @@ export function CadWorkspace({
           onKeyUp={onKeyUp}
           tabIndex={0}
         >
-          <aside className="panel stack">
-            <div className="muted">Drawing tools</div>
-            <div className="cad-toolbar">
-              {(
-                [
-                  ["select", "Select / edit"],
-                  ["pool_rect", "Pool rect"],
-                  ["pool_poly", "Pool poly"],
-                  ["steps", "Steps"],
-                  ["bench", "Bench"],
-                  ["patio", "Patio"],
-                  ["plumbing", "Plumbing"],
-                  ["place", "Library"],
-                  ["measure", "Measure"],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={`btn ${tool === id ? "" : "secondary"}`}
-                  onClick={() => {
-                    setTool(id);
-                    setDraftPoints([]);
-                    setLengthBuffer("");
-                    if (id !== "measure") setMeasurePoints([]);
-                    if (id === "place" && !placeItemId && library[0]) {
-                      setPlaceItemId(library[0].id);
-                    }
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            <div>
-              <strong>Design checklist</strong>
-              <div className="stack" style={{ marginTop: "0.5rem" }}>
-                {guideSteps.map((step) => (
-                  <div key={step.id} className="row" style={{ gap: "0.45rem" }}>
-                    <span
-                      className={`dot ${step.done ? "completed" : "pending"}`}
-                      style={{ marginTop: 2 }}
-                    />
-                    <div>
-                      <div
-                        style={{
-                          fontWeight: 600,
-                          textDecoration: step.done ? "line-through" : "none",
-                          opacity: step.done ? 0.65 : 1,
-                        }}
-                      >
-                        {step.title}
-                      </div>
-                      {!step.done && (
-                        <div className="muted" style={{ fontSize: "0.8rem" }}>
-                          {step.hint}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="row">
-              <button
-                type="button"
-                className={`btn ${ortho ? "" : "secondary"}`}
-                onClick={() => setOrtho((v) => !v)}
-              >
-                Ortho {ortho ? "ON" : "OFF"}
-              </button>
-              <button
-                type="button"
-                className={`btn ${angleSnap ? "" : "secondary"}`}
-                onClick={() => setAngleSnap((v) => !v)}
-              >
-                15° snap {angleSnap ? "ON" : "OFF"}
-              </button>
-            </div>
-            <div className="row">
-              <button
-                type="button"
-                className="btn secondary"
-                onClick={undo}
-                disabled={!past.length}
-              >
-                Undo
-              </button>
-              <button
-                type="button"
-                className="btn secondary"
-                onClick={redo}
-                disabled={!future.length}
-              >
-                Redo
-              </button>
-              <button
-                type="button"
-                className="btn secondary"
-                onClick={() => setVp(DEFAULT_VIEWPORT)}
-              >
-                Reset view
-              </button>
-            </div>
-
-            <p className="muted" style={{ fontSize: "0.9rem" }}>
-              {toolHelp}
-            </p>
-
-            {lengthBuffer && (
-              <div className="badge warn">Length: {lengthBuffer}_</div>
-            )}
-
-            {(tool === "pool_poly" || tool === "patio" || tool === "plumbing") && (
-              <button
-                type="button"
-                className="btn secondary"
-                onClick={finishDraft}
-                disabled={
-                  tool === "plumbing"
-                    ? draftPoints.length < 2
-                    : draftPoints.length < 3
-                }
-              >
-                {tool === "plumbing" ? "Finish run" : "Close shape"}
-              </button>
-            )}
-
-            {tool === "place" && (
-              <div className="stack">
-                <strong>Object library</strong>
-                {library.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className="card-link"
-                    style={{
-                      textAlign: "left",
-                      borderColor:
-                        placeItemId === item.id ? "var(--accent)" : undefined,
-                    }}
-                    onClick={() => setPlaceItemId(item.id)}
-                  >
-                    <strong>{item.name}</strong>
-                    <div className="muted" style={{ textTransform: "capitalize" }}>
-                      {item.category} · {formatMoney(item.unitPriceCents)}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div>
-              <strong>Layers</strong>
-              <div className="stack" style={{ marginTop: "0.5rem" }}>
-                {design.layers.map((layer) => (
-                  <label key={layer.id} className="row" style={{ gap: "0.5rem" }}>
-                    <input
-                      type="checkbox"
-                      checked={layer.visible}
-                      onChange={() =>
-                        commitDesign({
-                          ...design,
-                          layers: design.layers.map((l) =>
-                            l.id === layer.id
-                              ? { ...l, visible: !l.visible }
-                              : l,
-                          ),
-                        })
-                      }
-                    />
-                    <span style={{ textTransform: "capitalize" }}>{layer.name}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              className="btn secondary"
-              onClick={() => setShowHelp((v) => !v)}
-            >
-              {showHelp ? "Hide shortcuts" : "Shortcuts"}
-            </button>
-            {showHelp && (
-              <div className="muted" style={{ fontSize: "0.85rem" }}>
-                <div>Scroll — zoom</div>
-                <div>Space + drag / Alt + drag — pan</div>
-                <div>O — ortho · A — 15° angle snap</div>
-                <div>Type length + Enter — exact segment</div>
-                <div>Select — drag shape or vertex handles</div>
-                <div>R — rotate selected library object 15°</div>
-                <div>Drag circle handle — free rotate (snaps 15°)</div>
-                <div>⌘/Ctrl+Z — undo · Shift+⌘/Ctrl+Z — redo</div>
-                <div>Esc — cancel draft/measure · Delete — remove</div>
-              </div>
-            )}
-
-            <div className="muted" style={{ fontSize: "0.85rem" }}>
-              Units: {unitSystem} · Zoom: {(vp.scale / DEFAULT_VIEWPORT.scale).toFixed(1)}x
-              <br />
-              Save: {saveState}
-            </div>
-          </aside>
-
-          <section className="panel" style={{ padding: "0.85rem" }}>
+          <section className="panel cad-canvas-panel">
             <div
               className="cad-canvas-wrap"
-              style={{ cursor: spaceDown || drag?.mode === "pan" ? "grab" : "crosshair" }}
+              style={{
+                cursor: spaceDown || drag?.mode === "pan" ? "grab" : "crosshair",
+              }}
             >
               <canvas
                 ref={canvasRef}
@@ -1295,220 +1090,372 @@ export function CadWorkspace({
             </div>
           </section>
 
-          <aside className="panel stack">
-            <h2>Properties</h2>
-            {!selection && (
-              <p className="muted">
-                Select a pool, patio, object, or run. Drag handles to edit corners.
+          <aside className="panel cad-right-rail stack">
+            <div>
+              <div className="muted" style={{ marginBottom: "0.45rem" }}>
+                Tools
+              </div>
+              <div className="cad-icon-toolbar">
+                {TOOL_META.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`tool-icon-btn ${tool === item.id ? "active" : ""}`}
+                    title={item.label}
+                    aria-label={item.label}
+                    onClick={() => {
+                      setTool(item.id);
+                      setDraftPoints([]);
+                      setLengthBuffer("");
+                      if (item.id !== "measure") setMeasurePoints([]);
+                      if (item.id === "place" && !placeItemId && library[0]) {
+                        setPlaceItemId(library[0].id);
+                      }
+                    }}
+                  >
+                    {item.icon}
+                  </button>
+                ))}
+              </div>
+              <div className="cad-action-row" style={{ marginTop: "0.4rem" }}>
+                <button
+                  type="button"
+                  className={`tool-icon-btn ${ortho ? "active" : ""}`}
+                  title={`Ortho ${ortho ? "on" : "off"}`}
+                  aria-label="Toggle ortho"
+                  onClick={() => setOrtho((v) => !v)}
+                >
+                  {ACTION_ICONS.ortho}
+                </button>
+                <button
+                  type="button"
+                  className={`tool-icon-btn ${angleSnap ? "active" : ""}`}
+                  title={`15° snap ${angleSnap ? "on" : "off"}`}
+                  aria-label="Toggle angle snap"
+                  onClick={() => setAngleSnap((v) => !v)}
+                >
+                  {ACTION_ICONS.angle}
+                </button>
+                <button
+                  type="button"
+                  className="tool-icon-btn"
+                  title="Undo"
+                  aria-label="Undo"
+                  onClick={undo}
+                  disabled={!past.length}
+                >
+                  {ACTION_ICONS.undo}
+                </button>
+                <button
+                  type="button"
+                  className="tool-icon-btn"
+                  title="Redo"
+                  aria-label="Redo"
+                  onClick={redo}
+                  disabled={!future.length}
+                >
+                  {ACTION_ICONS.redo}
+                </button>
+                <button
+                  type="button"
+                  className="tool-icon-btn"
+                  title="Reset view"
+                  aria-label="Reset view"
+                  onClick={() => setVp(DEFAULT_VIEWPORT)}
+                >
+                  {ACTION_ICONS.reset}
+                </button>
+              </div>
+              <p className="muted" style={{ fontSize: "0.85rem", margin: "0.55rem 0 0" }}>
+                {toolHelp}
               </p>
-            )}
-            {selectedPool && (
-              <div className="stack">
-                <strong>{selectedPool.name}</strong>
-                <div className="muted">
-                  Perimeter{" "}
-                  {formatLength(
-                    polygonPerimeterMm(selectedPool.outline),
-                    unitSystem,
-                  )}
-                  <br />
-                  Area {formatArea(polygonAreaMm2(selectedPool.outline), unitSystem)}
+              {lengthBuffer && (
+                <div className="badge warn" style={{ marginTop: "0.4rem" }}>
+                  Length: {lengthBuffer}_
                 </div>
-                <DepthFields
-                  key={selectedPool.id}
-                  shallowMm={selectedPool.depthShallowMm}
-                  deepMm={selectedPool.depthDeepMm}
-                  unitSystem={unitSystem}
-                  onChange={(shallowMm, deepMm) =>
-                    commitDesign({
-                      ...design,
-                      poolBodies: design.poolBodies.map((p) =>
-                        p.id === selectedPool.id
-                          ? { ...p, depthShallowMm: shallowMm, depthDeepMm: deepMm }
-                          : p,
-                      ),
-                    })
-                  }
-                />
-                <button type="button" className="btn danger" onClick={deleteSelection}>
-                  Delete pool
-                </button>
-              </div>
-            )}
-            {selectedPatio && (
-              <div className="stack">
-                <strong>{selectedPatio.name}</strong>
-                <div className="muted">
-                  {formatArea(polygonAreaMm2(selectedPatio.outline), unitSystem)}
-                </div>
-                <button type="button" className="btn danger" onClick={deleteSelection}>
-                  Delete patio
-                </button>
-              </div>
-            )}
-            {selectedRun && (
-              <div className="stack">
-                <strong>{selectedRun.name}</strong>
-                <div>
-                  {formatLength(polylineLengthMm(selectedRun.points), unitSystem)}
-                </div>
-                <button type="button" className="btn danger" onClick={deleteSelection}>
-                  Delete run
-                </button>
-              </div>
-            )}
-            {selectedObject && (
-              <div className="stack">
-                <strong>{selectedObject.name}</strong>
-                <div className="muted">
-                  {formatLength(selectedObject.widthMm, unitSystem)} ×{" "}
-                  {formatLength(selectedObject.depthMm, unitSystem)}
-                  <br />
-                  Rotation {Math.round(selectedObject.rotationDeg || 0)}°
-                </div>
+              )}
+              {(tool === "pool_poly" || tool === "patio" || tool === "plumbing") && (
                 <button
                   type="button"
                   className="btn secondary"
-                  onClick={() =>
-                    commitDesign({
-                      ...design,
-                      objects: design.objects.map((o) =>
-                        o.id === selectedObject.id
-                          ? { ...o, rotationDeg: (o.rotationDeg + 15) % 360 }
-                          : o,
-                      ),
-                    })
+                  style={{ marginTop: "0.45rem", width: "100%" }}
+                  onClick={finishDraft}
+                  disabled={
+                    tool === "plumbing"
+                      ? draftPoints.length < 2
+                      : draftPoints.length < 3
                   }
                 >
-                  Rotate +15°
+                  {tool === "plumbing" ? "Finish run" : "Close shape"}
                 </button>
-                <button type="button" className="btn danger" onClick={deleteSelection}>
-                  Delete object
-                </button>
-              </div>
-            )}
-            {selectedFeature && (
-              <div className="stack">
-                <strong>{selectedFeature.name}</strong>
-                <div className="muted" style={{ textTransform: "capitalize" }}>
-                  {selectedFeature.kind}
-                  {selectedFeature.riserCount
-                    ? ` · ${selectedFeature.riserCount} risers`
-                    : ""}
-                </div>
-                <div className="muted">
-                  {formatArea(
-                    polygonAreaMm2(selectedFeature.outline),
-                    unitSystem,
-                  )}
-                </div>
-                {selectedFeature.kind === "steps" && (
-                  <div className="field">
-                    <label htmlFor="risers">Riser count</label>
-                    <input
-                      id="risers"
-                      type="number"
-                      min={1}
-                      max={12}
-                      defaultValue={selectedFeature.riserCount ?? 3}
-                      onBlur={(e) => {
-                        const n = Number(e.target.value);
-                        if (!Number.isFinite(n) || n < 1) return;
-                        commitDesign({
-                          ...design,
-                          features: (design.features ?? []).map((f) =>
-                            f.id === selectedFeature.id
-                              ? { ...f, riserCount: Math.round(n) }
-                              : f,
-                          ),
-                        });
+              )}
+            </div>
+
+            {tool === "place" && (
+              <div className="cad-side-section stack">
+                <strong>Furniture library</strong>
+                <div className="cad-compact-list">
+                  {library.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="card-link"
+                      style={{
+                        textAlign: "left",
+                        padding: "0.65rem 0.75rem",
+                        borderColor:
+                          placeItemId === item.id ? "var(--accent)" : undefined,
                       }}
-                    />
-                  </div>
-                )}
-                <button type="button" className="btn danger" onClick={deleteSelection}>
-                  Delete feature
-                </button>
-              </div>
-            )}
-            {tool === "measure" && measurePoints.length === 2 && (
-              <div className="stack">
-                <strong>Measurement</strong>
-                <div>
-                  {formatLength(
-                    segmentLengthMm(measurePoints[0], measurePoints[1]),
-                    unitSystem,
-                  )}
+                      onClick={() => setPlaceItemId(item.id)}
+                    >
+                      <strong>{item.name}</strong>
+                      <div
+                        className="muted"
+                        style={{ fontSize: "0.8rem", textTransform: "capitalize" }}
+                      >
+                        {item.category} · {formatMoney(item.unitPriceCents)}
+                      </div>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
 
-            <hr style={{ border: 0, borderTop: "1px solid var(--line)", width: "100%" }} />
-            <h2>On drawing</h2>
-            <div className="stack">
-              {design.poolBodies.map((pool) => (
-                <button
-                  key={pool.id}
-                  type="button"
-                  className="card-link"
-                  style={{
-                    textAlign: "left",
-                    borderColor:
-                      selection?.kind === "pool" && selection.id === pool.id
-                        ? "var(--accent)"
-                        : undefined,
-                  }}
-                  onClick={() => setSelection({ kind: "pool", id: pool.id })}
-                >
-                  <strong>{pool.name}</strong>
-                </button>
-              ))}
-              {design.patios.map((patio) => (
-                <button
-                  key={patio.id}
-                  type="button"
-                  className="card-link"
-                  style={{ textAlign: "left" }}
-                  onClick={() => setSelection({ kind: "patio", id: patio.id })}
-                >
-                  <strong>{patio.name}</strong>
-                </button>
-              ))}
-              {design.plumbingRuns.map((run) => (
-                <button
-                  key={run.id}
-                  type="button"
-                  className="card-link"
-                  style={{ textAlign: "left" }}
-                  onClick={() => setSelection({ kind: "run", id: run.id })}
-                >
-                  <strong>{run.name}</strong>
-                </button>
-              ))}
-              {(design.features ?? []).map((feature) => (
-                <button
-                  key={feature.id}
-                  type="button"
-                  className="card-link"
-                  style={{ textAlign: "left" }}
-                  onClick={() =>
-                    setSelection({ kind: "feature", id: feature.id })
+            <div className="cad-side-section stack">
+              <strong>Properties</strong>
+              {!selection && (
+                <p className="muted" style={{ margin: 0, fontSize: "0.9rem" }}>
+                  Select an item to edit. Furniture supports rotation and custom
+                  width/depth.
+                </p>
+              )}
+              {selectedPool && (
+                <div className="stack">
+                  <strong>{selectedPool.name}</strong>
+                  <div className="muted" style={{ fontSize: "0.85rem" }}>
+                    {formatArea(polygonAreaMm2(selectedPool.outline), unitSystem)}
+                  </div>
+                  <DepthFields
+                    key={selectedPool.id}
+                    shallowMm={selectedPool.depthShallowMm}
+                    deepMm={selectedPool.depthDeepMm}
+                    unitSystem={unitSystem}
+                    onChange={(shallowMm, deepMm) =>
+                      commitDesign({
+                        ...design,
+                        poolBodies: design.poolBodies.map((p) =>
+                          p.id === selectedPool.id
+                            ? {
+                                ...p,
+                                depthShallowMm: shallowMm,
+                                depthDeepMm: deepMm,
+                              }
+                            : p,
+                        ),
+                      })
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="btn danger"
+                    onClick={deleteSelection}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+              {selectedPatio && (
+                <div className="stack">
+                  <strong>{selectedPatio.name}</strong>
+                  <button
+                    type="button"
+                    className="btn danger"
+                    onClick={deleteSelection}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+              {selectedRun && (
+                <div className="stack">
+                  <strong>{selectedRun.name}</strong>
+                  <div>
+                    {formatLength(
+                      polylineLengthMm(selectedRun.points),
+                      unitSystem,
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn danger"
+                    onClick={deleteSelection}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+              {selectedObject && (
+                <FurnitureFields
+                  key={`${selectedObject.id}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.rotationDeg}`}
+                  object={selectedObject}
+                  unitSystem={unitSystem}
+                  onRotate={(deg) =>
+                    commitDesign({
+                      ...design,
+                      objects: design.objects.map((o) =>
+                        o.id === selectedObject.id
+                          ? { ...o, rotationDeg: ((deg % 360) + 360) % 360 }
+                          : o,
+                      ),
+                    })
                   }
+                  onDimensions={(widthMm, depthMm) =>
+                    commitDesign({
+                      ...design,
+                      objects: design.objects.map((o) =>
+                        o.id === selectedObject.id
+                          ? { ...o, widthMm, depthMm }
+                          : o,
+                      ),
+                    })
+                  }
+                  onDelete={deleteSelection}
+                />
+              )}
+              {selectedFeature && (
+                <div className="stack">
+                  <strong>{selectedFeature.name}</strong>
+                  <div className="muted" style={{ textTransform: "capitalize" }}>
+                    {selectedFeature.kind}
+                  </div>
+                  {selectedFeature.kind === "steps" && (
+                    <div className="field">
+                      <label htmlFor="risers">Riser count</label>
+                      <input
+                        id="risers"
+                        type="number"
+                        min={1}
+                        max={12}
+                        defaultValue={selectedFeature.riserCount ?? 3}
+                        onBlur={(e) => {
+                          const n = Number(e.target.value);
+                          if (!Number.isFinite(n) || n < 1) return;
+                          commitDesign({
+                            ...design,
+                            features: (design.features ?? []).map((f) =>
+                              f.id === selectedFeature.id
+                                ? { ...f, riserCount: Math.round(n) }
+                                : f,
+                            ),
+                          });
+                        }}
+                      />
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="btn danger"
+                    onClick={deleteSelection}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+              {tool === "measure" && measurePoints.length === 2 && (
+                <div>
+                  <strong>Measurement</strong>
+                  <div>
+                    {formatLength(
+                      segmentLengthMm(measurePoints[0], measurePoints[1]),
+                      unitSystem,
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="cad-side-section">
+              <strong>Checklist</strong>
+              <div className="stack" style={{ marginTop: "0.45rem" }}>
+                {guideSteps.map((step) => (
+                  <div key={step.id} className="row" style={{ gap: "0.4rem" }}>
+                    <span
+                      className={`dot ${step.done ? "completed" : ""}`}
+                      style={{ marginTop: 2 }}
+                    />
+                    <span
+                      style={{
+                        fontSize: "0.88rem",
+                        textDecoration: step.done ? "line-through" : "none",
+                        opacity: step.done ? 0.6 : 1,
+                      }}
+                    >
+                      {step.title}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="cad-side-section">
+              <strong>Layers</strong>
+              <div className="stack" style={{ marginTop: "0.45rem" }}>
+                {design.layers.map((layer) => (
+                  <label key={layer.id} className="row" style={{ gap: "0.45rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={layer.visible}
+                      onChange={() =>
+                        commitDesign({
+                          ...design,
+                          layers: design.layers.map((l) =>
+                            l.id === layer.id
+                              ? { ...l, visible: !l.visible }
+                              : l,
+                          ),
+                        })
+                      }
+                    />
+                    <span
+                      style={{
+                        fontSize: "0.88rem",
+                        textTransform: "capitalize",
+                      }}
+                    >
+                      {layer.name}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="cad-side-section">
+              <button
+                type="button"
+                className="btn secondary"
+                style={{ width: "100%" }}
+                onClick={() => setShowHelp((v) => !v)}
+              >
+                {showHelp ? "Hide shortcuts" : "Shortcuts"}
+              </button>
+              {showHelp && (
+                <div
+                  className="muted"
+                  style={{ fontSize: "0.8rem", marginTop: "0.45rem" }}
                 >
-                  <strong>{feature.name}</strong>
-                </button>
-              ))}
-              {(design.objects ?? []).map((obj) => (
-                <button
-                  key={obj.id}
-                  type="button"
-                  className="card-link"
-                  style={{ textAlign: "left" }}
-                  onClick={() => setSelection({ kind: "object", id: obj.id })}
-                >
-                  <strong>{obj.name}</strong>
-                </button>
-              ))}
+                  <div>Scroll zoom · Space-drag pan</div>
+                  <div>R / handle — rotate furniture</div>
+                  <div>Edit width & depth in Properties</div>
+                  <div>Type length + Enter while drawing</div>
+                </div>
+              )}
+              <div
+                className="muted"
+                style={{ fontSize: "0.8rem", marginTop: "0.45rem" }}
+              >
+                {unitSystem} · {(vp.scale / DEFAULT_VIEWPORT.scale).toFixed(1)}x ·{" "}
+                {saveState}
+              </div>
             </div>
           </aside>
         </div>
@@ -1553,6 +1500,87 @@ function DepthFields({
         />
       </div>
     </>
+  );
+}
+
+function FurnitureFields({
+  object,
+  unitSystem,
+  onRotate,
+  onDimensions,
+  onDelete,
+}: {
+  object: PlacedObject;
+  unitSystem: UnitSystem;
+  onRotate: (deg: number) => void;
+  onDimensions: (widthMm: number, depthMm: number) => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="stack">
+      <strong>{object.name}</strong>
+      <div className="field">
+        <label htmlFor="furn-width">Width</label>
+        <input
+          id="furn-width"
+          defaultValue={formatLength(object.widthMm, unitSystem)}
+          placeholder={unitSystem === "imperial" ? `e.g. 6'` : "e.g. 1.8m"}
+          onBlur={(e) => {
+            const mm = parseLengthToMm(e.target.value, unitSystem);
+            if (mm != null && mm > 0) onDimensions(mm, object.depthMm);
+          }}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="furn-depth">Depth / length</label>
+        <input
+          id="furn-depth"
+          defaultValue={formatLength(object.depthMm, unitSystem)}
+          placeholder={unitSystem === "imperial" ? `e.g. 3'` : "e.g. 0.9m"}
+          onBlur={(e) => {
+            const mm = parseLengthToMm(e.target.value, unitSystem);
+            if (mm != null && mm > 0) onDimensions(object.widthMm, mm);
+          }}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="furn-rot">Rotation (degrees)</label>
+        <input
+          id="furn-rot"
+          type="number"
+          step={15}
+          defaultValue={Math.round(object.rotationDeg || 0)}
+          onBlur={(e) => {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n)) onRotate(n);
+          }}
+        />
+      </div>
+      <div className="row">
+        <button
+          type="button"
+          className="btn secondary"
+          title="Rotate -15°"
+          onClick={() => onRotate((object.rotationDeg || 0) - 15)}
+        >
+          −15°
+        </button>
+        <button
+          type="button"
+          className="btn secondary"
+          title="Rotate +15°"
+          onClick={() => onRotate((object.rotationDeg || 0) + 15)}
+        >
+          +15°
+        </button>
+      </div>
+      <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
+        Or drag the circle handle on the plan. Press R for +15°.
+      </p>
+      <button type="button" className="btn danger" onClick={onDelete}>
+        Delete
+      </button>
+    </div>
   );
 }
 
