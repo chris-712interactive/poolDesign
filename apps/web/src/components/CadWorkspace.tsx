@@ -51,6 +51,7 @@ import {
 } from "@/lib/cad/draw";
 
 type WorkspaceView = "design" | "estimate";
+type SideTab = "tools" | "properties" | "layers";
 type Tool =
   | "select"
   | "pool_rect"
@@ -149,6 +150,7 @@ export function CadWorkspace({
   const dragOriginRef = useRef<DesignDocument | null>(null);
   const designRef = useRef<DesignDocument>(initialDesign);
   const [view, setView] = useState<WorkspaceView>("design");
+  const [sideTab, setSideTab] = useState<SideTab>("tools");
   const [design, setDesign] = useState<DesignDocument>(() =>
     normalizeDesign(initialDesign),
   );
@@ -214,6 +216,10 @@ export function CadWorkspace({
     [design.features, selection],
   );
   const guideSteps = useMemo(() => designGuideSteps(design), [design]);
+
+  useEffect(() => {
+    if (selection) setSideTab("properties");
+  }, [selection]);
 
   const constrainPoint = useCallback(
     (from: PointMm | null, to: PointMm, shiftKey: boolean) => {
@@ -1091,372 +1097,400 @@ export function CadWorkspace({
           </section>
 
           <aside className="panel cad-right-rail stack">
-            <div>
-              <div className="muted" style={{ marginBottom: "0.45rem" }}>
-                Tools
-              </div>
-              <div className="cad-icon-toolbar">
-                {TOOL_META.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`tool-icon-btn ${tool === item.id ? "active" : ""}`}
-                    title={item.label}
-                    aria-label={item.label}
-                    onClick={() => {
-                      setTool(item.id);
-                      setDraftPoints([]);
-                      setLengthBuffer("");
-                      if (item.id !== "measure") setMeasurePoints([]);
-                      if (item.id === "place" && !placeItemId && library[0]) {
-                        setPlaceItemId(library[0].id);
-                      }
-                    }}
-                  >
-                    {item.icon}
-                  </button>
-                ))}
-              </div>
-              <div className="cad-action-row" style={{ marginTop: "0.4rem" }}>
+            <div className="cad-side-tabs" role="tablist" aria-label="Side panel">
+              {(
+                [
+                  ["tools", "Tools"],
+                  ["properties", "Properties"],
+                  ["layers", "Layers"],
+                ] as const
+              ).map(([id, label]) => (
                 <button
+                  key={id}
                   type="button"
-                  className={`tool-icon-btn ${ortho ? "active" : ""}`}
-                  title={`Ortho ${ortho ? "on" : "off"}`}
-                  aria-label="Toggle ortho"
-                  onClick={() => setOrtho((v) => !v)}
+                  role="tab"
+                  aria-selected={sideTab === id}
+                  className={`cad-side-tab ${sideTab === id ? "active" : ""}`}
+                  onClick={() => setSideTab(id)}
                 >
-                  {ACTION_ICONS.ortho}
+                  {label}
                 </button>
-                <button
-                  type="button"
-                  className={`tool-icon-btn ${angleSnap ? "active" : ""}`}
-                  title={`15° snap ${angleSnap ? "on" : "off"}`}
-                  aria-label="Toggle angle snap"
-                  onClick={() => setAngleSnap((v) => !v)}
-                >
-                  {ACTION_ICONS.angle}
-                </button>
-                <button
-                  type="button"
-                  className="tool-icon-btn"
-                  title="Undo"
-                  aria-label="Undo"
-                  onClick={undo}
-                  disabled={!past.length}
-                >
-                  {ACTION_ICONS.undo}
-                </button>
-                <button
-                  type="button"
-                  className="tool-icon-btn"
-                  title="Redo"
-                  aria-label="Redo"
-                  onClick={redo}
-                  disabled={!future.length}
-                >
-                  {ACTION_ICONS.redo}
-                </button>
-                <button
-                  type="button"
-                  className="tool-icon-btn"
-                  title="Reset view"
-                  aria-label="Reset view"
-                  onClick={() => setVp(DEFAULT_VIEWPORT)}
-                >
-                  {ACTION_ICONS.reset}
-                </button>
-              </div>
-              <p className="muted" style={{ fontSize: "0.85rem", margin: "0.55rem 0 0" }}>
-                {toolHelp}
-              </p>
-              {lengthBuffer && (
-                <div className="badge warn" style={{ marginTop: "0.4rem" }}>
-                  Length: {lengthBuffer}_
-                </div>
-              )}
-              {(tool === "pool_poly" || tool === "patio" || tool === "plumbing") && (
-                <button
-                  type="button"
-                  className="btn secondary"
-                  style={{ marginTop: "0.45rem", width: "100%" }}
-                  onClick={finishDraft}
-                  disabled={
-                    tool === "plumbing"
-                      ? draftPoints.length < 2
-                      : draftPoints.length < 3
-                  }
-                >
-                  {tool === "plumbing" ? "Finish run" : "Close shape"}
-                </button>
-              )}
+              ))}
             </div>
 
-            {tool === "place" && (
-              <div className="cad-side-section stack">
-                <strong>Furniture library</strong>
-                <div className="cad-compact-list">
-                  {library.map((item) => (
+            {sideTab === "tools" && (
+              <div className="cad-tab-panel" role="tabpanel">
+                <div className="cad-icon-toolbar">
+                  {TOOL_META.map((item) => (
                     <button
                       key={item.id}
                       type="button"
-                      className="card-link"
-                      style={{
-                        textAlign: "left",
-                        padding: "0.65rem 0.75rem",
-                        borderColor:
-                          placeItemId === item.id ? "var(--accent)" : undefined,
+                      className={`tool-icon-btn ${tool === item.id ? "active" : ""}`}
+                      title={item.label}
+                      aria-label={item.label}
+                      onClick={() => {
+                        setTool(item.id);
+                        setDraftPoints([]);
+                        setLengthBuffer("");
+                        if (item.id !== "measure") setMeasurePoints([]);
+                        if (item.id === "place" && !placeItemId && library[0]) {
+                          setPlaceItemId(library[0].id);
+                        }
                       }}
-                      onClick={() => setPlaceItemId(item.id)}
                     >
-                      <strong>{item.name}</strong>
-                      <div
-                        className="muted"
-                        style={{ fontSize: "0.8rem", textTransform: "capitalize" }}
-                      >
-                        {item.category} · {formatMoney(item.unitPriceCents)}
-                      </div>
+                      {item.icon}
                     </button>
                   ))}
+                </div>
+                <div className="cad-action-row">
+                  <button
+                    type="button"
+                    className={`tool-icon-btn ${ortho ? "active" : ""}`}
+                    title={`Ortho ${ortho ? "on" : "off"}`}
+                    aria-label="Toggle ortho"
+                    onClick={() => setOrtho((v) => !v)}
+                  >
+                    {ACTION_ICONS.ortho}
+                  </button>
+                  <button
+                    type="button"
+                    className={`tool-icon-btn ${angleSnap ? "active" : ""}`}
+                    title={`15° snap ${angleSnap ? "on" : "off"}`}
+                    aria-label="Toggle angle snap"
+                    onClick={() => setAngleSnap((v) => !v)}
+                  >
+                    {ACTION_ICONS.angle}
+                  </button>
+                  <button
+                    type="button"
+                    className="tool-icon-btn"
+                    title="Undo"
+                    aria-label="Undo"
+                    onClick={undo}
+                    disabled={!past.length}
+                  >
+                    {ACTION_ICONS.undo}
+                  </button>
+                  <button
+                    type="button"
+                    className="tool-icon-btn"
+                    title="Redo"
+                    aria-label="Redo"
+                    onClick={redo}
+                    disabled={!future.length}
+                  >
+                    {ACTION_ICONS.redo}
+                  </button>
+                  <button
+                    type="button"
+                    className="tool-icon-btn"
+                    title="Reset view"
+                    aria-label="Reset view"
+                    onClick={() => setVp(DEFAULT_VIEWPORT)}
+                  >
+                    {ACTION_ICONS.reset}
+                  </button>
+                </div>
+                <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>
+                  {toolHelp}
+                </p>
+                {lengthBuffer && (
+                  <div className="badge warn">Length: {lengthBuffer}_</div>
+                )}
+                {(tool === "pool_poly" ||
+                  tool === "patio" ||
+                  tool === "plumbing") && (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    style={{ width: "100%" }}
+                    onClick={finishDraft}
+                    disabled={
+                      tool === "plumbing"
+                        ? draftPoints.length < 2
+                        : draftPoints.length < 3
+                    }
+                  >
+                    {tool === "plumbing" ? "Finish run" : "Close shape"}
+                  </button>
+                )}
+
+                {tool === "place" && (
+                  <div className="stack">
+                    <strong>Furniture library</strong>
+                    <div className="cad-compact-list">
+                      {library.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="card-link"
+                          style={{
+                            textAlign: "left",
+                            padding: "0.65rem 0.75rem",
+                            borderColor:
+                              placeItemId === item.id
+                                ? "var(--accent)"
+                                : undefined,
+                          }}
+                          onClick={() => setPlaceItemId(item.id)}
+                        >
+                          <strong>{item.name}</strong>
+                          <div
+                            className="muted"
+                            style={{
+                              fontSize: "0.8rem",
+                              textTransform: "capitalize",
+                            }}
+                          >
+                            {item.category} · {formatMoney(item.unitPriceCents)}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="stack">
+                  <strong>Checklist</strong>
+                  {guideSteps.map((step) => (
+                    <div key={step.id} className="row" style={{ gap: "0.4rem" }}>
+                      <span
+                        className={`dot ${step.done ? "completed" : ""}`}
+                        style={{ marginTop: 2 }}
+                      />
+                      <span
+                        style={{
+                          fontSize: "0.88rem",
+                          textDecoration: step.done ? "line-through" : "none",
+                          opacity: step.done ? 0.6 : 1,
+                        }}
+                      >
+                        {step.title}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ width: "100%" }}
+                  onClick={() => setShowHelp((v) => !v)}
+                >
+                  {showHelp ? "Hide shortcuts" : "Shortcuts"}
+                </button>
+                {showHelp && (
+                  <div className="muted" style={{ fontSize: "0.8rem" }}>
+                    <div>Scroll zoom · Space-drag pan</div>
+                    <div>R / handle — rotate furniture</div>
+                    <div>Edit size on Properties tab</div>
+                    <div>Type length + Enter while drawing</div>
+                  </div>
+                )}
+                <div className="muted" style={{ fontSize: "0.8rem" }}>
+                  {unitSystem} ·{" "}
+                  {(vp.scale / DEFAULT_VIEWPORT.scale).toFixed(1)}x · {saveState}
                 </div>
               </div>
             )}
 
-            <div className="cad-side-section stack">
-              <strong>Properties</strong>
-              {!selection && (
-                <p className="muted" style={{ margin: 0, fontSize: "0.9rem" }}>
-                  Select an item to edit. Furniture supports rotation and custom
-                  width/depth.
-                </p>
-              )}
-              {selectedPool && (
-                <div className="stack">
-                  <strong>{selectedPool.name}</strong>
-                  <div className="muted" style={{ fontSize: "0.85rem" }}>
-                    {formatArea(polygonAreaMm2(selectedPool.outline), unitSystem)}
-                  </div>
-                  <DepthFields
-                    key={selectedPool.id}
-                    shallowMm={selectedPool.depthShallowMm}
-                    deepMm={selectedPool.depthDeepMm}
-                    unitSystem={unitSystem}
-                    onChange={(shallowMm, deepMm) =>
-                      commitDesign({
-                        ...design,
-                        poolBodies: design.poolBodies.map((p) =>
-                          p.id === selectedPool.id
-                            ? {
-                                ...p,
-                                depthShallowMm: shallowMm,
-                                depthDeepMm: deepMm,
-                              }
-                            : p,
-                        ),
-                      })
-                    }
-                  />
-                  <button
-                    type="button"
-                    className="btn danger"
-                    onClick={deleteSelection}
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-              {selectedPatio && (
-                <div className="stack">
-                  <strong>{selectedPatio.name}</strong>
-                  <button
-                    type="button"
-                    className="btn danger"
-                    onClick={deleteSelection}
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-              {selectedRun && (
-                <div className="stack">
-                  <strong>{selectedRun.name}</strong>
-                  <div>
-                    {formatLength(
-                      polylineLengthMm(selectedRun.points),
-                      unitSystem,
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    className="btn danger"
-                    onClick={deleteSelection}
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-              {selectedObject && (
-                <FurnitureFields
-                  key={`${selectedObject.id}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.rotationDeg}`}
-                  object={selectedObject}
-                  unitSystem={unitSystem}
-                  onRotate={(deg) =>
-                    commitDesign({
-                      ...design,
-                      objects: design.objects.map((o) =>
-                        o.id === selectedObject.id
-                          ? { ...o, rotationDeg: ((deg % 360) + 360) % 360 }
-                          : o,
-                      ),
-                    })
-                  }
-                  onDimensions={(widthMm, depthMm) =>
-                    commitDesign({
-                      ...design,
-                      objects: design.objects.map((o) =>
-                        o.id === selectedObject.id
-                          ? { ...o, widthMm, depthMm }
-                          : o,
-                      ),
-                    })
-                  }
-                  onDelete={deleteSelection}
-                />
-              )}
-              {selectedFeature && (
-                <div className="stack">
-                  <strong>{selectedFeature.name}</strong>
-                  <div className="muted" style={{ textTransform: "capitalize" }}>
-                    {selectedFeature.kind}
-                  </div>
-                  {selectedFeature.kind === "steps" && (
-                    <div className="field">
-                      <label htmlFor="risers">Riser count</label>
-                      <input
-                        id="risers"
-                        type="number"
-                        min={1}
-                        max={12}
-                        defaultValue={selectedFeature.riserCount ?? 3}
-                        onBlur={(e) => {
-                          const n = Number(e.target.value);
-                          if (!Number.isFinite(n) || n < 1) return;
-                          commitDesign({
-                            ...design,
-                            features: (design.features ?? []).map((f) =>
-                              f.id === selectedFeature.id
-                                ? { ...f, riserCount: Math.round(n) }
-                                : f,
-                            ),
-                          });
-                        }}
-                      />
+            {sideTab === "properties" && (
+              <div className="cad-tab-panel" role="tabpanel">
+                {!selection && (
+                  <p className="muted" style={{ margin: 0, fontSize: "0.9rem" }}>
+                    Select an item on the plan to edit it. Furniture supports
+                    rotation and custom width/depth.
+                  </p>
+                )}
+                {selectedPool && (
+                  <div className="stack">
+                    <strong>{selectedPool.name}</strong>
+                    <div className="muted" style={{ fontSize: "0.85rem" }}>
+                      {formatArea(
+                        polygonAreaMm2(selectedPool.outline),
+                        unitSystem,
+                      )}
                     </div>
-                  )}
-                  <button
-                    type="button"
-                    className="btn danger"
-                    onClick={deleteSelection}
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-              {tool === "measure" && measurePoints.length === 2 && (
-                <div>
-                  <strong>Measurement</strong>
-                  <div>
-                    {formatLength(
-                      segmentLengthMm(measurePoints[0], measurePoints[1]),
-                      unitSystem,
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="cad-side-section">
-              <strong>Checklist</strong>
-              <div className="stack" style={{ marginTop: "0.45rem" }}>
-                {guideSteps.map((step) => (
-                  <div key={step.id} className="row" style={{ gap: "0.4rem" }}>
-                    <span
-                      className={`dot ${step.done ? "completed" : ""}`}
-                      style={{ marginTop: 2 }}
-                    />
-                    <span
-                      style={{
-                        fontSize: "0.88rem",
-                        textDecoration: step.done ? "line-through" : "none",
-                        opacity: step.done ? 0.6 : 1,
-                      }}
-                    >
-                      {step.title}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="cad-side-section">
-              <strong>Layers</strong>
-              <div className="stack" style={{ marginTop: "0.45rem" }}>
-                {design.layers.map((layer) => (
-                  <label key={layer.id} className="row" style={{ gap: "0.45rem" }}>
-                    <input
-                      type="checkbox"
-                      checked={layer.visible}
-                      onChange={() =>
+                    <DepthFields
+                      key={selectedPool.id}
+                      shallowMm={selectedPool.depthShallowMm}
+                      deepMm={selectedPool.depthDeepMm}
+                      unitSystem={unitSystem}
+                      onChange={(shallowMm, deepMm) =>
                         commitDesign({
                           ...design,
-                          layers: design.layers.map((l) =>
-                            l.id === layer.id
-                              ? { ...l, visible: !l.visible }
-                              : l,
+                          poolBodies: design.poolBodies.map((p) =>
+                            p.id === selectedPool.id
+                              ? {
+                                  ...p,
+                                  depthShallowMm: shallowMm,
+                                  depthDeepMm: deepMm,
+                                }
+                              : p,
                           ),
                         })
                       }
                     />
-                    <span
-                      style={{
-                        fontSize: "0.88rem",
-                        textTransform: "capitalize",
-                      }}
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
                     >
-                      {layer.name}
-                    </span>
-                  </label>
-                ))}
+                      Delete
+                    </button>
+                  </div>
+                )}
+                {selectedPatio && (
+                  <div className="stack">
+                    <strong>{selectedPatio.name}</strong>
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+                {selectedRun && (
+                  <div className="stack">
+                    <strong>{selectedRun.name}</strong>
+                    <div>
+                      {formatLength(
+                        polylineLengthMm(selectedRun.points),
+                        unitSystem,
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+                {selectedObject && (
+                  <FurnitureFields
+                    key={`${selectedObject.id}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.rotationDeg}`}
+                    object={selectedObject}
+                    unitSystem={unitSystem}
+                    onRotate={(deg) =>
+                      commitDesign({
+                        ...design,
+                        objects: design.objects.map((o) =>
+                          o.id === selectedObject.id
+                            ? {
+                                ...o,
+                                rotationDeg: ((deg % 360) + 360) % 360,
+                              }
+                            : o,
+                        ),
+                      })
+                    }
+                    onDimensions={(widthMm, depthMm) =>
+                      commitDesign({
+                        ...design,
+                        objects: design.objects.map((o) =>
+                          o.id === selectedObject.id
+                            ? { ...o, widthMm, depthMm }
+                            : o,
+                        ),
+                      })
+                    }
+                    onDelete={deleteSelection}
+                  />
+                )}
+                {selectedFeature && (
+                  <div className="stack">
+                    <strong>{selectedFeature.name}</strong>
+                    <div
+                      className="muted"
+                      style={{ textTransform: "capitalize" }}
+                    >
+                      {selectedFeature.kind}
+                    </div>
+                    {selectedFeature.kind === "steps" && (
+                      <div className="field">
+                        <label htmlFor="risers">Riser count</label>
+                        <input
+                          id="risers"
+                          type="number"
+                          min={1}
+                          max={12}
+                          defaultValue={selectedFeature.riserCount ?? 3}
+                          onBlur={(e) => {
+                            const n = Number(e.target.value);
+                            if (!Number.isFinite(n) || n < 1) return;
+                            commitDesign({
+                              ...design,
+                              features: (design.features ?? []).map((f) =>
+                                f.id === selectedFeature.id
+                                  ? { ...f, riserCount: Math.round(n) }
+                                  : f,
+                              ),
+                            });
+                          }}
+                        />
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+                {tool === "measure" && measurePoints.length === 2 && (
+                  <div>
+                    <strong>Measurement</strong>
+                    <div>
+                      {formatLength(
+                        segmentLengthMm(measurePoints[0], measurePoints[1]),
+                        unitSystem,
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
+            )}
 
-            <div className="cad-side-section">
-              <button
-                type="button"
-                className="btn secondary"
-                style={{ width: "100%" }}
-                onClick={() => setShowHelp((v) => !v)}
-              >
-                {showHelp ? "Hide shortcuts" : "Shortcuts"}
-              </button>
-              {showHelp && (
-                <div
-                  className="muted"
-                  style={{ fontSize: "0.8rem", marginTop: "0.45rem" }}
-                >
-                  <div>Scroll zoom · Space-drag pan</div>
-                  <div>R / handle — rotate furniture</div>
-                  <div>Edit width & depth in Properties</div>
-                  <div>Type length + Enter while drawing</div>
+            {sideTab === "layers" && (
+              <div className="cad-tab-panel" role="tabpanel">
+                <p className="muted" style={{ margin: 0, fontSize: "0.9rem" }}>
+                  Show or hide drawing layers on the plan.
+                </p>
+                <div className="stack">
+                  {design.layers.map((layer) => (
+                    <label
+                      key={layer.id}
+                      className="row"
+                      style={{ gap: "0.5rem" }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={layer.visible}
+                        onChange={() =>
+                          commitDesign({
+                            ...design,
+                            layers: design.layers.map((l) =>
+                              l.id === layer.id
+                                ? { ...l, visible: !l.visible }
+                                : l,
+                            ),
+                          })
+                        }
+                      />
+                      <span style={{ textTransform: "capitalize" }}>
+                        {layer.name}
+                      </span>
+                    </label>
+                  ))}
                 </div>
-              )}
-              <div
-                className="muted"
-                style={{ fontSize: "0.8rem", marginTop: "0.45rem" }}
-              >
-                {unitSystem} · {(vp.scale / DEFAULT_VIEWPORT.scale).toFixed(1)}x ·{" "}
-                {saveState}
               </div>
-            </div>
+            )}
           </aside>
         </div>
       )}

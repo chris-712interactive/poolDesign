@@ -337,6 +337,44 @@ textarea {
   overflow: auto;
 }
 
+.cad-side-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.3rem;
+  padding: 0.2rem;
+  background: #e8eef2;
+  border-radius: 12px;
+}
+
+.cad-side-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 9px;
+  padding: 0.55rem 0.35rem;
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.cad-side-tab:hover {
+  color: var(--panel-ink);
+}
+
+.cad-side-tab.active {
+  background: white;
+  color: var(--panel-ink);
+  box-shadow: 0 1px 3px rgba(20, 32, 41, 0.08);
+}
+
+.cad-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
 .cad-icon-toolbar {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
