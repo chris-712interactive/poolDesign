@@ -1,6 +1,15 @@
 import type { DesignLevel } from "./design-level";
 
-export type CatalogUnit = "ea" | "lf" | "sf" | "sy" | "hr" | "m" | "m2";
+export type CatalogUnit =
+  | "ea"
+  | "lf"
+  | "sf"
+  | "sy"
+  | "hr"
+  | "lb"
+  | "kg"
+  | "m"
+  | "m2";
 
 export type CatalogCategory =
   | "structure"
@@ -25,13 +34,59 @@ export type CatalogItem = {
 /** Starter residential-focused catalog (commercial/water park expand later) */
 export const DEFAULT_CATALOG: CatalogItem[] = [
   {
+    id: "gunite_shotcrete",
+    name: "Gunite / shotcrete shell",
+    category: "structure",
+    unit: "sf",
+    unitPriceCents: 1400,
+    levels: ["residential", "commercial", "water_park"],
+    description:
+      "Structural shell: floor + walls (shared pool/spa openings deducted)",
+  },
+  {
+    id: "rebar_steel",
+    name: "Rebar / steel reinforcement",
+    category: "structure",
+    unit: "lb",
+    unitPriceCents: 220,
+    levels: ["residential", "commercial", "water_park"],
+    description: "Shell reinforcing steel allowance from shell surface area",
+  },
+  {
+    id: "footing_bond_beam",
+    name: "Bond beam / pool footing",
+    category: "structure",
+    unit: "lf",
+    unitPriceCents: 3500,
+    levels: ["residential", "commercial", "water_park"],
+    description: "Continuous bond beam along exposed pool/spa perimeter",
+  },
+  {
+    id: "footing_spa",
+    name: "Spa / raised shell footing",
+    category: "structure",
+    unit: "lf",
+    unitPriceCents: 3200,
+    levels: ["residential", "commercial", "water_park"],
+    description: "Thickened edge footing for spa shell perimeter",
+  },
+  {
+    id: "footing_post",
+    name: "Post footing",
+    category: "structure",
+    unit: "ea",
+    unitPriceCents: 17500,
+    levels: ["residential", "commercial", "water_park"],
+    description: "Concrete pier footing for pergola / patio cover posts",
+  },
+  {
     id: "plaster_interior",
     name: "Interior plaster / pebble",
     category: "finish",
     unit: "sf",
     unitPriceCents: 1200,
     levels: ["residential", "commercial", "water_park"],
-    description: "Pool interior surface based on water surface area",
+    description: "Interior finish coat based on water surface area (not gunite)",
   },
   {
     id: "waterline_tile",
@@ -56,6 +111,24 @@ export const DEFAULT_CATALOG: CatalogItem[] = [
     unit: "sf",
     unitPriceCents: 1400,
     levels: ["residential", "commercial", "water_park"],
+  },
+  {
+    id: "pergola_structure",
+    name: "Pergola structure",
+    category: "hardscape",
+    unit: "sf",
+    unitPriceCents: 4500,
+    levels: ["residential", "commercial", "water_park"],
+    description: "Open-lattice pergola footprint area",
+  },
+  {
+    id: "patio_cover_roof",
+    name: "Patio cover / solid roof",
+    category: "hardscape",
+    unit: "sf",
+    unitPriceCents: 3800,
+    levels: ["residential", "commercial", "water_park"],
+    description: "Solid patio roof or shade cover footprint area",
   },
   {
     id: "pipe_pvc_schedule40",
@@ -106,6 +179,15 @@ export const DEFAULT_CATALOG: CatalogItem[] = [
     unitPriceCents: 9500,
     levels: ["residential", "commercial", "water_park"],
     description: "Bench length based on longest side of bench outline",
+  },
+  {
+    id: "sunshelf_assembly",
+    name: "Sunshelf / tanning ledge",
+    category: "structure",
+    unit: "sf",
+    unitPriceCents: 3200,
+    levels: ["residential", "commercial", "water_park"],
+    description: "Shallow ledge footprint area inside the pool",
   },
 ];
 

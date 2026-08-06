@@ -7,3 +7,6 @@ export * from "./payments";
 export * from "./catalog";
 export * from "./takeoff";
 export * from "./object-library";
+export * from "./spa-defaults";
+export * from "./plumbing-route";
+export * from "./design-normalize";

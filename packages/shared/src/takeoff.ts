@@ -1,14 +1,32 @@
 import { catalogForLevel, type CatalogItem, type CatalogUnit } from "./catalog";
-import type { DesignDocument } from "./design-model";
+import type { DesignDocument, PointMm, PoolBody } from "./design-model";
 import {
+  approximateIntersectionAreaMm2,
+  exposedWaterPerimeterMm,
   polygonAreaMm2,
   polygonPerimeterMm,
   polylineLengthMm,
   segmentLengthMm,
+  sharedBoundaryLengthMm,
 } from "./design-model";
 import { getPlaceableItem } from "./object-library";
+import { isPadEquipmentId } from "./plumbing-route";
+import {
+  insideOutlineFromOutside,
+  spaShellHeightMm,
+  spaWallThicknessMm,
+} from "./spa-defaults";
 import type { UnitSystem } from "./units";
 import { mmToInches } from "./units";
+
+/** Typical #3/#4 shell reinforcing allowance (lb per sf of shell surface) */
+const REBAR_LB_PER_SF_SHELL = 2;
+/** Corner posts assumed per patio cover / pergola */
+const POST_FOOTINGS_PER_COVER = 4;
+
+function avgBodyDepthMm(body: PoolBody): number {
+  return (body.depthShallowMm + body.depthDeepMm) / 2;
+}
 
 export type TakeoffLine = {
   catalogItemId: string;
@@ -55,14 +73,36 @@ export function buildTakeoff(
   const byId = new Map(catalog.map((c) => [c.id, c]));
   const lines: TakeoffLine[] = [];
 
-  const poolAreaMm2 = design.poolBodies.reduce(
+  const pools = design.poolBodies.filter((p) => (p.kind ?? "pool") !== "spa");
+  const spas = design.poolBodies.filter((p) => (p.kind ?? "pool") === "spa");
+  const spaInsides: PointMm[][] = spas.map((p) =>
+    insideOutlineFromOutside(p.outline, spaWallThicknessMm(p)),
+  );
+  let poolAreaMm2 = pools.reduce(
     (sum, p) => sum + polygonAreaMm2(p.outline),
     0,
   );
-  const poolPerimeterMm = design.poolBodies.reduce(
-    (sum, p) => sum + polygonPerimeterMm(p.outline),
+  let spaAreaMm2 = spaInsides.reduce(
+    (sum, outline) => sum + polygonAreaMm2(outline),
     0,
   );
+  // When a spa waterline overlaps a pool footprint, don't double-count plaster.
+  let plasterOverlapMm2 = 0;
+  for (const pool of pools) {
+    for (const spaInside of spaInsides) {
+      plasterOverlapMm2 += approximateIntersectionAreaMm2(
+        pool.outline,
+        spaInside,
+      );
+    }
+  }
+  if (plasterOverlapMm2 > 0) {
+    // Remove overlap from pool plaster (spa keeps its water surface).
+    poolAreaMm2 = Math.max(0, poolAreaMm2 - plasterOverlapMm2);
+  }
+  // Coping / waterline: full perimeters minus shared / attached walls.
+  const waterOutlines = design.poolBodies.map((p) => p.outline);
+  const waterPerimeterMm = exposedWaterPerimeterMm(waterOutlines);
   const patioAreaMm2 = design.patios.reduce(
     (sum, p) => sum + polygonAreaMm2(p.outline),
     0,
@@ -71,7 +111,9 @@ export function buildTakeoff(
     (sum, r) => sum + polylineLengthMm(r.points),
     0,
   );
-  const poolCount = design.poolBodies.length;
+  const poolCount = pools.length;
+  const spaCount = spas.length;
+  const bodyCount = design.poolBodies.length;
 
   const avgDepthIn =
     design.poolBodies.length === 0
@@ -104,10 +146,17 @@ export function buildTakeoff(
         quantity = qtyBase * 0.092903;
         unit = "m2";
         unitPriceCents = Math.round(item.unitPriceCents / 0.092903);
+      } else if (baseUnit === "lb") {
+        quantity = qtyBase * 0.453592;
+        unit = "kg";
+        unitPriceCents = Math.round(item.unitPriceCents / 0.453592);
       }
     }
 
-    quantity = roundQty(quantity, unit === "ea" || unit === "hr" ? 1 : 2);
+    quantity = roundQty(
+      quantity,
+      unit === "ea" || unit === "hr" || unit === "lb" || unit === "kg" ? 1 : 2,
+    );
     lines.push({
       catalogItemId,
       name: item.name,
@@ -120,10 +169,106 @@ export function buildTakeoff(
     });
   }
 
-  push("plaster_interior", mm2ToSf(poolAreaMm2), "sf", "Pool water surface area");
-  push("waterline_tile", mmToLf(poolPerimeterMm), "lf", "Pool perimeter");
-  push("coping", mmToLf(poolPerimeterMm), "lf", "Pool perimeter");
+  // Gunite / shotcrete: floor + walls; open shared pool↔spa walls deducted.
+  let shellMm2 = 0;
+  for (const pool of pools) {
+    const depth = avgBodyDepthMm(pool);
+    shellMm2 +=
+      polygonAreaMm2(pool.outline) +
+      polygonPerimeterMm(pool.outline) * depth;
+  }
+  for (let i = 0; i < spas.length; i++) {
+    const spa = spas[i];
+    const depth = avgBodyDepthMm(spa);
+    const inside = spaInsides[i];
+    shellMm2 +=
+      polygonAreaMm2(inside) + polygonPerimeterMm(inside) * depth;
+    // Raised spa exterior face above deck
+    const raise = spaShellHeightMm(spa);
+    if (raise > 0) {
+      shellMm2 += polygonPerimeterMm(spa.outline) * raise;
+    }
+  }
+  for (const pool of pools) {
+    for (const spa of spas) {
+      const shared = sharedBoundaryLengthMm(pool.outline, spa.outline);
+      if (shared <= 0) continue;
+      shellMm2 -= shared * avgBodyDepthMm(pool);
+      shellMm2 -= shared * avgBodyDepthMm(spa);
+    }
+  }
+  shellMm2 = Math.max(0, shellMm2);
+  const shellSf = mm2ToSf(shellMm2);
+
+  push(
+    "gunite_shotcrete",
+    shellSf,
+    "sf",
+    "Floor + walls (shared openings & overlap deducted)",
+  );
+  push(
+    "rebar_steel",
+    shellSf * REBAR_LB_PER_SF_SHELL,
+    "lb",
+    `${REBAR_LB_PER_SF_SHELL} lb/sf of gunite shell`,
+  );
+  push(
+    "footing_bond_beam",
+    mmToLf(waterPerimeterMm),
+    "lf",
+    "Exposed pool/spa perimeter (shared walls deducted)",
+  );
+  const spaFootingMm = spas.reduce(
+    (sum, spa) => sum + polygonPerimeterMm(spa.outline),
+    0,
+  );
+  push(
+    "footing_spa",
+    mmToLf(spaFootingMm),
+    "lf",
+    "Spa shell perimeter footing",
+  );
+  const coverCount = (design.patioCovers ?? []).length;
+  push(
+    "footing_post",
+    coverCount * POST_FOOTINGS_PER_COVER,
+    "ea",
+    `${POST_FOOTINGS_PER_COVER} post footings per pergola/roof`,
+  );
+
+  push(
+    "plaster_interior",
+    mm2ToSf(poolAreaMm2),
+    "sf",
+    plasterOverlapMm2 > 0
+      ? "Pool water surface (overlap with spa deducted)"
+      : "Pool water surface area",
+  );
+  push("plaster_interior", mm2ToSf(spaAreaMm2), "sf", "Spa water surface area");
+  push(
+    "waterline_tile",
+    mmToLf(waterPerimeterMm),
+    "lf",
+    "Exposed pool/spa perimeter (shared walls deducted)",
+  );
+  push(
+    "coping",
+    mmToLf(waterPerimeterMm),
+    "lf",
+    "Exposed pool/spa perimeter (shared walls deducted)",
+  );
   push("patio_concrete", mm2ToSf(patioAreaMm2), "sf", "Patio / deck area");
+
+  const covers = design.patioCovers ?? [];
+  const pergolaAreaMm2 = covers
+    .filter((c) => c.kind === "pergola")
+    .reduce((sum, c) => sum + polygonAreaMm2(c.outline), 0);
+  const roofAreaMm2 = covers
+    .filter((c) => c.kind === "roof")
+    .reduce((sum, c) => sum + polygonAreaMm2(c.outline), 0);
+  push("pergola_structure", mm2ToSf(pergolaAreaMm2), "sf", "Pergola footprint");
+  push("patio_cover_roof", mm2ToSf(roofAreaMm2), "sf", "Patio roof footprint");
+
   push(
     "pipe_pvc_schedule40",
     mmToLf(pipeMm),
@@ -131,10 +276,22 @@ export function buildTakeoff(
     "Sum of plumbing run lengths",
   );
 
-  if (design.designLevel === "residential") {
-    push("equip_pad_kit", poolCount, "ea", "One kit per pool body");
-  } else {
-    push("equip_commercial_kit", poolCount, "ea", "One package per pool body");
+  const placedPadEquip = (design.objects ?? []).filter((o) =>
+    isPadEquipmentId(o.catalogItemId),
+  );
+  // Prefer discrete pad equipment on the plan over a generic kit allowance.
+  if (placedPadEquip.length === 0) {
+    if (design.designLevel === "residential") {
+      push("equip_pad_kit", poolCount, "ea", "One kit per pool");
+      push("equip_pad_kit", spaCount, "ea", "One kit per spa");
+    } else {
+      push(
+        "equip_commercial_kit",
+        bodyCount,
+        "ea",
+        "One package per water body",
+      );
+    }
   }
 
   const features = design.features ?? [];
@@ -153,18 +310,36 @@ export function buildTakeoff(
       }
       return sum + mmToLf(longest);
     }, 0);
+  const sunshelfAreaMm2 = features
+    .filter((f) => f.kind === "sunshelf")
+    .reduce((sum, f) => sum + polygonAreaMm2(f.outline), 0);
   push("steps_assembly", stepsCount, "ea", "One assembly per steps feature");
   push("bench_assembly", benchLf, "lf", "Longest side of each bench");
+  push(
+    "sunshelf_assembly",
+    mm2ToSf(sunshelfAreaMm2),
+    "sf",
+    "Sunshelf / tanning ledge footprint",
+  );
+
+  // House doors/windows are plan annotation only — not outdoor project scope.
 
   const laborHrs =
+    shellSf * 0.12 +
     mm2ToSf(poolAreaMm2) * 0.08 +
+    mm2ToSf(spaAreaMm2) * 0.12 +
     mm2ToSf(patioAreaMm2) * 0.03 +
     mmToLf(pipeMm) * 0.15 +
+    mmToLf(waterPerimeterMm) * 0.2 +
+    mmToLf(spaFootingMm) * 0.15 +
+    coverCount * POST_FOOTINGS_PER_COVER * 1.5 +
     poolCount * 24 +
+    spaCount * 16 +
     avgDepthIn * 0.5 +
     (design.objects ?? []).length * 0.5 +
     stepsCount * 4 +
-    benchLf * 0.4;
+    benchLf * 0.4 +
+    mm2ToSf(sunshelfAreaMm2) * 0.15;
   push("labor_install", roundQty(laborHrs, 1), "hr", "Estimated install hours");
 
   // Group placed library objects
@@ -201,7 +376,7 @@ export function buildTakeoff(
 
 export function formatQuantity(qty: number, unit: CatalogUnit): string {
   const q =
-    unit === "ea" || unit === "hr"
+    unit === "ea" || unit === "hr" || unit === "lb" || unit === "kg"
       ? qty.toFixed(qty % 1 === 0 ? 0 : 1)
       : qty.toFixed(2);
   return `${q} ${unit}`;

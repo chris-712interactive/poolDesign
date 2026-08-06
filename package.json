@@ -10,6 +10,7 @@
     "db:push": "pnpm --filter @pool-design/db push",
     "db:seed": "pnpm --filter @pool-design/db seed",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @pool-design/shared test"
   }
 }

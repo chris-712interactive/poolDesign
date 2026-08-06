@@ -334,7 +334,53 @@ textarea {
   gap: 0.75rem;
   min-height: 0;
   max-height: calc(100vh - 110px);
+  overflow: hidden;
+}
+
+/* Scroll the active tab body; do not let flex-shrink collapse it onto siblings. */
+.cad-tools-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-right: 0.15rem;
+}
+
+.cad-kind-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3rem;
+  padding: 0.2rem;
+  background: #e8eef2;
+  border-radius: 12px;
+}
+
+.cad-kind-toggle-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cad-kind-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 9px;
+  padding: 0.45rem 0.35rem;
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.cad-kind-btn:hover {
+  color: var(--panel-ink);
+}
+
+.cad-kind-btn.active {
+  background: white;
+  color: var(--panel-ink);
+  box-shadow: 0 1px 3px rgba(20, 32, 41, 0.08);
 }
 
 .cad-side-tabs {
@@ -372,7 +418,20 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  min-height: 0;
+  flex-shrink: 0;
+  min-height: auto;
+}
+
+/* Select / Measure: equal 50/50 width of the tools rail. */
+.cad-icon-toolbar-2.cad-tools-core {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+.cad-icon-toolbar-2.cad-tools-core .tool-icon-btn {
+  width: 100%;
+  height: 44px;
+  aspect-ratio: auto;
 }
 
 .cad-icon-toolbar {
@@ -381,9 +440,127 @@ textarea {
   gap: 0.4rem;
 }
 
+.cad-icon-toolbar-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cad-icon-toolbar-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cad-icon-toolbar-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cad-icon-toolbar-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.cad-tool-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.cad-tool-group {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.cad-tool-group.active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+
+.cad-tool-group-head {
+  appearance: none;
+  width: 100%;
+  border: none;
+  background: transparent;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.7rem 0.75rem;
+  cursor: pointer;
+  text-align: left;
+  color: var(--panel-ink);
+}
+
+.cad-tool-group-head:hover {
+  background: #f4f7f9;
+}
+
+.cad-tool-group.open .cad-tool-group-head {
+  border-bottom: 1px solid var(--line);
+  background: #f7fafb;
+}
+
+.cad-tool-group-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: var(--panel-ink);
+}
+
+.cad-tool-group.active .cad-tool-group-icon {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.cad-tool-group-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.cad-tool-group-text strong {
+  font-size: 0.9rem;
+}
+
+.cad-tool-group-text .muted {
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.cad-tool-group-chevron {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.cad-tool-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.7rem 0.75rem 0.8rem;
+}
+
+.cad-tool-group-note {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.cad-tool-subgroup-label {
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cad-compact-list-tall {
+  max-height: 220px;
+}
+
 .cad-action-row {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 0.4rem;
 }
 
@@ -399,12 +576,14 @@ textarea {
   justify-content: center;
   cursor: pointer;
   padding: 0;
+  position: relative;
   transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
 
 .tool-icon-btn:hover {
   border-color: var(--accent);
   color: var(--accent-strong);
+  z-index: 2;
 }
 
 .tool-icon-btn.active {
@@ -416,6 +595,51 @@ textarea {
 .tool-icon-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+.tool-tooltip-anchor {
+  display: none;
+}
+
+/* Fixed / portaled — escapes overflow:auto on the tools rail */
+.tool-tooltip-portal {
+  position: fixed;
+  transform: translate(-50%, 0);
+  background: #142029;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(20, 32, 41, 0.22);
+  z-index: 10000;
+}
+
+.tool-tooltip-portal.above {
+  transform: translate(-50%, -100%);
+}
+
+.tool-tooltip-portal.below::before,
+.tool-tooltip-portal.above::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+}
+
+.tool-tooltip-portal.below::before {
+  bottom: 100%;
+  border-bottom-color: #142029;
+}
+
+.tool-tooltip-portal.above::before {
+  top: 100%;
+  border-top-color: #142029;
 }
 
 .hud {

@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@pool-design/db";
+import {
+  normalizeDesignDocument,
+  type DesignDocument,
+  type DesignLevel,
+} from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 
 export async function PUT(
@@ -20,14 +25,19 @@ export async function PUT(
   }
 
   const body = (await request.json()) as { design?: unknown };
-  if (!body.design) {
+  if (!body.design || typeof body.design !== "object") {
     return NextResponse.json({ error: "Missing design" }, { status: 400 });
   }
+
+  const design = normalizeDesignDocument(body.design as DesignDocument, {
+    designLevel: project.designLevel as DesignLevel,
+    unitSystem: user.unitSystem,
+  });
 
   await prisma.project.update({
     where: { id: project.id },
     data: {
-      designJson: JSON.stringify(body.design),
+      designJson: JSON.stringify(design),
       unitSystem: user.unitSystem,
     },
   });

@@ -1,40 +1,9 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@pool-design/db";
-import {
-  emptyDesignDocument,
-  DESIGN_LEVEL_CONFIG,
-  type DesignDocument,
-  type DesignLevel,
-} from "@pool-design/shared";
+import { parseDesignDocument } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
 import { CadWorkspace } from "@/components/CadWorkspace";
-
-function parseDesign(
-  json: string,
-  designLevel: DesignLevel,
-  unitSystem: "imperial" | "metric",
-): DesignDocument {
-  try {
-    const parsed = JSON.parse(json) as DesignDocument;
-    if (parsed?.version === 1 && Array.isArray(parsed.plumbingRuns)) {
-      return {
-        ...parsed,
-        objects: Array.isArray(parsed.objects) ? parsed.objects : [],
-        features: Array.isArray(parsed.features) ? parsed.features : [],
-        patios: Array.isArray(parsed.patios) ? parsed.patios : [],
-        poolBodies: Array.isArray(parsed.poolBodies) ? parsed.poolBodies : [],
-      };
-    }
-  } catch {
-    // fall through
-  }
-  return emptyDesignDocument(
-    designLevel,
-    unitSystem,
-    DESIGN_LEVEL_CONFIG[designLevel].defaultLayers,
-  );
-}
 
 export default async function ProjectCadPage({
   params,
@@ -52,7 +21,7 @@ export default async function ProjectCadPage({
   });
   if (!project) notFound();
 
-  const design = parseDesign(
+  const design = parseDesignDocument(
     project.designJson,
     project.designLevel,
     user.unitSystem,
