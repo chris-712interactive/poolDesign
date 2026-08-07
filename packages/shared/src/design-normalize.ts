@@ -7,10 +7,14 @@ import {
   DEFAULT_SPA_SHELL_HEIGHT_MM,
   DEFAULT_SPA_WALL_THICKNESS_MM,
   defaultOpeningSize,
+  DEFAULT_RETAINING_TRIGGER_MM,
   emptyDesignDocument,
   type DesignDocument,
   type DesignEstimate,
+  type DesignGradeOptions,
   type EstimateCustomLine,
+  type GradeSample,
+  type PatioGradeStrategy,
 } from "./design-model";
 
 const ESTIMATE_UNITS: CatalogUnit[] = [
@@ -23,6 +27,13 @@ const ESTIMATE_UNITS: CatalogUnit[] = [
   "kg",
   "m",
   "m2",
+  "cy",
+];
+
+const PATIO_GRADE_STRATEGIES: PatioGradeStrategy[] = [
+  "fill",
+  "retaining",
+  "both",
 ];
 const ESTIMATE_CATEGORIES: Array<CatalogCategory | "other"> = [
   "structure",
@@ -42,6 +53,13 @@ import {
   DEFAULT_PATIO_FINISH_ID,
   isPatioFinishId,
 } from "./patio-finishes";
+import {
+  defaultFabricFinishId,
+  defaultFrameFinishId,
+  furnitureFinishRoles,
+  getFurnitureFinish,
+  isFurnitureFinishId,
+} from "./furniture-finishes";
 import {
   DINING_CHAIR_CLEARANCE_MM,
   diningSetCatalogId,
@@ -117,12 +135,42 @@ export function normalizeDesignDocument(
         depthMm = dia;
       }
 
+      const roles = furnitureFinishRoles(catalogItemId);
+      let frameFinishId = o.frameFinishId;
+      let fabricFinishId = o.fabricFinishId;
+      if (roles.frame) {
+        frameFinishId =
+          isFurnitureFinishId(frameFinishId) &&
+          getFurnitureFinish(frameFinishId).kind === "wood"
+            ? frameFinishId
+            : defaultFrameFinishId(catalogItemId);
+      } else {
+        frameFinishId = undefined;
+      }
+      if (roles.fabric) {
+        fabricFinishId =
+          isFurnitureFinishId(fabricFinishId) &&
+          getFurnitureFinish(fabricFinishId).kind === "fabric"
+            ? fabricFinishId
+            : defaultFabricFinishId(catalogItemId);
+      } else if (roles.canopy) {
+        fabricFinishId =
+          isFurnitureFinishId(fabricFinishId) &&
+          getFurnitureFinish(fabricFinishId).kind === "canvas"
+            ? fabricFinishId
+            : defaultFabricFinishId(catalogItemId);
+      } else {
+        fabricFinishId = undefined;
+      }
+
       return {
         ...o,
         catalogItemId,
         name,
         widthMm,
         depthMm,
+        frameFinishId,
+        fabricFinishId,
         heightMm:
           o.heightMm != null && o.heightMm > 0
             ? o.heightMm
@@ -136,7 +184,14 @@ export function normalizeDesignDocument(
         p.materialId && isPatioFinishId(p.materialId)
           ? p.materialId
           : DEFAULT_PATIO_FINISH_ID,
+      gradeStrategy: PATIO_GRADE_STRATEGIES.includes(
+        p.gradeStrategy as PatioGradeStrategy,
+      )
+        ? (p.gradeStrategy as PatioGradeStrategy)
+        : "both",
     })),
+    gradeSamples: normalizeGradeSamples(doc.gradeSamples),
+    gradeOptions: normalizeGradeOptions(doc.gradeOptions),
     buildings: (Array.isArray(doc.buildings) ? doc.buildings : []).map((b) => {
       const stories = Math.max(1, b.stories || 1);
       return {
@@ -221,6 +276,44 @@ export function normalizeDesignDocument(
     ),
     plumbingRuns: Array.isArray(doc.plumbingRuns) ? doc.plumbingRuns : [],
     estimate: normalizeEstimate(doc.estimate),
+  };
+}
+
+function normalizeGradeSamples(
+  samples: GradeSample[] | undefined,
+): GradeSample[] {
+  if (!Array.isArray(samples)) return [];
+  return samples
+    .filter(
+      (s) =>
+        s &&
+        typeof s.id === "string" &&
+        s.position &&
+        typeof s.position.x === "number" &&
+        typeof s.position.y === "number" &&
+        typeof s.dropMm === "number" &&
+        Number.isFinite(s.dropMm),
+    )
+    .map((s) => ({
+      id: s.id,
+      position: { x: s.position.x, y: s.position.y },
+      dropMm: s.dropMm,
+      rotationDeg:
+        typeof s.rotationDeg === "number" && Number.isFinite(s.rotationDeg)
+          ? ((s.rotationDeg % 360) + 360) % 360
+          : 0,
+    }));
+}
+
+function normalizeGradeOptions(
+  options: DesignGradeOptions | undefined,
+): DesignGradeOptions {
+  const trigger = options?.retainingTriggerMm;
+  return {
+    retainingTriggerMm:
+      typeof trigger === "number" && Number.isFinite(trigger) && trigger > 0
+        ? trigger
+        : DEFAULT_RETAINING_TRIGGER_MM,
   };
 }
 

@@ -4,17 +4,16 @@ import { useContext, useMemo } from "react";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { CanvasTexture } from "three";
 import {
+  DEFAULT_FURNITURE_CANOPY_FINISH_ID,
+  DEFAULT_FURNITURE_FABRIC_FINISH_ID,
+  DEFAULT_FURNITURE_FRAME_FINISH_ID,
   DINING_CHAIR_CLEARANCE_MM,
   diningTableShape,
   isDiningSetId,
 } from "@pool-design/shared";
 import type { BoxDescriptor, SceneSelection } from "@/lib/cad3d/buildScene";
 import { ClipPlanesContext } from "@/lib/cad3d/clipContext";
-import {
-  makeOutdoorCushionTexture,
-  makeTeakWoodTexture,
-  makeUmbrellaCanvasTexture,
-} from "@/lib/cad3d/proceduralTextures";
+import { getFurnitureFinishTexture } from "@/lib/cad3d/furnitureFinishTextures";
 
 type Props = {
   desc: BoxDescriptor;
@@ -22,15 +21,27 @@ type Props = {
   onSelect?: (sel: SceneSelection | null) => void;
 };
 
-function useFurnitureTextures() {
+function useFurnitureTextures(desc: BoxDescriptor) {
   return useMemo(() => {
     if (typeof document === "undefined") return null;
     return {
-      teak: makeTeakWoodTexture(),
-      cushion: makeOutdoorCushionTexture(),
-      canvas: makeUmbrellaCanvasTexture(),
+      frame: getFurnitureFinishTexture(
+        desc.frameFinishId,
+        "wood",
+        DEFAULT_FURNITURE_FRAME_FINISH_ID,
+      ),
+      fabric: getFurnitureFinishTexture(
+        desc.fabricFinishId,
+        "fabric",
+        DEFAULT_FURNITURE_FABRIC_FINISH_ID,
+      ),
+      canopy: getFurnitureFinishTexture(
+        desc.fabricFinishId,
+        "canvas",
+        DEFAULT_FURNITURE_CANOPY_FINISH_ID,
+      ),
     };
-  }, []);
+  }, [desc.frameFinishId, desc.fabricFinishId]);
 }
 
 function Mat({
@@ -75,7 +86,7 @@ function Mat({
 export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   const catalogId = desc.catalogItemId ?? "";
   const { x: sx, y: sy, z: sz } = desc.size;
-  const furnTex = useFurnitureTextures();
+  const furnTex = useFurnitureTextures(desc);
   const rotationY = useMemo(() => {
     if (desc.axisX) return Math.atan2(-desc.axisX.z, desc.axisX.x);
     return desc.rotationY;
@@ -229,15 +240,15 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   }
 
   if (catalogId === "lounge_chair") {
-    const teak = furnTex?.teak;
-    const cushion = furnTex?.cushion;
+    const frame = furnTex?.frame;
+    const fabric = furnTex?.fabric;
     return (
       <group {...groupProps}>
         <mesh position={[0, -sy * 0.15, -sz * 0.05]} castShadow receiveShadow>
           <boxGeometry args={[sx * 0.92, sy * 0.12, sz * 0.55]} />
           <Mat
-            map={cushion?.color}
-            roughnessMap={cushion?.roughness}
+            map={fabric?.color}
+            roughnessMap={fabric?.roughness}
             roughness={0.85}
             selected={selected}
           />
@@ -249,8 +260,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
         >
           <boxGeometry args={[sx * 0.9, sy * 0.08, sz * 0.42]} />
           <Mat
-            map={cushion?.color}
-            roughnessMap={cushion?.roughness}
+            map={fabric?.color}
+            roughnessMap={fabric?.roughness}
             roughness={0.85}
             selected={selected}
           />
@@ -264,8 +275,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
           >
             <boxGeometry args={[0.03, sy * 0.22, sz * 0.5]} />
             <Mat
-              map={teak?.color}
-              roughnessMap={teak?.roughness}
+              map={frame?.color}
+              roughnessMap={frame?.roughness}
               roughness={0.55}
               selected={selected}
             />
@@ -282,8 +293,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
           <mesh key={i} position={[...p]} castShadow>
             <boxGeometry args={[0.04, sy * 0.35, 0.04]} />
             <Mat
-              map={teak?.color}
-              roughnessMap={teak?.roughness}
+              map={frame?.color}
+              roughnessMap={frame?.roughness}
               roughness={0.5}
               selected={selected}
             />
@@ -295,8 +306,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
 
   if (isDiningSetId(catalogId)) {
     const shape = diningTableShape(catalogId);
-    const teak = furnTex?.teak;
-    const cushion = furnTex?.cushion;
+    const frame = furnTex?.frame;
+    const fabric = furnTex?.fabric;
     // desc.size is tabletop; chairs sit in clearance beyond the top.
     const tableW = shape === "round" ? Math.max(sx, sz) : sx;
     const tableD = shape === "round" ? Math.max(sx, sz) : sz;
@@ -345,8 +356,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
           <mesh position={[0, topY, 0]} castShadow receiveShadow>
             <cylinderGeometry args={[tableW / 2, tableW / 2, topT, 32]} />
             <Mat
-              map={teak?.color}
-              roughnessMap={teak?.roughness}
+              map={frame?.color}
+              roughnessMap={frame?.roughness}
               roughness={0.45}
               selected={selected}
             />
@@ -355,8 +366,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
           <mesh position={[0, topY, 0]} castShadow receiveShadow>
             <boxGeometry args={[tableW, topT, tableD]} />
             <Mat
-              map={teak?.color}
-              roughnessMap={teak?.roughness}
+              map={frame?.color}
+              roughnessMap={frame?.roughness}
               roughness={0.45}
               selected={selected}
             />
@@ -368,8 +379,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
             <mesh position={[0, topY - legH / 2 - topT / 2, 0]} castShadow>
               <cylinderGeometry args={[0.055, 0.07, legH, 14]} />
               <Mat
-                map={teak?.color}
-                roughnessMap={teak?.roughness}
+                map={frame?.color}
+                roughnessMap={frame?.roughness}
                 roughness={0.5}
                 selected={selected}
               />
@@ -383,8 +394,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
                 args={[tableW * 0.22, tableW * 0.26, 0.04, 20]}
               />
               <Mat
-                map={teak?.color}
-                roughnessMap={teak?.roughness}
+                map={frame?.color}
+                roughnessMap={frame?.roughness}
                 roughness={0.5}
                 selected={selected}
               />
@@ -406,8 +417,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
             >
               <boxGeometry args={[0.06, legH, 0.06]} />
               <Mat
-                map={teak?.color}
-                roughnessMap={teak?.roughness}
+                map={frame?.color}
+                roughnessMap={frame?.roughness}
                 roughness={0.5}
                 selected={selected}
               />
@@ -420,8 +431,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
             <mesh position={[0, -sy * 0.5 + chairSeatH, 0]} castShadow>
               <boxGeometry args={[chairW, chairSeatT, chairD]} />
               <Mat
-                map={cushion?.color}
-                roughnessMap={cushion?.roughness}
+                map={fabric?.color}
+                roughnessMap={fabric?.roughness}
                 roughness={0.85}
                 selected={selected}
               />
@@ -432,8 +443,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
             >
               <boxGeometry args={[chairW * 0.95, backH, 0.04]} />
               <Mat
-                map={teak?.color}
-                roughnessMap={teak?.roughness}
+                map={frame?.color}
+                roughnessMap={frame?.roughness}
                 roughness={0.55}
                 selected={selected}
               />
@@ -453,8 +464,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
               >
                 <boxGeometry args={[0.035, chairSeatH, 0.035]} />
                 <Mat
-                  map={teak?.color}
-                  roughnessMap={teak?.roughness}
+                  map={frame?.color}
+                  roughnessMap={frame?.roughness}
                   roughness={0.5}
                   selected={selected}
                 />
@@ -467,15 +478,15 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   }
 
   if (catalogId === "sofa_outdoor") {
-    const teak = furnTex?.teak;
-    const cushion = furnTex?.cushion;
+    const frame = furnTex?.frame;
+    const fabric = furnTex?.fabric;
     return (
       <group {...groupProps}>
         <mesh position={[0, -sy * 0.28, 0]} castShadow receiveShadow>
           <boxGeometry args={[sx * 0.98, sy * 0.18, sz * 0.95]} />
           <Mat
-            map={teak?.color}
-            roughnessMap={teak?.roughness}
+            map={frame?.color}
+            roughnessMap={frame?.roughness}
             roughness={0.5}
             selected={selected}
           />
@@ -483,8 +494,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
         <mesh position={[0, -sy * 0.12, 0]} castShadow receiveShadow>
           <boxGeometry args={[sx * 0.92, sy * 0.22, sz * 0.88]} />
           <Mat
-            map={cushion?.color}
-            roughnessMap={cushion?.roughness}
+            map={fabric?.color}
+            roughnessMap={fabric?.roughness}
             roughness={0.88}
             selected={selected}
           />
@@ -492,8 +503,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
         <mesh position={[0, sy * 0.12, -sz * 0.35]} castShadow>
           <boxGeometry args={[sx * 0.94, sy * 0.5, sz * 0.2]} />
           <Mat
-            map={cushion?.color}
-            roughnessMap={cushion?.roughness}
+            map={fabric?.color}
+            roughnessMap={fabric?.roughness}
             roughness={0.88}
             selected={selected}
           />
@@ -501,8 +512,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
         <mesh position={[-sx * 0.42, sy * 0.02, sz * 0.05]} castShadow>
           <boxGeometry args={[sx * 0.1, sy * 0.38, sz * 0.75]} />
           <Mat
-            map={cushion?.color}
-            roughnessMap={cushion?.roughness}
+            map={fabric?.color}
+            roughnessMap={fabric?.roughness}
             roughness={0.88}
             selected={selected}
           />
@@ -510,8 +521,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
         <mesh position={[sx * 0.42, sy * 0.02, sz * 0.05]} castShadow>
           <boxGeometry args={[sx * 0.1, sy * 0.38, sz * 0.75]} />
           <Mat
-            map={cushion?.color}
-            roughnessMap={cushion?.roughness}
+            map={fabric?.color}
+            roughnessMap={fabric?.roughness}
             roughness={0.88}
             selected={selected}
           />
@@ -521,7 +532,7 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   }
 
   if (catalogId === "umbrella") {
-    const canvas = furnTex?.canvas;
+    const canopy = furnTex?.canopy;
     return (
       <group {...groupProps}>
         <mesh castShadow>
@@ -533,8 +544,8 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
             args={[Math.min(sx, sz) * 0.48, sy * 0.18, 20, 1, true]}
           />
           <Mat
-            map={canvas?.color}
-            roughnessMap={canvas?.roughness}
+            map={canopy?.color}
+            roughnessMap={canopy?.roughness}
             roughness={0.75}
             opacity={0.95}
             selected={selected}

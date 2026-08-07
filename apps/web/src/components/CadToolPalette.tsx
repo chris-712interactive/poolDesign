@@ -272,18 +272,34 @@ export function CadToolPalette({
                   )}
 
                   {group.id === "patio" && (
-                    <div className="cad-icon-toolbar cad-icon-toolbar-3">
-                      <button
-                        type="button"
-                        className={`tool-icon-btn ${tool === "patio" ? "active" : ""}`}
-                        title="Draw patio"
-                        aria-label="Draw patio"
-                        onClick={() => activateDraw("patio")}
-                      >
-                        {toolMeta("patio").icon}
-                        <ToolTooltip label="Draw patio" />
-                      </button>
-                    </div>
+                    <>
+                      <div className="cad-icon-toolbar cad-icon-toolbar-3">
+                        <button
+                          type="button"
+                          className={`tool-icon-btn ${tool === "patio" ? "active" : ""}`}
+                          title="Draw patio"
+                          aria-label="Draw patio"
+                          onClick={() => activateDraw("patio")}
+                        >
+                          {toolMeta("patio").icon}
+                          <ToolTooltip label="Draw patio" />
+                        </button>
+                        <button
+                          type="button"
+                          className={`tool-icon-btn ${tool === "grade_point" ? "active" : ""}`}
+                          title="Grade point"
+                          aria-label="Grade point"
+                          onClick={() => activateDraw("grade_point")}
+                        >
+                          {toolMeta("grade_point").icon}
+                          <ToolTooltip label="Grade point" />
+                        </button>
+                      </div>
+                      <p className="muted cad-tool-group-note">
+                        Grade points: drop/rise from house FFE. Set patio strategy
+                        for fill and/or retaining.
+                      </p>
+                    </>
                   )}
 
                   {group.id === "cover" && (

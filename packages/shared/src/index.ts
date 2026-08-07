@@ -11,6 +11,8 @@ export * from "./spa-defaults";
 export * from "./plumbing-route";
 export * from "./design-normalize";
 export * from "./patio-finishes";
+export * from "./furniture-finishes";
+export * from "./site-grade";
 export * from "./cover-supports";
 export * from "./scene3d";
 export * from "./water-geometry";

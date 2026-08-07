@@ -51,12 +51,43 @@ export type PoolBody = {
   depthAxis?: PointMm;
 };
 
+/** How a patio handles existing grade fall-away relative to house FFE. */
+export type PatioGradeStrategy = "fill" | "retaining" | "both";
+
 export type PatioRegion = {
   id: string;
   name: string;
   outline: PointMm[];
   materialId?: string;
+  /**
+   * Site-grade remediation under / at this patio.
+   * Defaults to "both" (fill + retaining where triggered).
+   */
+  gradeStrategy?: PatioGradeStrategy;
 };
+
+/**
+ * Spot elevation on the property relative to house FFE (patio top datum).
+ * `dropMm > 0` = existing grade below FFE; `dropMm < 0` = rise above FFE.
+ */
+export type GradeSample = {
+  id: string;
+  position: PointMm;
+  dropMm: number;
+  /** Plan orientation of the drop/rise arrow (degrees). */
+  rotationDeg?: number;
+};
+
+export type DesignGradeOptions = {
+  /**
+   * Drop (mm) above which retaining is assumed when strategy includes it.
+   * Default 457.2 mm (18″).
+   */
+  retainingTriggerMm?: number;
+};
+
+/** Default retaining trigger: 18″ of drop. */
+export const DEFAULT_RETAINING_TRIGGER_MM = 457.2;
 
 export type PatioCoverKind = "pergola" | "roof";
 
@@ -192,6 +223,13 @@ export type PlacedObject = {
   heightMm?: number;
   /** Optional link to a pool/spa body (spa package equipment) */
   parentBodyId?: string;
+  /** Wood / frame finish id (see furniture-finishes). */
+  frameFinishId?: string;
+  /**
+   * Cushion / sling / canopy finish id.
+   * Umbrellas use this for canopy canvas.
+   */
+  fabricFinishId?: string;
 };
 
 export type PlumbingRun = {
@@ -263,6 +301,9 @@ export type DesignDocument = {
   features: PoolFeature[];
   /** Optional BOM edits (removed auto lines + custom adds) */
   estimate?: DesignEstimate;
+  /** Spot elevations relative to house FFE */
+  gradeSamples?: GradeSample[];
+  gradeOptions?: DesignGradeOptions;
 };
 
 export function emptyDesignDocument(
@@ -297,6 +338,8 @@ export function emptyDesignDocument(
     plumbingRuns: [],
     features: [],
     estimate: { removedLineKeys: [], customLines: [] },
+    gradeSamples: [],
+    gradeOptions: { retainingTriggerMm: DEFAULT_RETAINING_TRIGGER_MM },
   };
 }
 

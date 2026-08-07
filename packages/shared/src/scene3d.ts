@@ -86,6 +86,9 @@ export function designBoundsMm(design: DesignDocument): DesignBoundsMm {
       { x: o.position.x + hw, y: o.position.y + hd },
     ]);
   }
+  for (const g of design.gradeSamples ?? []) {
+    include([g.position]);
+  }
 
   if (!Number.isFinite(minX)) {
     return {

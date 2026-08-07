@@ -4,6 +4,7 @@ import {
   POOL_LIP_THICKNESS_MM,
   POOL_WALL_THICKNESS_MM,
   POOL_WATER_FREEBOARD_MM,
+  analyzePatioGrade,
   approximateIntersectionAreaMm2,
   buildingHeightMm,
   clipOutlineByAabbs,
@@ -12,6 +13,7 @@ import {
   depthProfileForBody,
   depthTAtPlanPoint,
   designBoundsMm,
+  existingGradeDropMm,
   featureDepthMm,
   formatLength,
   insideOutlineFromOutside,
@@ -33,6 +35,7 @@ import {
   planToWorldXZ,
   pointInPolygon,
   rectangleFrame,
+  resolveGradeStrategy,
   spaNeedsDeckPit,
   spaShellParams,
   spaTotalDepthMm,
@@ -81,7 +84,9 @@ export type SceneMaterialKey =
   | "pipeOther"
   | "pipeGas"
   | "sectionCap"
-  | "sectionWater";
+  | "sectionWater"
+  | "fill"
+  | "retaining";
 
 /** Optional presentation toggles for the 3D preview. */
 export type SceneBuildOptions = {
@@ -129,6 +134,10 @@ export type BoxDescriptor = {
   catalogItemId?: string;
   /** Door / window variant for OpeningMesh. */
   openingKind?: BuildingOpeningKind;
+  /** Furniture wood / frame finish id. */
+  frameFinishId?: string;
+  /** Furniture cushion / canopy finish id. */
+  fabricFinishId?: string;
 } & Selectable;
 
 /** Shared depth-profile fields for floor / water meshes. */
@@ -219,12 +228,32 @@ export type TubeDescriptor = {
   y: number;
 } & Selectable;
 
+/**
+ * Plan-aligned heightfield for sloping existing grade.
+ * Vertex (i,j) at plan (originMm.x + i*stepMm, originMm.y + j*stepYMm),
+ * world Y = heightsM[j * cols + i].
+ */
+export type TerrainDescriptor = {
+  kind: "terrain";
+  id: string;
+  material: SceneMaterialKey;
+  originMm: PointMm;
+  /** Plan X step between columns (mm). */
+  stepMm: number;
+  /** Plan Y step between rows (mm). Defaults to stepMm when omitted. */
+  stepYMm?: number;
+  cols: number;
+  rows: number;
+  heightsM: number[];
+};
+
 export type MeshDescriptor =
   | ExtrudeDescriptor
   | BoxDescriptor
   | FloorDescriptor
   | WaterBodyDescriptor
-  | TubeDescriptor;
+  | TubeDescriptor
+  | TerrainDescriptor;
 
 export type SceneModel = {
   center: { x: number; z: number };
@@ -929,11 +958,14 @@ export function buildSceneModel(
   }
 
   const waterTopY = -mmToMeters(POOL_WATER_FREEBOARD_MM);
+  const gradeSamples = design.gradeSamples ?? [];
+  const hasGradeSamples = gradeSamples.length > 0;
 
   // Prefer solid AABB slabs with pits subtracted (reliable). Fall back to
   // Extrude holes only when the outline isn't a rectangle.
+  // Always punch pool/spa pits out of grade so basins stay clear.
   const groundRegions = subtractAabbHoles(groundOutline, poolPitHoles);
-  if (groundRegions.length > 0) {
+  if (!hasGradeSamples && groundRegions.length > 0) {
     let gi = 0;
     for (const region of groundRegions) {
       meshes.push({
@@ -947,15 +979,58 @@ export function buildSceneModel(
     }
   }
 
+  if (hasGradeSamples) {
+    const stepMm = Math.max(
+      900,
+      Math.min(bounds.width, bounds.height, 40000) / 28,
+    );
+    // One sloping patch per remainder region so pool/spa pits have no grass.
+    let ti = 0;
+    for (const region of groundRegions) {
+      if (region.length < 3) continue;
+      const bb = outlineBounds(region);
+      if (bb.width < 50 || bb.height < 50) continue;
+      const cols = Math.max(2, Math.ceil(bb.width / stepMm) + 1);
+      const rows = Math.max(2, Math.ceil(bb.height / stepMm) + 1);
+      const cellW = bb.width / (cols - 1);
+      const cellH = bb.height / (rows - 1);
+      const heightsM: number[] = [];
+      for (let j = 0; j < rows; j++) {
+        for (let i = 0; i < cols; i++) {
+          const plan = {
+            x: bb.minX + i * cellW,
+            y: bb.minY + j * cellH,
+          };
+          const dropMm = existingGradeDropMm(plan, gradeSamples);
+          heightsM.push(-mmToMeters(dropMm));
+        }
+      }
+      meshes.push({
+        kind: "terrain",
+        id: `ground_terrain_${ti++}`,
+        material: "ground",
+        originMm: { x: bb.minX, y: bb.minY },
+        stepMm: cellW,
+        // TerrainMesh uses uniform step for both axes; store cellW and
+        // encode non-uniform via a second field when needed.
+        cols,
+        rows,
+        heightsM,
+        stepYMm: cellH,
+      });
+    }
+  }
+
   const ground: ExtrudeDescriptor = {
     kind: "extrude",
     id: "ground_grade",
     material: "ground",
     outlineMm: groundOutline,
-    // When subtracted slabs were emitted into meshes, skip the solid ground mesh.
+    // When subtracted slabs / terrain were emitted, skip the solid ground mesh.
     holeOutlinesMm: groundRegions.length > 0 ? [] : poolPitHoles,
     bottomY: -0.04,
-    height: groundRegions.length > 0 ? 0 : 0.04,
+    height:
+      hasGradeSamples || groundRegions.length > 0 ? 0 : 0.04,
   };
 
   if (layerVisible(design, "house") || layerVisible(design, "building")) {
@@ -1072,6 +1147,117 @@ export function buildSceneModel(
           height: t,
           select,
         });
+      }
+
+      // Fill / retaining from site grade samples.
+      if (hasGradeSamples) {
+        const strategy = resolveGradeStrategy(p.gradeStrategy);
+        const analysis = analyzePatioGrade(
+          p,
+          gradeSamples,
+          design.gradeOptions,
+        );
+        // Max existing-grade drop under this patio (for a solid raised pad).
+        let maxDropMm = 0;
+        for (const corner of p.outline) {
+          maxDropMm = Math.max(
+            maxDropMm,
+            existingGradeDropMm(corner, gradeSamples),
+          );
+        }
+        maxDropMm = Math.max(maxDropMm, analysis.maxFillHeightMm);
+        for (const seg of analysis.retainingSegments) {
+          maxDropMm = Math.max(maxDropMm, seg.dropMm);
+        }
+
+        if (
+          (strategy === "fill" || strategy === "both") &&
+          maxDropMm > PATIO_SLAB_THICKNESS_MM + 40
+        ) {
+          const dropM = mmToMeters(maxDropMm);
+          // Continuous fill pad: existing grade → slab underside (y = 0).
+          // Punch pool/spa pits the same way as the deck (AABB subtract is
+          // reliable; ExtrudeGeometry holes often leave wedges in the basin).
+          if (isAxisAlignedRect(open, 80)) {
+            const fillRegions =
+              poolPitHoles.length > 0
+                ? subtractAabbHoles(open, poolPitHoles)
+                : [open];
+            let fi = 0;
+            for (const region of fillRegions) {
+              if (region.length < 3) continue;
+              meshes.push({
+                kind: "extrude",
+                id: `fill_${p.id}_${fi++}`,
+                material: "fill",
+                outlineMm: closeOutline(region),
+                bottomY: -dropM,
+                height: dropM,
+                select,
+              });
+            }
+          } else {
+            meshes.push({
+              kind: "extrude",
+              id: `fill_${p.id}`,
+              material: "fill",
+              outlineMm: closeOutline(p.outline),
+              holeOutlinesMm:
+                poolPitHoles.length > 0 ? poolPitHoles : undefined,
+              bottomY: -dropM,
+              height: dropM,
+              select,
+            });
+          }
+        }
+
+        if (strategy === "retaining" || strategy === "both") {
+          let ri = 0;
+          const patioBb = outlineBounds(p.outline);
+          for (const seg of analysis.retainingSegments) {
+            const mid = {
+              x: (seg.a.x + seg.b.x) / 2,
+              y: (seg.a.y + seg.b.y) / 2,
+            };
+            const dx = seg.b.x - seg.a.x;
+            const dy = seg.b.y - seg.a.y;
+            const len = Math.hypot(dx, dy) || 1;
+            // Outward normal (away from patio center)
+            let nx = -dy / len;
+            let ny = dx / len;
+            if (
+              nx * (patioBb.cx - mid.x) + ny * (patioBb.cy - mid.y) >
+              0
+            ) {
+              nx = -nx;
+              ny = -ny;
+            }
+            const offsetMm = 120;
+            const wallMid = {
+              x: mid.x + nx * offsetMm,
+              y: mid.y + ny * offsetMm,
+            };
+            const lenM = mmToMeters(seg.lengthMm);
+            const hM = Math.max(0.2, mmToMeters(seg.dropMm));
+            const thickM = 0.25;
+            const along = planDirToWorldXZ(dx, dy);
+            const xz = planToWorldXZ(wallMid);
+            // Wall sits from existing grade up to patio top.
+            meshes.push({
+              kind: "box",
+              id: `retain_${p.id}_${ri++}`,
+              material: "retaining",
+              position: {
+                x: xz.x,
+                y: -hM / 2 + t,
+                z: xz.z,
+              },
+              size: { x: Math.max(0.35, lenM), y: hM + t, z: thickM },
+              rotationY: Math.atan2(-along.z, along.x),
+              select,
+            });
+          }
+        }
       }
     }
   }
@@ -1502,6 +1688,8 @@ export function buildSceneModel(
       size: { x: w, y: h, z: d },
       rotationY,
       catalogItemId: obj.catalogItemId,
+      frameFinishId: obj.frameFinishId,
+      fabricFinishId: obj.fabricFinishId,
       select: { kind: "object", id: obj.id },
     });
   }

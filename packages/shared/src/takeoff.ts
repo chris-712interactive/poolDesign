@@ -12,6 +12,11 @@ import {
 import { getPlaceableItem } from "./object-library";
 import { isPadEquipmentId } from "./plumbing-route";
 import {
+  analyzeDesignGrade,
+  totalFillCy,
+  totalRetainingLf,
+} from "./site-grade";
+import {
   insideOutlineFromOutside,
   spaShellHeightMm,
   spaWallThicknessMm,
@@ -169,6 +174,10 @@ export function buildTakeoff(
         quantity = qtyBase * 0.453592;
         unit = "kg";
         unitPriceCents = Math.round(item.unitPriceCents / 0.453592);
+      } else if (baseUnit === "cy") {
+        quantity = qtyBase * 0.764555;
+        unit = "m3";
+        unitPriceCents = Math.round(item.unitPriceCents / 0.764555);
       }
     }
 
@@ -278,6 +287,26 @@ export function buildTakeoff(
     "Exposed pool/spa perimeter (shared walls deducted)",
   );
   push("patio_concrete", mm2ToSf(patioAreaMm2), "sf", "Patio / deck area");
+
+  const gradeAnalyses = analyzeDesignGrade(
+    design.patios ?? [],
+    design.gradeSamples ?? [],
+    design.gradeOptions,
+  );
+  const fillCy = totalFillCy(gradeAnalyses);
+  const retainingLf = totalRetainingLf(gradeAnalyses);
+  push(
+    "fill_dirt",
+    fillCy,
+    "cy",
+    "Compacted fill under patio to house FFE",
+  );
+  push(
+    "retaining_wall",
+    retainingLf,
+    "lf",
+    "Patio edges where grade drop exceeds threshold",
+  );
 
   const covers = design.patioCovers ?? [];
   const pergolaAreaMm2 = covers

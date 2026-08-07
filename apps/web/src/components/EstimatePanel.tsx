@@ -34,11 +34,13 @@ const ADD_UNITS: CatalogUnit[] = [
   "lf",
   "sf",
   "sy",
+  "cy",
   "hr",
   "lb",
   "kg",
   "m",
   "m2",
+  "m3",
 ];
 
 function newCustomId(): string {

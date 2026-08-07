@@ -13,6 +13,7 @@ export type DrawToolId =
   | "bench"
   | "sunshelf"
   | "patio"
+  | "grade_point"
   | "cover_rect"
   | "plumbing"
   | "place"
@@ -286,6 +287,17 @@ export const TOOL_META: {
     ),
   },
   {
+    id: "grade_point",
+    label: "Grade point",
+    icon: (
+      <Svg>
+        <path d="M12 3v14" />
+        <path d="M8 13l4 4 4-4" />
+        <circle cx="12" cy="5" r="2" />
+      </Svg>
+    ),
+  },
+  {
     id: "cover_rect",
     label: "Pergola / patio roof",
     icon: (
@@ -411,7 +423,7 @@ export function toolGroupForTool(
   placeCatalogId: string | null,
 ): ToolGroupId | null {
   if (isPadEquipTool(tool)) return "pad";
-  if (tool === "patio") return "patio";
+  if (tool === "patio" || tool === "grade_point") return "patio";
   if (tool === "cover_rect") return "cover";
   if (tool === "plumbing") return "plumbing";
   if (tool === "house_rect" || tool === "house_poly") return "house";

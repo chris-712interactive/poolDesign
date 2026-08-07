@@ -35,13 +35,19 @@ import {
   isPoolFixtureId,
   isSpaFixtureId,
   isWaterFixtureId,
+  analyzePatioGrade,
+  defaultFabricFinishId,
+  defaultFrameFinishId,
   diningSetCatalogId,
   diningTableShape,
+  furnitureFinishRoles,
   getPlaceableItem,
   isDiningSetId,
   objectFootprint,
   objectLibraryForLevel,
   objectPlanSizeMm,
+  type GradeSample,
+  type PatioGradeStrategy,
   outlineBounds,
   parseLengthToMm,
   polygonAreaMm2,
@@ -104,6 +110,7 @@ import {
 } from "@pool-design/shared";
 import { EstimatePanel } from "@/components/EstimatePanel";
 import { CadScene3DDynamic } from "@/components/CadScene3DDynamic";
+import { FurnitureFinishPicker } from "@/components/FurnitureFinishPicker";
 import { PatioFinishPicker } from "@/components/PatioFinishPicker";
 import {
   catalogIdForPadTool,
@@ -125,11 +132,13 @@ import {
   drawDepthProfile,
   drawDraft,
   drawFeature,
+  drawGradeSample,
   drawGrid,
   drawMeasure,
   drawPatioCover,
   drawPlacedObject,
   drawPolygon,
+  drawRetainingEdges,
   drawRun,
   drawEdgeLabel,
   openingEndpoints,
@@ -149,6 +158,7 @@ type Selection =
   | { kind: "run"; id: string }
   | { kind: "object"; id: string }
   | { kind: "feature"; id: string }
+  | { kind: "gradeSample"; id: string }
   | null;
 
 type DragState =
@@ -172,7 +182,15 @@ type DragState =
     }
   | {
       mode: "move";
-      kind: "pool" | "patio" | "building" | "cover" | "run" | "object" | "feature";
+      kind:
+        | "pool"
+        | "patio"
+        | "building"
+        | "cover"
+        | "run"
+        | "object"
+        | "feature"
+        | "gradeSample";
       id: string;
       last: PointMm;
     }
@@ -223,6 +241,15 @@ function rotationHandleWorld(obj: PlacedObject): PointMm {
   return {
     x: obj.position.x - Math.sin(rad) * dist,
     y: obj.position.y - Math.cos(rad) * dist,
+  };
+}
+
+function gradeRotationHandleWorld(sample: GradeSample): PointMm {
+  const rad = ((sample.rotationDeg || 0) * Math.PI) / 180;
+  const dist = 600;
+  return {
+    x: sample.position.x - Math.sin(rad) * dist,
+    y: sample.position.y - Math.cos(rad) * dist,
   };
 }
 
@@ -374,6 +401,13 @@ export function CadWorkspace({
         ? (design.features ?? []).find((f) => f.id === selection.id) ?? null
         : null,
     [design.features, selection],
+  );
+  const selectedGradeSample = useMemo(
+    () =>
+      selection?.kind === "gradeSample"
+        ? (design.gradeSamples ?? []).find((s) => s.id === selection.id) ?? null
+        : null,
+    [design.gradeSamples, selection],
   );
   const guideSteps = useMemo(() => designGuideSteps(design), [design]);
 
@@ -572,7 +606,23 @@ export function CadWorkspace({
           true,
           selection?.kind === "patio" && selection.id === patio.id,
         );
+        const grade = analyzePatioGrade(
+          patio,
+          design.gradeSamples ?? [],
+          design.gradeOptions,
+        );
+        drawRetainingEdges(ctx, vp, grade.retainingSegments);
       }
+    }
+
+    for (const sample of design.gradeSamples ?? []) {
+      drawGradeSample(
+        ctx,
+        vp,
+        sample,
+        selection?.kind === "gradeSample" && selection.id === sample.id,
+        unitSystem,
+      );
     }
 
     if (layerVisible(design, "covers")) {
@@ -1158,16 +1208,28 @@ export function CadWorkspace({
   }
 
   function hitRotateHandle(point: PointMm): string | null {
-    if (!selectedObject) return null;
-    const handle = rotationHandleWorld(selectedObject);
     const tol = (VERTEX_HIT_PX + 4) / vp.scale;
-    if (segmentLengthMm(point, handle) <= tol) return selectedObject.id;
+    if (selectedObject) {
+      const handle = rotationHandleWorld(selectedObject);
+      if (segmentLengthMm(point, handle) <= tol) return selectedObject.id;
+    }
+    if (selectedGradeSample) {
+      const handle = gradeRotationHandleWorld(selectedGradeSample);
+      if (segmentLengthMm(point, handle) <= tol) return selectedGradeSample.id;
+    }
     return null;
   }
 
   function hitTest(point: PointMm): Selection {
     const objectHitMm = Math.max(180, 12 / vp.scale);
     const openingHitMm = Math.max(220, 14 / vp.scale);
+    const gradeHitMm = Math.max(220, 14 / vp.scale);
+    for (let i = (design.gradeSamples ?? []).length - 1; i >= 0; i--) {
+      const sample = design.gradeSamples![i];
+      if (segmentLengthMm(point, sample.position) <= gradeHitMm) {
+        return { kind: "gradeSample", id: sample.id };
+      }
+    }
     for (let i = (design.objects ?? []).length - 1; i >= 0; i--) {
       const obj = design.objects[i];
       const nearCenter = segmentLengthMm(point, obj.position) <= objectHitMm;
@@ -1319,6 +1381,13 @@ export function CadWorkspace({
         ...design,
         features: (design.features ?? []).filter((f) => f.id !== selection.id),
       });
+    } else if (selection.kind === "gradeSample") {
+      commitDesign({
+        ...design,
+        gradeSamples: (design.gradeSamples ?? []).filter(
+          (s) => s.id !== selection.id,
+        ),
+      });
     }
     setSelection(null);
   }
@@ -1431,6 +1500,21 @@ export function CadWorkspace({
       } else {
         setMeasurePoints((pts) => [...pts, point]);
       }
+      return;
+    }
+
+    if (tool === "grade_point") {
+      const sample: GradeSample = {
+        id: newId("grade"),
+        position: point,
+        dropMm: 304.8, // default 1′ drop — edit in Properties
+        rotationDeg: 0,
+      };
+      commitDesign({
+        ...design,
+        gradeSamples: [...(design.gradeSamples ?? []), sample],
+      });
+      setSelection({ kind: "gradeSample", id: sample.id });
       return;
     }
 
@@ -1565,6 +1649,27 @@ export function CadWorkspace({
     }
 
     if (drag.mode === "rotate") {
+      const sample = (designRef.current.gradeSamples ?? []).find(
+        (s) => s.id === drag.id,
+      );
+      if (sample) {
+        const angle =
+          (Math.atan2(
+            raw.y - sample.position.y,
+            raw.x - sample.position.x,
+          ) *
+            180) /
+            Math.PI +
+          90;
+        const snapped = Math.round(angle / 15) * 15;
+        setDesign((d) => ({
+          ...d,
+          gradeSamples: (d.gradeSamples ?? []).map((s) =>
+            s.id === drag.id ? { ...s, rotationDeg: snapped } : s,
+          ),
+        }));
+        return;
+      }
       const obj = designRef.current.objects.find((o) => o.id === drag.id);
       if (!obj) return;
       const angle =
@@ -1894,6 +1999,21 @@ export function CadWorkspace({
       });
       return;
     }
+    if ((e.key === "r" || e.key === "R") && selectedGradeSample) {
+      e.preventDefault();
+      commitDesign({
+        ...design,
+        gradeSamples: (design.gradeSamples ?? []).map((s) =>
+          s.id === selectedGradeSample.id
+            ? {
+                ...s,
+                rotationDeg: ((s.rotationDeg || 0) + 15) % 360,
+              }
+            : s,
+        ),
+      });
+      return;
+    }
     if (e.key === "Enter") {
       if (lengthBuffer) {
         e.preventDefault();
@@ -1978,6 +2098,8 @@ export function CadWorkspace({
                   : "Click pool corners. Hold Shift for 90° lines. Type length + Enter. Close near start."
                 : tool === "patio"
                   ? "Click corners. Hold Shift for 90° lines. Type length + Enter. Close near start."
+                  : tool === "grade_point"
+                    ? "Click to place a grade point. Set drop/rise from house FFE in Properties."
                   : tool === "plumbing"
                     ? "Click segments. Hold Shift (or Ortho) for 90° lines. Type length + Enter."
                     : isPadEquipTool(tool)
@@ -2067,7 +2189,9 @@ export function CadWorkspace({
                 <CadScene3DDynamic
                   design={design}
                   projectId={projectId}
-                  selection={selection}
+                  selection={
+                    selection?.kind === "gradeSample" ? null : selection
+                  }
                   onSelect={(sel) => {
                     setSelection(sel);
                     if (sel) setSideTab("properties");
@@ -2520,6 +2644,35 @@ export function CadWorkspace({
                         })
                       }
                     />
+                    <div className="field">
+                      <label htmlFor="patio-grade-strategy">
+                        Grade strategy
+                      </label>
+                      <select
+                        id="patio-grade-strategy"
+                        value={selectedPatio.gradeStrategy ?? "both"}
+                        onChange={(e) => {
+                          const gradeStrategy = e.target
+                            .value as PatioGradeStrategy;
+                          commitDesign({
+                            ...design,
+                            patios: design.patios.map((p) =>
+                              p.id === selectedPatio.id
+                                ? { ...p, gradeStrategy }
+                                : p,
+                            ),
+                          });
+                        }}
+                      >
+                        <option value="fill">Fill only</option>
+                        <option value="retaining">Retaining only</option>
+                        <option value="both">Both fill &amp; retaining</option>
+                      </select>
+                    </div>
+                    <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
+                      Uses grade points relative to house FFE. Retaining along
+                      edges where drop exceeds ~18″ (when strategy includes it).
+                    </p>
                     <PatioFinishPicker
                       value={selectedPatio.materialId}
                       onChange={(materialId) =>
@@ -2533,6 +2686,168 @@ export function CadWorkspace({
                         })
                       }
                     />
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+                {selectedGradeSample && (
+                  <div className="stack">
+                    <strong>Grade point</strong>
+                    <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>
+                      Drop below house FFE (use negative for rise).
+                    </p>
+                    <div className="field">
+                      <label htmlFor="grade-drop">
+                        {selectedGradeSample.dropMm >= 0 ? "Drop" : "Rise"}
+                      </label>
+                      <input
+                        id="grade-drop"
+                        key={`grade-drop-${selectedGradeSample.id}-${selectedGradeSample.dropMm}`}
+                        defaultValue={formatLength(
+                          Math.abs(selectedGradeSample.dropMm),
+                          unitSystem,
+                        )}
+                        placeholder={
+                          unitSystem === "imperial" ? "e.g. 2'" : "e.g. 0.6m"
+                        }
+                        onBlur={(e) => {
+                          const mm = parseLengthToMm(
+                            e.target.value,
+                            unitSystem,
+                          );
+                          if (mm == null || mm < 0) return;
+                          const sign =
+                            selectedGradeSample.dropMm < 0 ? -1 : 1;
+                          commitDesign({
+                            ...design,
+                            gradeSamples: (design.gradeSamples ?? []).map(
+                              (s) =>
+                                s.id === selectedGradeSample.id
+                                  ? { ...s, dropMm: sign * mm }
+                                  : s,
+                            ),
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        onClick={() =>
+                          commitDesign({
+                            ...design,
+                            gradeSamples: (design.gradeSamples ?? []).map(
+                              (s) =>
+                                s.id === selectedGradeSample.id
+                                  ? { ...s, dropMm: -Math.abs(s.dropMm) }
+                                  : s,
+                            ),
+                          })
+                        }
+                      >
+                        Set as rise
+                      </button>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        onClick={() =>
+                          commitDesign({
+                            ...design,
+                            gradeSamples: (design.gradeSamples ?? []).map(
+                              (s) =>
+                                s.id === selectedGradeSample.id
+                                  ? { ...s, dropMm: Math.abs(s.dropMm) }
+                                  : s,
+                            ),
+                          })
+                        }
+                      >
+                        Set as drop
+                      </button>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="grade-rot">Rotation (degrees)</label>
+                      <input
+                        id="grade-rot"
+                        type="number"
+                        step={15}
+                        key={`grade-rot-${selectedGradeSample.id}-${selectedGradeSample.rotationDeg ?? 0}`}
+                        defaultValue={Math.round(
+                          selectedGradeSample.rotationDeg || 0,
+                        )}
+                        onBlur={(e) => {
+                          const n = Number(e.target.value);
+                          if (!Number.isFinite(n)) return;
+                          commitDesign({
+                            ...design,
+                            gradeSamples: (design.gradeSamples ?? []).map(
+                              (s) =>
+                                s.id === selectedGradeSample.id
+                                  ? {
+                                      ...s,
+                                      rotationDeg: ((n % 360) + 360) % 360,
+                                    }
+                                  : s,
+                            ),
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        onClick={() =>
+                          commitDesign({
+                            ...design,
+                            gradeSamples: (design.gradeSamples ?? []).map(
+                              (s) =>
+                                s.id === selectedGradeSample.id
+                                  ? {
+                                      ...s,
+                                      rotationDeg:
+                                        (((s.rotationDeg || 0) - 15) % 360 +
+                                          360) %
+                                        360,
+                                    }
+                                  : s,
+                            ),
+                          })
+                        }
+                      >
+                        −15°
+                      </button>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        onClick={() =>
+                          commitDesign({
+                            ...design,
+                            gradeSamples: (design.gradeSamples ?? []).map(
+                              (s) =>
+                                s.id === selectedGradeSample.id
+                                  ? {
+                                      ...s,
+                                      rotationDeg:
+                                        ((s.rotationDeg || 0) + 15) % 360,
+                                    }
+                                  : s,
+                            ),
+                          })
+                        }
+                      >
+                        +15°
+                      </button>
+                    </div>
+                    <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
+                      Or drag the circle handle on the plan. Press R for +15°.
+                    </p>
                     <button
                       type="button"
                       className="btn danger"
@@ -3175,7 +3490,7 @@ export function CadWorkspace({
                 )}
                 {selectedObject && (
                   <FurnitureFields
-                    key={`${selectedObject.id}-${selectedObject.catalogItemId}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.rotationDeg}`}
+                    key={`${selectedObject.id}-${selectedObject.catalogItemId}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.rotationDeg}-${selectedObject.frameFinishId}-${selectedObject.fabricFinishId}`}
                     object={selectedObject}
                     unitSystem={unitSystem}
                     onRotate={(deg) =>
@@ -3198,6 +3513,14 @@ export function CadWorkspace({
                           o.id === selectedObject.id
                             ? { ...o, widthMm, depthMm }
                             : o,
+                        ),
+                      })
+                    }
+                    onFinishChange={(patch) =>
+                      commitDesign({
+                        ...design,
+                        objects: design.objects.map((o) =>
+                          o.id === selectedObject.id ? { ...o, ...patch } : o,
                         ),
                       })
                     }
@@ -3826,6 +4149,7 @@ function FurnitureFields({
   unitSystem,
   onRotate,
   onDimensions,
+  onFinishChange,
   onDiningShape,
   onDelete,
 }: {
@@ -3833,16 +4157,32 @@ function FurnitureFields({
   unitSystem: UnitSystem;
   onRotate: (deg: number) => void;
   onDimensions: (widthMm: number, depthMm: number) => void;
+  onFinishChange?: (patch: {
+    frameFinishId?: string;
+    fabricFinishId?: string;
+  }) => void;
   onDiningShape?: (shape: "rect" | "round") => void;
   onDelete: () => void;
 }) {
   const dining = isDiningSetId(object.catalogItemId);
   const diningShape = dining ? diningTableShape(object.catalogItemId) : null;
   const plan = objectPlanSizeMm(object);
+  const finishRoles = furnitureFinishRoles(object.catalogItemId);
+  const hasFinishes =
+    finishRoles.frame || finishRoles.fabric || finishRoles.canopy;
 
   return (
     <div className="stack">
       <strong>{object.name}</strong>
+      {hasFinishes && onFinishChange && (
+        <FurnitureFinishPicker
+          catalogItemId={object.catalogItemId}
+          frameFinishId={object.frameFinishId}
+          fabricFinishId={object.fabricFinishId}
+          onFrameChange={(frameFinishId) => onFinishChange({ frameFinishId })}
+          onFabricChange={(fabricFinishId) => onFinishChange({ fabricFinishId })}
+        />
+      )}
       {dining && onDiningShape && (
         <div className="field">
           <label htmlFor="dining-shape">Table shape</label>
@@ -3985,6 +4325,8 @@ function placeLibraryItem(
     depthMm: item.depthMm,
     heightMm: item.heightMm,
     parentBodyId,
+    frameFinishId: defaultFrameFinishId(item.id),
+    fabricFinishId: defaultFabricFinishId(item.id),
   };
   let layers = design.layers;
   if (!layers.some((l) => l.id === item.layerId)) {
@@ -4075,7 +4417,15 @@ function nearestPatioId(
 
 function translateDesign(
   d: DesignDocument,
-  kind: "pool" | "patio" | "building" | "cover" | "run" | "object" | "feature",
+  kind:
+    | "pool"
+    | "patio"
+    | "building"
+    | "cover"
+    | "run"
+    | "object"
+    | "feature"
+    | "gradeSample",
   id: string,
   dx: number,
   dy: number,
@@ -4148,6 +4498,14 @@ function translateDesign(
       ...d,
       features: (d.features ?? []).map((f) =>
         f.id === id ? { ...f, outline: f.outline.map(shift) } : f,
+      ),
+    };
+  }
+  if (kind === "gradeSample") {
+    return {
+      ...d,
+      gradeSamples: (d.gradeSamples ?? []).map((s) =>
+        s.id === id ? { ...s, position: shift(s.position) } : s,
       ),
     };
   }

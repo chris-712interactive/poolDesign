@@ -10,12 +10,14 @@ import {
   segmentLengthMm,
   type Building,
   type BuildingOpening,
+  type GradeSample,
   type PatioCover,
   type PlacedObject,
   type PlumbingRun,
   type PointMm,
   type PoolBody,
   type PoolFeature,
+  type RetainingSegment,
   type UnitSystem,
 } from "@pool-design/shared";
 import { type Viewport, worldToScreen } from "@/lib/cad/math";
@@ -429,6 +431,94 @@ export function drawPlacedObject(
     ctx.fill();
     ctx.stroke();
   }
+}
+
+export function drawGradeSample(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  sample: GradeSample,
+  selected: boolean,
+  unitSystem: UnitSystem,
+) {
+  const c = worldToScreen(sample.position, vp);
+  const r = selected ? 7 : 5.5;
+  const rad = ((sample.rotationDeg || 0) * Math.PI) / 180;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+  ctx.fillStyle = selected ? "#1f6b8a" : "#2a7a9a";
+  ctx.fill();
+  ctx.strokeStyle = selected ? "#0d3a4a" : "#1a5a6a";
+  ctx.lineWidth = selected ? 2.2 : 1.4;
+  ctx.stroke();
+  // Drop / rise arrow (oriented by rotationDeg)
+  ctx.save();
+  ctx.translate(c.x, c.y);
+  ctx.rotate(rad);
+  ctx.beginPath();
+  if (sample.dropMm >= 0) {
+    ctx.moveTo(0, -12);
+    ctx.lineTo(0, 14);
+    ctx.moveTo(-4, 9);
+    ctx.lineTo(0, 14);
+    ctx.lineTo(4, 9);
+  } else {
+    ctx.moveTo(0, 12);
+    ctx.lineTo(0, -14);
+    ctx.moveTo(-4, -9);
+    ctx.lineTo(0, -14);
+    ctx.lineTo(4, -9);
+  }
+  ctx.stroke();
+  ctx.restore();
+  const label =
+    sample.dropMm >= 0
+      ? `↓ ${formatLength(sample.dropMm, unitSystem)}`
+      : `↑ ${formatLength(-sample.dropMm, unitSystem)}`;
+  ctx.fillStyle = "rgba(20,32,41,0.85)";
+  ctx.font = "11px Source Sans 3, sans-serif";
+  ctx.fillText(label, c.x + 10, c.y + 4);
+
+  if (selected) {
+    const dist = 600 * vp.scale;
+    const handle = {
+      x: c.x - Math.sin(rad) * dist,
+      y: c.y - Math.cos(rad) * dist,
+    };
+    ctx.strokeStyle = "#1a5a6a";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y);
+    ctx.lineTo(handle.x, handle.y);
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(handle.x, handle.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+export function drawRetainingEdges(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  segments: RetainingSegment[],
+) {
+  if (!segments.length) return;
+  ctx.save();
+  ctx.strokeStyle = "#8a3a1a";
+  ctx.lineWidth = 3.5;
+  ctx.lineCap = "round";
+  for (const seg of segments) {
+    const a = worldToScreen(seg.a, vp);
+    const b = worldToScreen(seg.b, vp);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 export function drawPatioCover(

@@ -33,6 +33,7 @@ import {
   type MeshDescriptor,
   type SceneMaterialKey,
   type SceneSelection,
+  type TerrainDescriptor,
   type TubeDescriptor,
   type WaterBodyDescriptor,
 } from "@/lib/cad3d/buildScene";
@@ -135,6 +136,8 @@ const MATERIALS: Record<SceneMaterialKey, MatDef> = {
   pipeGas: { color: "#b89b2c", roughness: 0.5, metalness: 0.2 },
   sectionCap: { color: "#e8eeec", roughness: 0.55, metalness: 0.02 },
   sectionWater: { color: "#1a7fa3", roughness: 0.1, metalness: 0.1 },
+  fill: { color: "#a89070", roughness: 0.95, metalness: 0 },
+  retaining: { color: "#8a8074", roughness: 0.85, metalness: 0.05 },
 };
 
 type SceneTextures = {
@@ -337,6 +340,56 @@ function SelectableMaterial({
       clippingPlanes={clippingPlanes}
       clipShadows={clippingPlanes.length > 0}
     />
+  );
+}
+
+function TerrainMesh({ desc }: { desc: TerrainDescriptor }) {
+  const geometry = useMemo(() => {
+    const { cols, rows, stepMm, originMm, heightsM } = desc;
+    const stepYMm = desc.stepYMm ?? stepMm;
+    const positions = new Float32Array(cols * rows * 3);
+    const uvs = new Float32Array(cols * rows * 2);
+    for (let j = 0; j < rows; j++) {
+      for (let i = 0; i < cols; i++) {
+        const idx = j * cols + i;
+        const plan = {
+          x: originMm.x + i * stepMm,
+          y: originMm.y + j * stepYMm,
+        };
+        const xz = planToWorldXZ(plan);
+        const y = heightsM[idx] ?? 0;
+        positions[idx * 3] = xz.x;
+        positions[idx * 3 + 1] = y;
+        positions[idx * 3 + 2] = xz.z;
+        uvs[idx * 2] = i / Math.max(1, cols - 1);
+        uvs[idx * 2 + 1] = j / Math.max(1, rows - 1);
+      }
+    }
+    const indices: number[] = [];
+    for (let j = 0; j < rows - 1; j++) {
+      for (let i = 0; i < cols - 1; i++) {
+        const a = j * cols + i;
+        const b = a + 1;
+        const c = a + cols;
+        const d = c + 1;
+        // Winding chosen for plan→world flip (both axes negated).
+        indices.push(a, b, c, b, d, c);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    return geo;
+  }, [desc]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  return (
+    <mesh geometry={geometry} receiveShadow castShadow={false}>
+      <SelectableMaterial material={desc.material} selected={false} />
+    </mesh>
   );
 }
 
@@ -851,7 +904,11 @@ function SceneMeshes({
   return (
     <>
       {meshes.map((m) => {
-        const selected = selectionEquals(m.select, selection);
+        const selected =
+          "select" in m ? selectionEquals(m.select, selection) : false;
+        if (m.kind === "terrain") {
+          return <TerrainMesh key={m.id} desc={m} />;
+        }
         if (m.kind === "extrude") {
           return (
             <ExtrudeMesh

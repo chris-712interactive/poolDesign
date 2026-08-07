@@ -5,11 +5,13 @@ export type CatalogUnit =
   | "lf"
   | "sf"
   | "sy"
+  | "cy"
   | "hr"
   | "lb"
   | "kg"
   | "m"
-  | "m2";
+  | "m2"
+  | "m3";
 
 export type CatalogCategory =
   | "structure"
@@ -111,6 +113,26 @@ export const DEFAULT_CATALOG: CatalogItem[] = [
     unit: "sf",
     unitPriceCents: 1400,
     levels: ["residential", "commercial", "water_park"],
+  },
+  {
+    id: "fill_dirt",
+    name: "Fill dirt / engineered fill",
+    category: "hardscape",
+    unit: "cy",
+    unitPriceCents: 8500,
+    levels: ["residential", "commercial", "water_park"],
+    description:
+      "Compacted fill under patio to bring deck to house FFE over falling grade",
+  },
+  {
+    id: "retaining_wall",
+    name: "Retaining wall",
+    category: "hardscape",
+    unit: "lf",
+    unitPriceCents: 18500,
+    levels: ["residential", "commercial", "water_park"],
+    description:
+      "Retaining wall along patio edges where existing grade drop exceeds threshold",
   },
   {
     id: "pergola_structure",
