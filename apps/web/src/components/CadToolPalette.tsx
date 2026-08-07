@@ -30,6 +30,7 @@ type Props = {
   waterKind: WaterBodyKind;
   coverKind: PatioCoverKind;
   openingKind: BuildingOpeningKind;
+  openingStory: number;
   houseStories: number;
   placeItemId: string | null;
   placeLibrary: PlaceableItem[];
@@ -50,6 +51,7 @@ type Props = {
   onWaterKind: (kind: WaterBodyKind) => void;
   onCoverKind: (kind: PatioCoverKind) => void;
   onOpeningKind: (kind: BuildingOpeningKind) => void;
+  onOpeningStory: (n: number) => void;
   onHouseStories: (n: number) => void;
   onPlaceItemId: (id: string) => void;
   onOrtho: () => void;
@@ -66,6 +68,7 @@ export function CadToolPalette({
   waterKind,
   coverKind,
   openingKind,
+  openingStory,
   houseStories,
   placeItemId,
   placeLibrary,
@@ -86,6 +89,7 @@ export function CadToolPalette({
   onWaterKind,
   onCoverKind,
   onOpeningKind,
+  onOpeningStory,
   onHouseStories,
   onPlaceItemId,
   onOrtho,
@@ -258,7 +262,9 @@ export function CadToolPalette({
                               textTransform: "capitalize",
                             }}
                           >
-                            {item.category} · {formatMoney(item.unitPriceCents)}
+                            {item.category === "furniture"
+                              ? "Layout only · not billed"
+                              : `${item.category} · ${formatMoney(item.unitPriceCents)}`}
                           </div>
                         </button>
                       ))}
@@ -535,31 +541,59 @@ export function CadToolPalette({
                   )}
 
                   {group.id === "openings" && (
-                    <div
-                      className="cad-kind-toggle cad-kind-toggle-3"
-                      role="group"
-                      aria-label="Opening type"
-                    >
-                      {(
-                        [
-                          ["door", "Door"],
-                          ["sliding_door", "Sliding"],
-                          ["window", "Window"],
-                        ] as const
-                      ).map(([id, label]) => (
-                        <button
-                          key={id}
-                          type="button"
-                          className={`cad-kind-btn ${tool === "opening" && openingKind === id ? "active" : ""}`}
-                          onClick={() => {
-                            onOpeningKind(id);
-                            activateDraw("opening");
+                    <>
+                      <div
+                        className="cad-kind-toggle cad-kind-toggle-3"
+                        role="group"
+                        aria-label="Opening type"
+                      >
+                        {(
+                          [
+                            ["door", "Door"],
+                            ["sliding_door", "Sliding"],
+                            ["window", "Window"],
+                          ] as const
+                        ).map(([id, label]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            className={`cad-kind-btn ${tool === "opening" && openingKind === id ? "active" : ""}`}
+                            onClick={() => {
+                              onOpeningKind(id);
+                              activateDraw("opening");
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="field" style={{ margin: 0 }}>
+                        <label htmlFor="opening-story-tool">Story</label>
+                        <input
+                          id="opening-story-tool"
+                          type="number"
+                          min={1}
+                          max={12}
+                          step={1}
+                          value={openingStory}
+                          onChange={(e) => {
+                            const n = Number(e.target.value);
+                            if (Number.isFinite(n)) {
+                              onOpeningStory(
+                                Math.max(1, Math.min(12, Math.round(n))),
+                              );
+                            }
                           }}
+                        />
+                        <p
+                          className="muted"
+                          style={{ margin: "0.25rem 0 0", fontSize: "0.75rem" }}
                         >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+                          1 = ground floor. Clamped to the house story count
+                          when placed.
+                        </p>
+                      </div>
+                    </>
                   )}
                 </div>
               )}

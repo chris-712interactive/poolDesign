@@ -1,4 +1,6 @@
+import type { CatalogCategory, CatalogUnit } from "./catalog";
 import type { DesignLevel } from "./design-level";
+import { objectPlanSizeMm } from "./object-library";
 import type { UnitSystem } from "./units";
 
 export type PointMm = { x: number; y: number };
@@ -6,6 +8,19 @@ export type PointMm = { x: number; y: number };
 export type DesignLayerId = string;
 
 export type WaterBodyKind = "pool" | "spa";
+
+/** How the pool floor arrives at a depth station from the previous one. */
+export type DepthTransition = "smooth" | "dropoff";
+
+/** Depth break along the pool's shallow→deep axis. */
+export type DepthStation = {
+  id: string;
+  /** 0–1 along the depth axis (0 = shallow-axis start). */
+  t: number;
+  depthMm: number;
+  /** Default: smooth curved transition. */
+  transition?: DepthTransition;
+};
 
 export type PoolBody = {
   id: string;
@@ -23,10 +38,17 @@ export type PoolBody = {
   /** Spa shell / wall thickness (mm). Outside outline insets by this for waterline. */
   wallThicknessMm?: number;
   /**
-   * Spa shell height above surrounding deck/grade (mm).
-   * Independent of water depth — varies by customer preference.
+   * Spa shell height above the finished patio/deck surface (mm).
+   * Authorable to any ≥ 0 value (0 = rim flush with patio, not below it).
    */
   shellHeightMm?: number;
+  /**
+   * Authorable depth profile (≥2 stations). When omitted, shallow/deep +
+   * default long-axis are used.
+   */
+  depthStations?: DepthStation[];
+  /** Unit direction of the depth axis in plan (shallow → deep). */
+  depthAxis?: PointMm;
 };
 
 export type PatioRegion = {
@@ -37,6 +59,17 @@ export type PatioRegion = {
 };
 
 export type PatioCoverKind = "pergola" | "roof";
+
+/** Post + footing under a patio cover / pergola */
+export type CoverSupport = {
+  id: string;
+  /** Plan center of the post / footing */
+  position: PointMm;
+  /** Post square size (mm). Defaults to 6×6. */
+  postSizeMm?: number;
+  /** Footing square size (mm). Defaults to 16×16. */
+  footingSizeMm?: number;
+};
 
 /** Shade structure over a patio / deck (pergola or solid roof) */
 export type PatioCover = {
@@ -49,6 +82,8 @@ export type PatioCover = {
   patioId?: string;
   /** Structure height above deck (mm) */
   heightMm?: number;
+  /** Structural posts + footings (movable after placement) */
+  supports?: CoverSupport[];
 };
 
 /** Typical pergola post height ~8' */
@@ -71,6 +106,11 @@ export type BuildingOpening = {
   widthMm: number;
   /** Rough opening height (elevation / schedule) */
   heightMm: number;
+  /**
+   * 1-based story the opening sits on (1 = ground floor).
+   * Defaults to 1 when missing. Clamped to the building's story count.
+   */
+  story?: number;
 };
 
 /** Standard exterior door 36″ × 80″ */
@@ -142,9 +182,14 @@ export type PlacedObject = {
   position: PointMm;
   rotationDeg: number;
   layerId: DesignLayerId;
-  /** Footprint snapshot at placement (mm) */
+  /**
+   * Footprint snapshot at placement (mm).
+   * For dining sets this is the **tabletop** size; plan footprint adds chair clearance.
+   */
   widthMm: number;
   depthMm: number;
+  /** Vertical size for 3D (mm). Filled from catalog when missing. */
+  heightMm?: number;
   /** Optional link to a pool/spa body (spa package equipment) */
   parentBodyId?: string;
 };
@@ -181,6 +226,28 @@ export type PoolFeature = {
   depthMm?: number;
 };
 
+/** User-authored estimate line (not derived from geometry). */
+export type EstimateCustomLine = {
+  id: string;
+  name: string;
+  category: CatalogCategory | "other";
+  unit: CatalogUnit;
+  quantity: number;
+  /** Sell price in USD cents */
+  unitPriceCents: number;
+  note?: string;
+};
+
+/**
+ * Estimate adjustments persisted with the design.
+ * Auto takeoff is recomputed; these filter/add on top.
+ */
+export type DesignEstimate = {
+  /** Stable keys of auto-generated lines the user removed */
+  removedLineKeys?: string[];
+  customLines?: EstimateCustomLine[];
+};
+
 export type DesignDocument = {
   version: 1;
   designLevel: DesignLevel;
@@ -194,6 +261,8 @@ export type DesignDocument = {
   objects: PlacedObject[];
   plumbingRuns: PlumbingRun[];
   features: PoolFeature[];
+  /** Optional BOM edits (removed auto lines + custom adds) */
+  estimate?: DesignEstimate;
 };
 
 export function emptyDesignDocument(
@@ -227,6 +296,7 @@ export function emptyDesignDocument(
     objects: [],
     plumbingRuns: [],
     features: [],
+    estimate: { removedLineKeys: [], customLines: [] },
   };
 }
 
@@ -566,8 +636,9 @@ export function pointAtRectDepth(
 
 /** Axis-aligned footprint corners for a placed object (ignores rotation). */
 export function objectFootprintAxis(obj: PlacedObject): PointMm[] {
-  const hw = obj.widthMm / 2;
-  const hd = obj.depthMm / 2;
+  const { widthMm, depthMm } = objectPlanSizeMm(obj);
+  const hw = widthMm / 2;
+  const hd = depthMm / 2;
   return [
     { x: obj.position.x - hw, y: obj.position.y - hd },
     { x: obj.position.x + hw, y: obj.position.y - hd },
@@ -578,8 +649,9 @@ export function objectFootprintAxis(obj: PlacedObject): PointMm[] {
 
 /** Rotated footprint corners around object center. */
 export function objectFootprint(obj: PlacedObject): PointMm[] {
-  const hw = obj.widthMm / 2;
-  const hd = obj.depthMm / 2;
+  const { widthMm, depthMm } = objectPlanSizeMm(obj);
+  const hw = widthMm / 2;
+  const hd = depthMm / 2;
   const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);

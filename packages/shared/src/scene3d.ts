@@ -1,0 +1,302 @@
+import {
+  DEFAULT_PATIO_ROOF_HEIGHT_MM,
+  DEFAULT_PERGOLA_HEIGHT_MM,
+  DEFAULT_SPA_SHELL_HEIGHT_MM,
+  DEFAULT_SUNSHELF_DEPTH_MM,
+  type BuildingOpeningKind,
+  type DesignDocument,
+  type PointMm,
+  type PoolBody,
+} from "./design-model";
+import { getPlaceableItem, isWaterFixtureId } from "./object-library";
+import { isPadEquipmentId } from "./plumbing-route";
+import {
+  insideOutlineFromOutside,
+  outlineBounds,
+  rectangleFrame,
+  spaWallThicknessMm,
+} from "./spa-defaults";
+
+/** ~9′ per building story */
+export const STORY_HEIGHT_MM = 2743.2;
+/** Thin patio / deck slab */
+export const PATIO_SLAB_THICKNESS_MM = 100;
+/** Pool shell lip thickness above grade */
+export const POOL_LIP_THICKNESS_MM = 150;
+/** Structural pool wall thickness for hollow 3D shell */
+export const POOL_WALL_THICKNESS_MM = 200;
+/** Cover roof slab thickness */
+export const COVER_SLAB_THICKNESS_MM = 150;
+
+export function mmToMeters(mm: number): number {
+  return mm / 1000;
+}
+
+export function metersToMm(m: number): number {
+  return m * 1000;
+}
+
+/**
+ * Plan point → Three.js XZ (Y-up world).
+ * CAD plan matches screen (X right, Y down). Mirror X so left/right matches the
+ * 2D canvas when viewed in orbit (otherwise the yard appears flipped).
+ * Map: planX → -x, planY → -z.
+ */
+export function planToWorldXZ(p: PointMm): { x: number; z: number } {
+  return { x: mmToMeters(-p.x), z: mmToMeters(-p.y) };
+}
+
+export type DesignBoundsMm = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  cx: number;
+  cy: number;
+  width: number;
+  height: number;
+};
+
+/** Axis-aligned bounds of all design footprints (mm). Empty design → unit box. */
+export function designBoundsMm(design: DesignDocument): DesignBoundsMm {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  const include = (outline: PointMm[]) => {
+    for (const p of outline) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+  };
+
+  for (const b of design.buildings ?? []) include(b.outline);
+  for (const p of design.patios ?? []) include(p.outline);
+  for (const c of design.patioCovers ?? []) include(c.outline);
+  for (const p of design.poolBodies ?? []) include(p.outline);
+  for (const f of design.features ?? []) include(f.outline);
+  for (const o of design.objects ?? []) {
+    const hw = o.widthMm / 2;
+    const hd = o.depthMm / 2;
+    include([
+      { x: o.position.x - hw, y: o.position.y - hd },
+      { x: o.position.x + hw, y: o.position.y + hd },
+    ]);
+  }
+
+  if (!Number.isFinite(minX)) {
+    return {
+      minX: 0,
+      minY: 0,
+      maxX: 10000,
+      maxY: 10000,
+      cx: 5000,
+      cy: 5000,
+      width: 10000,
+      height: 10000,
+    };
+  }
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    cx: (minX + maxX) / 2,
+    cy: (minY + maxY) / 2,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  };
+}
+
+export function buildingHeightMm(stories: number): number {
+  return Math.max(1, stories || 1) * STORY_HEIGHT_MM;
+}
+
+/** Typical window sill height above finished floor (~36″). */
+export const WINDOW_SILL_ABOVE_FLOOR_MM = 914.4;
+
+/** Clamp opening story to 1..buildingStories. */
+export function clampOpeningStory(
+  story: number | undefined,
+  buildingStories: number,
+): number {
+  const max = Math.max(1, buildingStories || 1);
+  const n = story == null || !Number.isFinite(story) ? 1 : Math.round(story);
+  return Math.min(max, Math.max(1, n));
+}
+
+/**
+ * Bottom of the opening above grade (mm).
+ * Doors sit on the story floor; windows sit on a sill above that floor.
+ */
+export function openingSillMm(
+  kind: BuildingOpeningKind,
+  story: number | undefined,
+  buildingStories = 1,
+): number {
+  const s = clampOpeningStory(story, buildingStories);
+  const floorMm = (s - 1) * STORY_HEIGHT_MM;
+  if (kind === "window") return floorMm + WINDOW_SILL_ABOVE_FLOOR_MM;
+  return floorMm;
+}
+
+export function poolAverageDepthMm(body: PoolBody): number {
+  return (body.depthShallowMm + body.depthDeepMm) / 2;
+}
+
+export function coverHeightMm(kind: "pergola" | "roof", heightMm?: number): number {
+  if (heightMm != null && heightMm > 0) return heightMm;
+  return kind === "roof"
+    ? DEFAULT_PATIO_ROOF_HEIGHT_MM
+    : DEFAULT_PERGOLA_HEIGHT_MM;
+}
+
+/**
+ * Default vertical size for placed catalog objects.
+ * Prefers catalog `heightMm`, then category fallbacks.
+ */
+export function defaultObjectHeightMm(catalogItemId: string): number {
+  const item = getPlaceableItem(catalogItemId);
+  if (item?.heightMm && item.heightMm > 0) return item.heightMm;
+  if (isWaterFixtureId(catalogItemId)) {
+    if (catalogItemId.includes("light")) return 80;
+    return 120;
+  }
+  if (catalogItemId === "equip_pad") return 150;
+  if (isPadEquipmentId(catalogItemId)) return 800;
+  switch (item?.category) {
+    case "furniture":
+      return 900;
+    case "hardscape":
+      return 450;
+    case "amenity":
+      return 1100;
+    case "attraction":
+      return 1500;
+    case "equipment":
+      return 800;
+    default:
+      return 900;
+  }
+}
+
+/** Resolve height for a placed object (instance override → catalog → fallback). */
+export function objectHeightMm(obj: {
+  catalogItemId: string;
+  heightMm?: number;
+}): number {
+  if (obj.heightMm != null && obj.heightMm > 0) return obj.heightMm;
+  return defaultObjectHeightMm(obj.catalogItemId);
+}
+
+export function spaShellParams(body: PoolBody): {
+  wallMm: number;
+  shellHeightMm: number;
+  insideOutline: PointMm[];
+  waterDepthMm: number;
+} {
+  const wallMm = spaWallThicknessMm(body);
+  return {
+    wallMm,
+    // Preserve explicit 0 (flush with deck); only default when unset.
+    shellHeightMm: body.shellHeightMm ?? DEFAULT_SPA_SHELL_HEIGHT_MM,
+    insideOutline: insideOutlineFromOutside(body.outline, wallMm),
+    waterDepthMm: body.depthShallowMm,
+  };
+}
+
+export function featureDepthMm(
+  kind: "steps" | "bench" | "sunshelf",
+  depthMm?: number,
+): number {
+  if (kind === "sunshelf") return depthMm ?? DEFAULT_SUNSHELF_DEPTH_MM;
+  if (kind === "bench") return depthMm ?? 450;
+  return depthMm ?? 600;
+}
+
+/** Typical residential pool step riser (~12″). */
+export const STANDARD_STEP_RISER_MM = 304.8;
+/** Typical residential pool step tread depth (~12″). */
+export const STANDARD_STEP_TREAD_MM = 304.8;
+/** Minimum walkway width across the steps (~4′). */
+export const DEFAULT_STEP_WIDTH_MM = 1219.2;
+
+export function stepsRiserCount(riserCount?: number): number {
+  if (riserCount == null || !Number.isFinite(riserCount)) return 3;
+  return Math.min(12, Math.max(1, Math.round(riserCount)));
+}
+
+/** Total run (into the pool) for a step assembly. */
+export function stepsRunMm(riserCount?: number): number {
+  return stepsRiserCount(riserCount) * STANDARD_STEP_TREAD_MM;
+}
+
+/**
+ * Size a steps footprint: across-width ≥ 4′, run = risers × tread.
+ * Preserves center; aligns the longer drawn side as the walkway width.
+ */
+export function applyStepsStandardFootprint(
+  outline: PointMm[],
+  riserCount?: number,
+): PointMm[] {
+  const runMm = stepsRunMm(riserCount);
+  const frame = rectangleFrame(outline);
+  const b = outlineBounds(outline);
+  const center = frame?.center ?? { x: b.cx, y: b.cy };
+  const across = Math.max(
+    DEFAULT_STEP_WIDTH_MM,
+    frame ? Math.max(frame.widthMm, frame.lengthMm) : Math.max(b.width, b.height),
+  );
+  let u = frame?.axisWidth ?? { x: 1, y: 0 };
+  let v = frame?.axisLength ?? { x: 0, y: 1 };
+  if (frame && frame.lengthMm > frame.widthMm) {
+    u = frame.axisLength;
+    v = frame.axisWidth;
+  }
+  // Ensure CCW-ish: u × v > 0
+  if (u.x * v.y - u.y * v.x < 0) {
+    v = { x: -v.x, y: -v.y };
+  }
+  const hw = across / 2;
+  const hl = runMm / 2;
+  return [
+    { x: center.x - u.x * hw - v.x * hl, y: center.y - u.y * hw - v.y * hl },
+    { x: center.x + u.x * hw - v.x * hl, y: center.y + u.y * hw - v.y * hl },
+    { x: center.x + u.x * hw + v.x * hl, y: center.y + u.y * hw + v.y * hl },
+    { x: center.x - u.x * hw + v.x * hl, y: center.y - u.y * hw + v.y * hl },
+  ];
+}
+
+/** One tread strip (0 = top/entry) along the steps run axis. */
+export function stepsTreadOutline(
+  outline: PointMm[],
+  stepIndex: number,
+  stepCount: number,
+): PointMm[] {
+  const n = Math.max(1, stepCount);
+  const s = Math.min(n - 1, Math.max(0, stepIndex));
+  const frame = rectangleFrame(outline);
+  if (!frame) return outline;
+  // After standard sizing, the shorter side is the run (into pool).
+  const runIsWidth = frame.widthMm <= frame.lengthMm;
+  const acrossMm = runIsWidth ? frame.lengthMm : frame.widthMm;
+  const runMm = runIsWidth ? frame.widthMm : frame.lengthMm;
+  const u = runIsWidth ? frame.axisLength : frame.axisWidth;
+  const v = runIsWidth ? frame.axisWidth : frame.axisLength;
+  const t0 = s / n;
+  const t1 = (s + 1) / n;
+  const along0 = -runMm / 2 + runMm * t0;
+  const along1 = -runMm / 2 + runMm * t1;
+  const hw = acrossMm / 2;
+  const c = frame.center;
+  return [
+    { x: c.x + u.x * -hw + v.x * along0, y: c.y + u.y * -hw + v.y * along0 },
+    { x: c.x + u.x * hw + v.x * along0, y: c.y + u.y * hw + v.y * along0 },
+    { x: c.x + u.x * hw + v.x * along1, y: c.y + u.y * hw + v.y * along1 },
+    { x: c.x + u.x * -hw + v.x * along1, y: c.y + u.y * -hw + v.y * along1 },
+  ];
+}

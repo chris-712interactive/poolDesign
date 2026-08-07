@@ -308,6 +308,28 @@ textarea {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cad-canvas-toolbar {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.cad-mode-toggle {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.cad-mode-toggle .btn {
+  padding: 0.35rem 0.85rem;
+  min-width: 3rem;
+}
+
+.cad-mode-note {
+  font-size: 0.85rem;
 }
 
 .cad-canvas-wrap {
@@ -317,15 +339,120 @@ textarea {
   border-radius: 14px;
   overflow: hidden;
   flex: 1;
-  min-height: calc(100vh - 160px);
+  min-height: calc(100vh - 200px);
+}
+
+.cad-canvas-wrap-3d {
+  background: #c5d4dc;
+  cursor: default;
 }
 
 .cad-canvas-wrap canvas {
   width: 100%;
   height: 100%;
-  min-height: calc(100vh - 160px);
+  min-height: calc(100vh - 200px);
   display: block;
   cursor: crosshair;
+}
+
+.cad-canvas-wrap-3d canvas {
+  cursor: grab;
+  min-height: calc(100vh - 200px);
+}
+
+.cad-scene3d {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: calc(100vh - 200px);
+}
+
+.cad-scene3d-loading {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 200px);
+  background: #c5d4dc;
+}
+
+.cad-scene3d-hint {
+  position: absolute;
+  left: 0.75rem;
+  bottom: 0.65rem;
+  right: 0.75rem;
+  pointer-events: none;
+  font-size: 0.8rem;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.7);
+}
+
+.cad-scene3d-toolbar {
+  position: absolute;
+  top: 0.65rem;
+  left: 0.65rem;
+  right: 0.65rem;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.cad-scene3d-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  pointer-events: auto;
+}
+
+.cad-scene3d-tool-btn {
+  padding: 0.28rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.cad-scene3d-tool-btn.active {
+  background: #1f5f72;
+  color: #fff;
+  border-color: #1f5f72;
+}
+
+.cad-scene3d-label {
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(18, 28, 32, 0.78);
+  color: #f4f7f8;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  user-select: none;
+}
+
+.cad-scene3d-cut-slider {
+  position: absolute;
+  left: 0.65rem;
+  top: 3.1rem;
+  z-index: 2;
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.35rem 0.65rem;
+  box-shadow: 0 1px 4px rgba(20, 32, 41, 0.08);
+}
+
+.cad-scene3d-cut-slider label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--panel-ink);
+}
+
+.cad-scene3d-cut-slider input[type="range"] {
+  width: 140px;
 }
 
 .cad-right-rail {
@@ -334,6 +461,7 @@ textarea {
   gap: 0.75rem;
   min-height: 0;
   max-height: calc(100vh - 110px);
+  height: calc(100vh - 110px);
   overflow: hidden;
 }
 
@@ -341,7 +469,9 @@ textarea {
 .cad-tools-scroll {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -390,6 +520,7 @@ textarea {
   padding: 0.2rem;
   background: #e8eef2;
   border-radius: 12px;
+  flex-shrink: 0;
 }
 
 .cad-side-tab {
@@ -418,8 +549,15 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  flex-shrink: 0;
-  min-height: auto;
+}
+
+/* Properties / Layers share cad-tab-panel — keep them scrollable in the rail. */
+.cad-tools-scroll.cad-tab-panel {
+  flex: 1 1 auto;
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* Select / Measure: equal 50/50 width of the tools rail. */
@@ -671,4 +809,105 @@ textarea {
 .error {
   color: var(--danger);
   font-size: 0.92rem;
+}
+
+.patio-finish-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.patio-pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.patio-pattern-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+  padding: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.patio-pattern-btn:hover {
+  border-color: #9aabb4;
+  background: #f7fafb;
+}
+
+.patio-pattern-btn.is-selected {
+  border-color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.patio-pattern-preview {
+  display: block;
+  border-radius: 6px;
+  overflow: hidden;
+  line-height: 0;
+  border: 1px solid rgba(20, 32, 41, 0.08);
+}
+
+.patio-pattern-preview svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.patio-pattern-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.patio-color-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.patio-color-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.55rem 0.35rem 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.patio-color-btn:hover {
+  border-color: #9aabb4;
+  background: #f7fafb;
+}
+
+.patio-color-btn.is-selected {
+  border-color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.patio-color-swatch {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(20, 32, 41, 0.18);
+  flex-shrink: 0;
+}
+
+.patio-color-label {
+  font-size: 0.78rem;
+  font-weight: 600;
 }

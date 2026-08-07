@@ -1,7 +1,12 @@
 import {
   clampOpeningT,
+  depthProfileForBody,
+  depthStationPlanPoint,
+  diningTableShape,
   formatLength,
+  isDiningSetId,
   objectFootprint,
+  objectPlanSizeMm,
   segmentLengthMm,
   type Building,
   type BuildingOpening,
@@ -9,6 +14,7 @@ import {
   type PlacedObject,
   type PlumbingRun,
   type PointMm,
+  type PoolBody,
   type PoolFeature,
   type UnitSystem,
 } from "@pool-design/shared";
@@ -91,6 +97,65 @@ export function drawPolygon(
   }
 }
 
+/** Depth axis + station handles for a selected pool. */
+export function drawDepthProfile(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  body: PoolBody,
+  unitSystem: UnitSystem,
+) {
+  const profile = depthProfileForBody(body);
+  if (profile.stations.length < 2) return;
+  const start = depthStationPlanPoint(body.outline, profile.axis, 0);
+  const end = depthStationPlanPoint(body.outline, profile.axis, 1);
+  const a = worldToScreen(start, vp);
+  const b = worldToScreen(end, vp);
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(15, 92, 74, 0.65)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  for (let i = 0; i < profile.stations.length; i++) {
+    const s = profile.stations[i];
+    const p = depthStationPlanPoint(body.outline, profile.axis, s.t);
+    const c = worldToScreen(p, vp);
+    const isEnd = i === 0 || i === profile.stations.length - 1;
+    ctx.fillStyle = s.transition === "dropoff" ? "#b45309" : "#0f5c4a";
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (isEnd) {
+      ctx.rect(c.x - 6, c.y - 6, 12, 12);
+    } else {
+      ctx.arc(c.x, c.y, 6, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.stroke();
+
+    const label = formatLength(s.depthMm, unitSystem);
+    ctx.font = "600 11px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#142029";
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 3;
+    ctx.strokeText(label, c.x + 10, c.y - 8);
+    ctx.fillText(label, c.x + 10, c.y - 8);
+    if (i === 0) {
+      ctx.fillStyle = "#0f5c4a";
+      ctx.fillText("S", c.x + 10, c.y + 8);
+    } else if (i === profile.stations.length - 1) {
+      ctx.fillStyle = "#0f5c4a";
+      ctx.fillText("D", c.x + 10, c.y + 8);
+    }
+  }
+  ctx.restore();
+}
+
 export function drawRun(
   ctx: CanvasRenderingContext2D,
   vp: Viewport,
@@ -163,6 +228,45 @@ export function drawPlacedObject(
   preview = false,
 ) {
   const center = worldToScreen(obj.position, vp);
+
+  if (obj.catalogItemId === "person_scale") {
+    const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
+    const w = obj.widthMm * vp.scale;
+    const d = obj.depthMm * vp.scale;
+    const headR = Math.max(3, w * 0.22);
+    ctx.save();
+    ctx.translate(center.x, center.y);
+    ctx.rotate(rad);
+    ctx.fillStyle = selected || preview
+      ? "rgba(61,107,138,0.55)"
+      : "rgba(61,107,138,0.4)";
+    ctx.strokeStyle = selected || preview ? "#1f5f8a" : "#3d6b8a";
+    ctx.lineWidth = selected ? 2.2 : 1.4;
+    if (preview) ctx.setLineDash([5, 4]);
+    // Shoulders / torso
+    ctx.beginPath();
+    ctx.ellipse(0, 0, w * 0.42, d * 0.38, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Head
+    ctx.beginPath();
+    ctx.arc(0, -d * 0.55, headR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Facing tick
+    ctx.beginPath();
+    ctx.moveTo(0, d * 0.15);
+    ctx.lineTo(0, d * 0.55);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    if (selected || preview) {
+      ctx.fillStyle = "rgba(20,32,41,0.8)";
+      ctx.font = "10px Source Sans 3, sans-serif";
+      ctx.fillText("5′8″", center.x + w * 0.35, center.y + 3);
+    }
+    return;
+  }
 
   if (isWaterFixture(obj)) {
     const r = Math.max(4, Math.min(obj.widthMm, obj.depthMm) * vp.scale * 0.45);
@@ -256,6 +360,7 @@ export function drawPlacedObject(
   });
   ctx.closePath();
   const pad = isPadEquipment(obj);
+  const dining = isDiningSetId(obj.catalogItemId);
   ctx.fillStyle = pad
     ? preview
       ? "rgba(70,90,110,0.22)"
@@ -275,13 +380,37 @@ export function drawPlacedObject(
   if (preview) ctx.setLineDash([5, 4]);
   ctx.stroke();
   ctx.setLineDash([]);
+
+  // Dining: draw tabletop inside the larger chair-clearance footprint.
+  if (dining) {
+    const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
+    const shape = diningTableShape(obj.catalogItemId);
+    ctx.save();
+    ctx.translate(center.x, center.y);
+    ctx.rotate(rad);
+    ctx.strokeStyle = selected || preview ? "#6a3a0a" : "#a06028";
+    ctx.lineWidth = selected ? 1.8 : 1.2;
+    if (shape === "round") {
+      const r = (Math.max(obj.widthMm, obj.depthMm) / 2) * vp.scale;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      const hw = (obj.widthMm / 2) * vp.scale;
+      const hd = (obj.depthMm / 2) * vp.scale;
+      ctx.strokeRect(-hw, -hd, hw * 2, hd * 2);
+    }
+    ctx.restore();
+  }
+
   ctx.fillStyle = "rgba(20,32,41,0.8)";
   ctx.font = "11px Source Sans 3, sans-serif";
   ctx.fillText(obj.name, center.x - 24, center.y + 4);
 
   if (selected && !preview) {
     const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
-    const dist = obj.depthMm / 2 + 400;
+    const plan = objectPlanSizeMm(obj);
+    const dist = plan.depthMm / 2 + 400;
     const handle = worldToScreen(
       {
         x: obj.position.x - Math.sin(rad) * dist,
@@ -308,18 +437,24 @@ export function drawPatioCover(
   cover: PatioCover,
   selected: boolean,
   unitSystem: UnitSystem,
+  selectedSupportId?: string | null,
 ) {
   const isPergola = cover.kind !== "roof";
   drawPolygon(
     ctx,
     vp,
     cover.outline,
-    selected,
-    selected ? "#6b4f2a" : isPergola ? "#8a6a3a" : "#5c5346",
-    isPergola ? "rgba(138,106,58,0.18)" : "rgba(92,83,70,0.32)",
+    selected && !selectedSupportId,
+    selected && !selectedSupportId
+      ? "#6b4f2a"
+      : isPergola
+        ? "#8a6a3a"
+        : "#5c5346",
+    // Solid roofs read opaque on plan; pergolas stay light lattice fill.
+    isPergola ? "rgba(138,106,58,0.18)" : "rgba(70,64,56,0.55)",
     unitSystem,
     true,
-    selected,
+    selected && !selectedSupportId,
   );
   // Pergola lattice hint
   if (isPergola && cover.outline.length >= 4) {
@@ -348,6 +483,31 @@ export function drawPatioCover(
     }
     ctx.restore();
   }
+
+  for (const support of cover.supports ?? []) {
+    const foot =
+      support.footingSizeMm && support.footingSizeMm > 0
+        ? support.footingSizeMm
+        : 406.4;
+    const post =
+      support.postSizeMm && support.postSizeMm > 0
+        ? support.postSizeMm
+        : 152.4;
+    const sc = worldToScreen(support.position, vp);
+    const footPx = Math.max(6, (foot * vp.scale) / 2);
+    const postPx = Math.max(3, (post * vp.scale) / 2);
+    const active = selectedSupportId === support.id;
+    ctx.fillStyle = active ? "rgba(31,95,138,0.35)" : "rgba(160,150,130,0.55)";
+    ctx.strokeStyle = active ? "#1f5f8a" : "#5c5346";
+    ctx.lineWidth = active ? 2 : 1.25;
+    ctx.beginPath();
+    ctx.rect(sc.x - footPx, sc.y - footPx, footPx * 2, footPx * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = active ? "#3d6f8f" : "#6b5340";
+    ctx.fillRect(sc.x - postPx, sc.y - postPx, postPx * 2, postPx * 2);
+  }
+
   if (cover.outline.length) {
     let cx = 0;
     let cy = 0;
@@ -518,6 +678,15 @@ export function drawBuildingOpening(
     ctx.beginPath();
     ctx.arc(sc.x, sc.y, 4, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  const story = opening.story ?? 1;
+  if (story > 1) {
+    ctx.fillStyle = selected ? stroke : "rgba(20,32,41,0.72)";
+    ctx.font = "600 10px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(`L${story}`, sc.x, sc.y - 6);
   }
 }
 

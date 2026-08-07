@@ -74,29 +74,103 @@ export function formatLength(mm: number, unitSystem: UnitSystem): string {
   return `${sign}${feet}'-${inchPart}"`;
 }
 
-/** Parse simple length input into mm (supports 10'6", 10'6.5", 3.2m, 3200mm, 12.5") */
-export function parseLengthToMm(input: string, unitSystem: UnitSystem): number | null {
-  const raw = input.trim().toLowerCase().replace(/\s+/g, "");
-  if (!raw) return null;
+/** Parse a mixed-number inch token: 8, 8.5, 8 1/2, 1/2 */
+function parseInchToken(token: string): number | null {
+  const t = token.trim();
+  if (!t) return null;
+  const mixed = t.match(/^(-?\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) {
+    const whole = parseInt(mixed[1], 10);
+    const numer = parseInt(mixed[2], 10);
+    const denom = parseInt(mixed[3], 10);
+    if (!denom) return null;
+    const sign = whole < 0 ? -1 : 1;
+    return sign * (Math.abs(whole) + numer / denom);
+  }
+  const frac = t.match(/^(-?\d+)\s*\/\s*(\d+)$/);
+  if (frac) {
+    const numer = parseInt(frac[1], 10);
+    const denom = parseInt(frac[2], 10);
+    if (!denom) return null;
+    return numer / denom;
+  }
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
 
-  const meters = raw.match(/^(-?\d+(?:\.\d+)?)m$/);
-  if (meters) return parseFloat(meters[1]) * 1000;
+/**
+ * Parse length input into mm.
+ * Accepts architectural forms that {@link formatLength} emits, e.g. 6'-8", 3'-0",
+ * plus 6' 8", 6ft 8in, 36", 36 in, 3/4", 2.5m, 2500mm, and bare numbers
+ * (inches in imperial, mm in metric).
+ */
+export function parseLengthToMm(
+  input: string,
+  unitSystem: UnitSystem,
+): number | null {
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return null;
 
-  const cm = raw.match(/^(-?\d+(?:\.\d+)?)cm$/);
-  if (cm) return parseFloat(cm[1]) * 10;
+  // Normalize: collapse whitespace, unify dashes between feet/inches.
+  let raw = trimmed
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/\s*-\s*/g, "-");
 
-  const mm = raw.match(/^(-?\d+(?:\.\d+)?)mm$/);
-  if (mm) return parseFloat(mm[1]);
+  const sign = raw.startsWith("-") ? -1 : 1;
+  if (raw.startsWith("-") || raw.startsWith("+")) raw = raw.slice(1).trim();
 
-  const feetInches = raw.match(/^(-?)(?:(\d+)')?(?:(-?\d+(?:\.\d+)?)(?:"|in)?)?$/);
-  if (feetInches && (feetInches[2] || feetInches[3])) {
-    const sign = feetInches[1] === "-" ? -1 : 1;
-    const ft = feetInches[2] ? parseInt(feetInches[2], 10) : 0;
-    const inch = feetInches[3] ? parseFloat(feetInches[3]) : 0;
-    return sign * inchesToMm(ft * 12 + inch);
+  // Explicit metric units
+  const meters = raw.match(/^(\d+(?:\.\d+)?)\s*m$/);
+  if (meters) return sign * parseFloat(meters[1]) * 1000;
+
+  const cm = raw.match(/^(\d+(?:\.\d+)?)\s*cm$/);
+  if (cm) return sign * parseFloat(cm[1]) * 10;
+
+  const mmOnly = raw.match(/^(\d+(?:\.\d+)?)\s*mm$/);
+  if (mmOnly) return sign * parseFloat(mmOnly[1]);
+
+  // Feet + inches: 6'-8", 6'8", 6' 8", 6ft-8in, 6 ft 8 in, 6'-8 1/2"
+  const feetInches = raw.match(
+    /^(\d+(?:\.\d+)?)\s*(?:'|ft)\s*-?\s*(?:(\d+(?:\.\d+)?(?:\s+\d+\s*\/\s*\d+)?|\d+\s*\/\s*\d+))?\s*(?:"|in|inch|inches)?$/,
+  );
+  if (feetInches) {
+    const ft = parseFloat(feetInches[1]);
+    const inchPart = feetInches[2] ? parseInchToken(feetInches[2]) : 0;
+    if (inchPart == null || !Number.isFinite(ft)) return null;
+    return sign * inchesToMm(ft * 12 + inchPart);
   }
 
-  const bare = Number(raw);
+  // Feet only: 6', 6ft
+  const feetOnly = raw.match(/^(\d+(?:\.\d+)?)\s*(?:'|ft)$/);
+  if (feetOnly) return sign * inchesToMm(parseFloat(feetOnly[1]) * 12);
+
+  // Inches with mark / word: 36", 36in, 8 1/2", 3/4"
+  const inchesOnly = raw.match(
+    /^(\d+(?:\.\d+)?(?:\s+\d+\s*\/\s*\d+)?|\d+\s*\/\s*\d+)\s*(?:"|in|inch|inches)$/,
+  );
+  if (inchesOnly) {
+    const inch = parseInchToken(inchesOnly[1]);
+    if (inch == null) return null;
+    return sign * inchesToMm(inch);
+  }
+
+  // Mixed number without unit mark when imperial (e.g. "8 1/2")
+  if (unitSystem === "imperial") {
+    const mixedBare = raw.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+    if (mixedBare) {
+      const inch = parseInchToken(raw);
+      if (inch != null) return sign * inchesToMm(inch);
+    }
+    const fracBare = raw.match(/^(\d+)\s*\/\s*(\d+)$/);
+    if (fracBare) {
+      const inch = parseInchToken(raw);
+      if (inch != null) return sign * inchesToMm(inch);
+    }
+  }
+
+  // Bare number: inches (imperial) or mm (metric)
+  const bare = Number(raw.replace(/\s+/g, ""));
   if (!Number.isFinite(bare)) return null;
-  return unitSystem === "metric" ? bare : inchesToMm(bare);
+  return sign * (unitSystem === "metric" ? bare : inchesToMm(bare));
 }

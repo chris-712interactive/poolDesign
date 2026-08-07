@@ -31,19 +31,38 @@ function avgBodyDepthMm(body: PoolBody): number {
 export type TakeoffLine = {
   catalogItemId: string;
   name: string;
-  category: CatalogItem["category"] | "furniture" | "amenity" | "attraction";
+  category:
+    | CatalogItem["category"]
+    | "furniture"
+    | "amenity"
+    | "attraction"
+    | "other";
   unit: CatalogUnit;
   quantity: number;
   unitPriceCents: number;
   totalCents: number;
   note?: string;
+  /**
+   * Stable identity for exclude/restore. Auto lines use catalogId + note;
+   * custom lines use `custom:<id>`.
+   */
+  lineKey: string;
+  /** True when the line was added by the user (not derived from geometry). */
+  custom?: boolean;
 };
 
 export type TakeoffResult = {
   lines: TakeoffLine[];
+  /** Auto-generated lines currently hidden via design.estimate.removedLineKeys */
+  removedLines: TakeoffLine[];
   subtotalCents: number;
   generatedAt: string;
 };
+
+/** Stable key for an auto-generated takeoff line. */
+export function takeoffLineKey(catalogItemId: string, note?: string): string {
+  return note ? `${catalogItemId}::${note}` : catalogItemId;
+}
 
 const MM2_PER_SF = 92903.04;
 const MM_PER_LF = 304.8;
@@ -166,6 +185,7 @@ export function buildTakeoff(
       unitPriceCents,
       totalCents: Math.round(quantity * unitPriceCents),
       note,
+      lineKey: takeoffLineKey(catalogItemId, note),
     });
   }
 
@@ -324,6 +344,17 @@ export function buildTakeoff(
 
   // House doors/windows are plan annotation only — not outdoor project scope.
 
+  // Furniture / scale figures are layout aids — do not inflate install labor.
+  const billableObjectCount = (design.objects ?? []).filter((o) => {
+    const item = getPlaceableItem(o.catalogItemId);
+    if (!item) return false;
+    if (item.category === "furniture") return false;
+    if (item.unitPriceCents <= 0 || o.catalogItemId === "person_scale") {
+      return false;
+    }
+    return true;
+  }).length;
+
   const laborHrs =
     shellSf * 0.12 +
     mm2ToSf(poolAreaMm2) * 0.08 +
@@ -336,13 +367,13 @@ export function buildTakeoff(
     poolCount * 24 +
     spaCount * 16 +
     avgDepthIn * 0.5 +
-    (design.objects ?? []).length * 0.5 +
+    billableObjectCount * 0.5 +
     stepsCount * 4 +
     benchLf * 0.4 +
     mm2ToSf(sunshelfAreaMm2) * 0.15;
   push("labor_install", roundQty(laborHrs, 1), "hr", "Estimated install hours");
 
-  // Group placed library objects
+  // Group placed library objects (furniture is layout-only — not sold/billed).
   const objectCounts = new Map<string, number>();
   for (const obj of design.objects ?? []) {
     objectCounts.set(
@@ -353,8 +384,12 @@ export function buildTakeoff(
   for (const [catalogItemId, count] of objectCounts) {
     const item = getPlaceableItem(catalogItemId);
     if (!item) continue;
+    if (item.category === "furniture") continue;
+    // Skip free scale / reference items (e.g. person for scale).
+    if (item.unitPriceCents <= 0 || catalogItemId === "person_scale") continue;
     const category: TakeoffLine["category"] =
       item.category === "hardscape" ? "hardscape" : item.category;
+    const note = "Placed from object library";
     lines.push({
       catalogItemId,
       name: item.name,
@@ -363,13 +398,35 @@ export function buildTakeoff(
       quantity: count,
       unitPriceCents: item.unitPriceCents,
       totalCents: count * item.unitPriceCents,
-      note: "Placed from object library",
+      note,
+      lineKey: takeoffLineKey(catalogItemId, note),
+    });
+  }
+
+  const removedKeys = new Set(design.estimate?.removedLineKeys ?? []);
+  const removedLines = lines.filter((l) => removedKeys.has(l.lineKey));
+  let visible = lines.filter((l) => !removedKeys.has(l.lineKey));
+
+  for (const custom of design.estimate?.customLines ?? []) {
+    if (custom.quantity <= 0) continue;
+    visible.push({
+      catalogItemId: `custom:${custom.id}`,
+      name: custom.name,
+      category: custom.category,
+      unit: custom.unit,
+      quantity: custom.quantity,
+      unitPriceCents: custom.unitPriceCents,
+      totalCents: Math.round(custom.quantity * custom.unitPriceCents),
+      note: custom.note,
+      lineKey: `custom:${custom.id}`,
+      custom: true,
     });
   }
 
   return {
-    lines,
-    subtotalCents: lines.reduce((s, l) => s + l.totalCents, 0),
+    lines: visible,
+    removedLines,
+    subtotalCents: visible.reduce((s, l) => s + l.totalCents, 0),
     generatedAt: new Date().toISOString(),
   };
 }

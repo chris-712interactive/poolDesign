@@ -87,6 +87,36 @@ describe("normalizeDesignDocument", () => {
     assert.ok(opening.heightMm > 0);
     assert.equal(next.buildings[0].stories, 1);
   });
+
+  it("migrates legacy dining_table_set to round tabletop sizing", () => {
+    const FT = 304.8;
+    const raw = {
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [],
+      poolBodies: [],
+      objects: [
+        {
+          id: "d1",
+          catalogItemId: "dining_table_set",
+          name: "Dining table set",
+          position: { x: 0, y: 0 },
+          rotationDeg: 0,
+          layerId: "furniture",
+          widthMm: 6 * FT,
+          depthMm: 6 * FT,
+        },
+      ],
+      plumbingRuns: [],
+    } as unknown as DesignDocument;
+
+    const next = normalizeDesignDocument(raw);
+    const obj = next.objects[0];
+    assert.equal(obj.catalogItemId, "dining_table_round");
+    assert.ok(obj.widthMm < 6 * FT);
+    assert.equal(obj.widthMm, obj.depthMm);
+  });
 });
 
 describe("parseDesignDocument", () => {

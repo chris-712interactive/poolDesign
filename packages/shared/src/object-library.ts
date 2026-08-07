@@ -15,6 +15,8 @@ export type PlaceableItem = {
   widthMm: number;
   /** Footprint depth (Y) in mm */
   depthMm: number;
+  /** Default vertical size for 3D (mm) */
+  heightMm: number;
   /** Default layer id in the design document */
   layerId: string;
   levels: DesignLevel[];
@@ -60,6 +62,13 @@ export function isSpaFixtureId(id: string): boolean {
 const FT = 304.8;
 const IN = 25.4;
 
+/** Adult scale figure height: 5′8″ (1727.2 mm). */
+export const SCALE_PERSON_HEIGHT_MM = 5 * FT + 8 * IN;
+/** Shoulder breadth ≈ 18″ for a standing adult. */
+export const SCALE_PERSON_WIDTH_MM = 18 * IN;
+/** Front-to-back chest / stance depth ≈ 12″. */
+export const SCALE_PERSON_DEPTH_MM = 12 * IN;
+
 export const OBJECT_LIBRARY: PlaceableItem[] = [
   {
     id: "equip_pad",
@@ -67,6 +76,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "equipment",
     widthMm: 8 * FT,
     depthMm: 4 * FT,
+    heightMm: 150,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 125000,
@@ -77,6 +87,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "equipment",
     widthMm: 2.5 * FT,
     depthMm: 2 * FT,
+    heightMm: 700,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 185000,
@@ -87,6 +98,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "equipment",
     widthMm: 2 * FT,
     depthMm: 2 * FT,
+    heightMm: 900,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 95000,
@@ -97,6 +109,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "equipment",
     widthMm: 3 * FT,
     depthMm: 2.5 * FT,
+    heightMm: 1200,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 320000,
@@ -107,6 +120,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "equipment",
     widthMm: 1.5 * FT,
     depthMm: 1 * FT,
+    heightMm: 600,
     layerId: "equipment",
     levels: ["residential", "commercial"],
     unitPriceCents: 140000,
@@ -117,6 +131,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "equipment",
     widthMm: 10 * IN,
     depthMm: 10 * IN,
+    heightMm: 80,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 18500,
@@ -127,6 +142,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "equipment",
     widthMm: 6 * IN,
     depthMm: 6 * IN,
+    heightMm: 120,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 27500,
@@ -137,6 +153,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "equipment",
     widthMm: 6 * IN,
     depthMm: 6 * IN,
+    heightMm: 120,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 32500,
@@ -148,6 +165,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "equipment",
     widthMm: 5 * IN,
     depthMm: 5 * IN,
+    heightMm: 100,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 14500,
@@ -158,6 +176,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "equipment",
     widthMm: 8 * IN,
     depthMm: 8 * IN,
+    heightMm: 80,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 45000,
@@ -169,10 +188,24 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "equipment",
     widthMm: 8 * IN,
     depthMm: 8 * IN,
+    heightMm: 80,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 78500,
     description: "RGB / color-changing underwater LED light",
+  },
+  {
+    id: "person_scale",
+    name: "Person (5′8″ scale)",
+    category: "furniture",
+    widthMm: SCALE_PERSON_WIDTH_MM,
+    depthMm: SCALE_PERSON_DEPTH_MM,
+    heightMm: SCALE_PERSON_HEIGHT_MM,
+    layerId: "furniture",
+    levels: ["residential", "commercial", "water_park"],
+    unitPriceCents: 0,
+    description:
+      "Standing adult for scale — 5′8″ tall, ~18″ shoulders, ~12″ deep. Not billed.",
   },
   {
     id: "lounge_chair",
@@ -180,18 +213,53 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "furniture",
     widthMm: 2.2 * FT,
     depthMm: 6.5 * FT,
+    heightMm: 900,
     layerId: "furniture",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 45000,
   },
   {
-    id: "dining_table_set",
-    name: "Dining table set",
+    id: "dining_table_rect",
+    name: "Dining set (rectangular)",
     category: "furniture",
+    /** Tabletop width — plan footprint adds chair clearance. */
     widthMm: 6 * FT,
-    depthMm: 6 * FT,
+    /** Tabletop depth */
+    depthMm: 3.5 * FT,
+    heightMm: 750,
     layerId: "furniture",
     levels: ["residential", "commercial"],
+    unitPriceCents: 185000,
+    description:
+      "Sized by tabletop; chairs add ~22″ clearance on each side of the plan footprint.",
+  },
+  {
+    id: "dining_table_round",
+    name: "Dining set (round)",
+    category: "furniture",
+    /** Tabletop diameter (width = depth). */
+    widthMm: 5 * FT,
+    depthMm: 5 * FT,
+    heightMm: 750,
+    layerId: "furniture",
+    levels: ["residential", "commercial"],
+    unitPriceCents: 185000,
+    description:
+      "Sized by tabletop diameter; chairs add ~22″ clearance around the plan footprint.",
+  },
+  /**
+   * Legacy id — still recognized for older designs; prefer rect/round.
+   * Kept so getPlaceableItem / normalize can resolve height defaults.
+   */
+  {
+    id: "dining_table_set",
+    name: "Dining set (round)",
+    category: "furniture",
+    widthMm: 5 * FT,
+    depthMm: 5 * FT,
+    heightMm: 750,
+    layerId: "furniture",
+    levels: [],
     unitPriceCents: 185000,
   },
   {
@@ -200,6 +268,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "furniture",
     widthMm: 7 * FT,
     depthMm: 3 * FT,
+    heightMm: 850,
     layerId: "furniture",
     levels: ["residential", "commercial"],
     unitPriceCents: 220000,
@@ -210,6 +279,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "furniture",
     widthMm: 8 * FT,
     depthMm: 8 * FT,
+    heightMm: 2400,
     layerId: "furniture",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 65000,
@@ -220,6 +290,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "amenity",
     widthMm: 4 * FT,
     depthMm: 4 * FT,
+    heightMm: 450,
     layerId: "furniture",
     levels: ["residential", "commercial"],
     unitPriceCents: 350000,
@@ -230,6 +301,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "hardscape",
     widthMm: 2 * FT,
     depthMm: 2 * FT,
+    heightMm: 500,
     layerId: "furniture",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 18000,
@@ -240,6 +312,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "amenity",
     widthMm: 10 * FT,
     depthMm: 3 * FT,
+    heightMm: 1100,
     layerId: "amenities",
     levels: ["residential", "commercial"],
     unitPriceCents: 1250000,
@@ -250,6 +323,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "amenity",
     widthMm: 10 * FT,
     depthMm: 10 * FT,
+    heightMm: 2700,
     layerId: "amenities",
     levels: ["commercial", "water_park"],
     unitPriceCents: 850000,
@@ -260,6 +334,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     category: "attraction",
     widthMm: 20 * FT,
     depthMm: 40 * FT,
+    heightMm: 4500,
     layerId: "attractions",
     levels: ["water_park"],
     unitPriceCents: 25000000,
@@ -272,4 +347,59 @@ export function objectLibraryForLevel(level: DesignLevel): PlaceableItem[] {
 
 export function getPlaceableItem(id: string): PlaceableItem | undefined {
   return OBJECT_LIBRARY.find((item) => item.id === id);
+}
+
+/** Chair pull-out clearance added on each side of a dining tabletop. */
+export const DINING_CHAIR_CLEARANCE_MM = 22 * IN;
+
+export function isDiningSetId(id: string): boolean {
+  return (
+    id === "dining_table_set" ||
+    id === "dining_table_rect" ||
+    id === "dining_table_round"
+  );
+}
+
+export function diningTableShape(id: string): "rect" | "round" {
+  return id === "dining_table_rect" ? "rect" : "round";
+}
+
+export function diningSetCatalogId(shape: "rect" | "round"): string {
+  return shape === "rect" ? "dining_table_rect" : "dining_table_round";
+}
+
+/** Overall plan/3D footprint including chairs around the tabletop. */
+export function diningOverallFootprintMm(
+  tableWidthMm: number,
+  tableDepthMm: number,
+  shape: "rect" | "round" = "rect",
+): { widthMm: number; depthMm: number } {
+  const pad = DINING_CHAIR_CLEARANCE_MM * 2;
+  if (shape === "round") {
+    const dia = Math.max(tableWidthMm, tableDepthMm);
+    return { widthMm: dia + pad, depthMm: dia + pad };
+  }
+  return {
+    widthMm: tableWidthMm + pad,
+    depthMm: tableDepthMm + pad,
+  };
+}
+
+/**
+ * Plan / hit-test size for a placed object.
+ * Dining sets store tabletop size; footprint includes chair clearance.
+ */
+export function objectPlanSizeMm(obj: {
+  catalogItemId: string;
+  widthMm: number;
+  depthMm: number;
+}): { widthMm: number; depthMm: number } {
+  if (isDiningSetId(obj.catalogItemId)) {
+    return diningOverallFootprintMm(
+      obj.widthMm,
+      obj.depthMm,
+      diningTableShape(obj.catalogItemId),
+    );
+  }
+  return { widthMm: obj.widthMm, depthMm: obj.depthMm };
 }

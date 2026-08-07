@@ -10,3 +10,8 @@ export * from "./object-library";
 export * from "./spa-defaults";
 export * from "./plumbing-route";
 export * from "./design-normalize";
+export * from "./patio-finishes";
+export * from "./cover-supports";
+export * from "./scene3d";
+export * from "./water-geometry";
+export * from "./depth-profile";

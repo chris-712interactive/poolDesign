@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  DEFAULT_PATIO_FINISH_ID,
   DEFAULT_PATIO_ROOF_HEIGHT_MM,
   DEFAULT_PERGOLA_HEIGHT_MM,
   DEFAULT_POOL_DEEP_MM,
@@ -30,36 +31,62 @@ import {
   formatLength,
   insideBoundsFromOutside,
   insideOutlineFromOutside,
-  isAxisAlignedRect,
   isPadEquipmentId,
   isPoolFixtureId,
   isSpaFixtureId,
   isWaterFixtureId,
+  diningSetCatalogId,
+  diningTableShape,
+  getPlaceableItem,
+  isDiningSetId,
   objectFootprint,
   objectLibraryForLevel,
+  objectPlanSizeMm,
   outlineBounds,
   parseLengthToMm,
   polygonAreaMm2,
   polygonPerimeterMm,
   polylineLengthMm,
   poolCount,
+  applyStepsStandardFootprint,
+  rectangleFrame,
   relayoutSpaPackage,
   resetSpaPackage,
-  resizeAxisAlignedOutline,
+  resizeRectangleOutline,
   resolveEquipmentConnection,
+  stepsRunMm,
+  STANDARD_STEP_TREAD_MM,
   segmentLengthMm,
   snapMm,
   spaCount,
   spaShellHeightMm,
   spaWallThicknessMm,
   stripBodyChildren,
+  COVER_FOOTING_SIZE_MM,
+  COVER_MAX_POST_SPACING_MM,
+  COVER_POST_SIZE_MM,
+  buildingHeightMm,
+  clampOpeningStory,
   clampOpeningT,
+  coverSupportFootingSizeMm,
+  coverSupportPostSizeMm,
+  createCoverSupports,
   defaultOpeningSize,
   openingKindLabel,
+  openingSillMm,
+  addDepthBreak,
+  depthProfileForBody,
+  depthStationPlanPoint,
+  depthTAtPlanPoint,
+  flipDepthEnds,
+  materializeDepthStations,
+  removeDepthBreak,
+  updateDepthStation,
   waterBodyKind,
   type Building,
   type BuildingOpening,
   type BuildingOpeningKind,
+  type DepthTransition,
   type DesignDocument,
   type DesignLevel,
   type PatioCover,
@@ -76,6 +103,8 @@ import {
   type WaterBodyKind,
 } from "@pool-design/shared";
 import { EstimatePanel } from "@/components/EstimatePanel";
+import { CadScene3DDynamic } from "@/components/CadScene3DDynamic";
+import { PatioFinishPicker } from "@/components/PatioFinishPicker";
 import {
   catalogIdForPadTool,
   isPadEquipTool,
@@ -93,6 +122,7 @@ import {
 } from "@/lib/cad/math";
 import {
   drawBuilding,
+  drawDepthProfile,
   drawDraft,
   drawFeature,
   drawGrid,
@@ -106,6 +136,7 @@ import {
 } from "@/lib/cad/draw";
 
 type WorkspaceView = "design" | "estimate";
+type DesignMode = "2d" | "3d";
 type SideTab = "tools" | "properties" | "layers";
 type Tool = ToolId;
 type Selection =
@@ -114,6 +145,7 @@ type Selection =
   | { kind: "building"; id: string }
   | { kind: "opening"; buildingId: string; id: string }
   | { kind: "cover"; id: string }
+  | { kind: "coverSupport"; coverId: string; id: string }
   | { kind: "run"; id: string }
   | { kind: "object"; id: string }
   | { kind: "feature"; id: string }
@@ -134,6 +166,11 @@ type DragState =
       index: number;
     }
   | {
+      mode: "depthStation";
+      poolId: string;
+      stationId: string;
+    }
+  | {
       mode: "move";
       kind: "pool" | "patio" | "building" | "cover" | "run" | "object" | "feature";
       id: string;
@@ -143,6 +180,12 @@ type DragState =
       mode: "opening";
       buildingId: string;
       id: string;
+    }
+  | {
+      mode: "coverSupport";
+      coverId: string;
+      id: string;
+      last: PointMm;
     }
   | {
       mode: "rotate";
@@ -175,7 +218,8 @@ function layerVisible(design: DesignDocument, id: string): boolean {
 
 function rotationHandleWorld(obj: PlacedObject): PointMm {
   const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
-  const dist = obj.depthMm / 2 + 400;
+  const plan = objectPlanSizeMm(obj);
+  const dist = plan.depthMm / 2 + 400;
   return {
     x: obj.position.x - Math.sin(rad) * dist,
     y: obj.position.y - Math.cos(rad) * dist,
@@ -193,6 +237,7 @@ export function CadWorkspace({
   const dragOriginRef = useRef<DesignDocument | null>(null);
   const designRef = useRef<DesignDocument>(initialDesign);
   const [view, setView] = useState<WorkspaceView>("design");
+  const [designMode, setDesignMode] = useState<DesignMode>("2d");
   const [sideTab, setSideTab] = useState<SideTab>("tools");
   const [design, setDesign] = useState<DesignDocument>(() =>
     normalizeDesignDocument(initialDesign, { designLevel, unitSystem }),
@@ -207,6 +252,7 @@ export function CadWorkspace({
   const [coverKind, setCoverKind] = useState<PatioCoverKind>("pergola");
   const [openingKind, setOpeningKind] =
     useState<BuildingOpeningKind>("door");
+  const [openingStory, setOpeningStory] = useState(1);
   const [houseStories, setHouseStories] = useState(2);
   const [placeItemId, setPlaceItemId] = useState<string | null>(null);
   const [ortho, setOrtho] = useState(false);
@@ -531,12 +577,19 @@ export function CadWorkspace({
 
     if (layerVisible(design, "covers")) {
       for (const cover of design.patioCovers ?? []) {
+        const supportSelected =
+          selection?.kind === "coverSupport" &&
+          selection.coverId === cover.id
+            ? selection.id
+            : null;
         drawPatioCover(
           ctx,
           vp,
           cover,
-          selection?.kind === "cover" && selection.id === cover.id,
+          (selection?.kind === "cover" && selection.id === cover.id) ||
+            !!supportSelected,
           unitSystem,
+          supportSelected,
         );
       }
     }
@@ -573,6 +626,8 @@ export function CadWorkspace({
             false,
             false,
           );
+        } else if (selected) {
+          drawDepthProfile(ctx, vp, pool, unitSystem);
         }
       }
     }
@@ -772,11 +827,12 @@ export function CadWorkspace({
   ]);
 
   useEffect(() => {
+    if (designMode !== "2d") return;
     drawScene();
     const onResize = () => drawScene();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [drawScene]);
+  }, [drawScene, designMode]);
 
   function canvasLocal(e: { clientX: number; clientY: number }) {
     const canvas = canvasRef.current!;
@@ -875,8 +931,9 @@ export function CadWorkspace({
     const kind = coverKind;
     const n =
       (design.patioCovers ?? []).filter((c) => c.kind === kind).length + 1;
+    const coverId = newId(kind === "roof" ? "roof" : "pergola");
     const cover: PatioCover = {
-      id: newId(kind === "roof" ? "roof" : "pergola"),
+      id: coverId,
       name: kind === "roof" ? `Patio roof ${n}` : `Pergola ${n}`,
       kind,
       outline,
@@ -885,6 +942,11 @@ export function CadWorkspace({
         kind === "roof"
           ? DEFAULT_PATIO_ROOF_HEIGHT_MM
           : DEFAULT_PERGOLA_HEIGHT_MM,
+      supports: createCoverSupports(
+        outline,
+        design.buildings ?? [],
+        () => newId("sup"),
+      ),
     };
     let layers = design.layers;
     if (!layers.some((l) => l.id === "covers")) {
@@ -909,6 +971,7 @@ export function CadWorkspace({
     const edgeLen = segmentLengthMm(hit.edgeA, hit.edgeB);
     if (edgeLen < size.widthMm * 0.5) return false;
     const t = clampOpeningT(edgeLen, size.widthMm, hit.t);
+    const stories = Math.max(1, building.stories || 1);
     const opening: BuildingOpening = {
       id: newId(openingKind === "window" ? "win" : "door"),
       kind: openingKind,
@@ -916,6 +979,7 @@ export function CadWorkspace({
       t,
       widthMm: size.widthMm,
       heightMm: size.heightMm,
+      story: clampOpeningStory(openingStory, stories),
     };
     commitDesign({
       ...design,
@@ -947,6 +1011,7 @@ export function CadWorkspace({
         id: newId("patio"),
         name: `Patio ${design.patios.length + 1}`,
         outline: draftPoints,
+        materialId: DEFAULT_PATIO_FINISH_ID,
       };
       commitDesign({ ...design, patios: [...design.patios, patio] });
       setSelection({ kind: "patio", id: patio.id });
@@ -1072,6 +1137,26 @@ export function CadWorkspace({
     return null;
   }
 
+  function hitDepthStation(
+    point: PointMm,
+  ): { poolId: string; stationId: string } | null {
+    if (selection?.kind !== "pool" || !selectedPool) return null;
+    if (waterBodyKind(selectedPool) === "spa") return null;
+    const profile = depthProfileForBody(selectedPool);
+    const tol = (VERTEX_HIT_PX + 4) / vp.scale;
+    for (const s of profile.stations) {
+      const p = depthStationPlanPoint(
+        selectedPool.outline,
+        profile.axis,
+        s.t,
+      );
+      if (segmentLengthMm(point, p) <= tol) {
+        return { poolId: selectedPool.id, stationId: s.id };
+      }
+    }
+    return null;
+  }
+
   function hitRotateHandle(point: PointMm): string | null {
     if (!selectedObject) return null;
     const handle = rotationHandleWorld(selectedObject);
@@ -1110,8 +1195,22 @@ export function CadWorkspace({
       }
     }
     for (let i = (design.patioCovers ?? []).length - 1; i >= 0; i--) {
-      if (pointInPolygon(point, design.patioCovers[i].outline)) {
-        return { kind: "cover", id: design.patioCovers[i].id };
+      const cover = design.patioCovers[i];
+      for (let j = (cover.supports ?? []).length - 1; j >= 0; j--) {
+        const s = cover.supports![j];
+        const hitR = coverSupportFootingSizeMm(s) / 2 + 40;
+        if (
+          Math.hypot(point.x - s.position.x, point.y - s.position.y) <= hitR
+        ) {
+          return {
+            kind: "coverSupport",
+            coverId: cover.id,
+            id: s.id,
+          };
+        }
+      }
+      if (pointInPolygon(point, cover.outline)) {
+        return { kind: "cover", id: cover.id };
       }
     }
     for (let i = (design.buildings ?? []).length - 1; i >= 0; i--) {
@@ -1188,6 +1287,20 @@ export function CadWorkspace({
           (c) => c.id !== selection.id,
         ),
       });
+    } else if (selection.kind === "coverSupport") {
+      commitDesign({
+        ...design,
+        patioCovers: (design.patioCovers ?? []).map((c) =>
+          c.id === selection.coverId
+            ? {
+                ...c,
+                supports: (c.supports ?? []).filter(
+                  (s) => s.id !== selection.id,
+                ),
+              }
+            : c,
+        ),
+      });
     } else if (selection.kind === "run") {
       commitDesign({
         ...design,
@@ -1222,6 +1335,7 @@ export function CadWorkspace({
       design.poolBodies[0]?.id;
     const count =
       (design.features ?? []).filter((f) => f.kind === kind).length + 1;
+    const riserCount = kind === "steps" ? 3 : undefined;
     const feature: PoolFeature = {
       id: newId(kind === "sunshelf" ? "shelf" : kind),
       kind,
@@ -1231,9 +1345,12 @@ export function CadWorkspace({
           : kind === "sunshelf"
             ? `Sunshelf ${count}`
             : `Bench ${count}`,
-      outline,
+      outline:
+        kind === "steps"
+          ? applyStepsStandardFootprint(outline, riserCount)
+          : outline,
       poolBodyId: nearestPool,
-      riserCount: kind === "steps" ? 3 : undefined,
+      riserCount,
       depthMm: kind === "sunshelf" ? DEFAULT_SUNSHELF_DEPTH_MM : undefined,
     };
     commitDesign({
@@ -1267,6 +1384,12 @@ export function CadWorkspace({
         setDrag({ mode: "rotate", id: rotateId });
         return;
       }
+      const depthHit = hitDepthStation(point);
+      if (depthHit) {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({ mode: "depthStation", ...depthHit });
+        return;
+      }
       const vertex = hitVertex(point);
       if (vertex) {
         dragOriginRef.current = structuredClone(design);
@@ -1281,6 +1404,14 @@ export function CadWorkspace({
           mode: "opening",
           buildingId: hit.buildingId,
           id: hit.id,
+        });
+      } else if (hit?.kind === "coverSupport") {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({
+          mode: "coverSupport",
+          coverId: hit.coverId,
+          id: hit.id,
+          last: point,
         });
       } else if (hit) {
         dragOriginRef.current = structuredClone(design);
@@ -1404,6 +1535,32 @@ export function CadWorkspace({
         panX: drag.originPanX + (local.x - drag.startX),
         panY: drag.originPanY + (local.y - drag.startY),
       }));
+      return;
+    }
+
+    if (drag.mode === "depthStation") {
+      setDesign((d) => {
+        const body = d.poolBodies.find((p) => p.id === drag.poolId);
+        if (!body) return d;
+        const profile = depthProfileForBody(materializeDepthStations(body));
+        const t = depthTAtPlanPoint(
+          point,
+          profile.originMm,
+          profile.axis,
+          profile.axisLengthMm,
+        );
+        const next = updateDepthStation(
+          materializeDepthStations(body),
+          drag.stationId,
+          { t },
+        );
+        return {
+          ...d,
+          poolBodies: d.poolBodies.map((p) =>
+            p.id === drag.poolId ? next : p,
+          ),
+        };
+      });
       return;
     }
 
@@ -1583,6 +1740,35 @@ export function CadWorkspace({
       return;
     }
 
+    if (drag.mode === "coverSupport") {
+      const dx = point.x - drag.last.x;
+      const dy = point.y - drag.last.y;
+      if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return;
+      setDesign((d) => ({
+        ...d,
+        patioCovers: (d.patioCovers ?? []).map((c) =>
+          c.id === drag.coverId
+            ? {
+                ...c,
+                supports: (c.supports ?? []).map((s) =>
+                  s.id === drag.id
+                    ? {
+                        ...s,
+                        position: {
+                          x: s.position.x + dx,
+                          y: s.position.y + dy,
+                        },
+                      }
+                    : s,
+                ),
+              }
+            : c,
+        ),
+      }));
+      setDrag({ ...drag, last: point });
+      return;
+    }
+
     if (drag.mode === "move") {
       const dx = point.x - drag.last.x;
       const dy = point.y - drag.last.y;
@@ -1597,7 +1783,9 @@ export function CadWorkspace({
       drag?.mode === "vertex" ||
       drag?.mode === "move" ||
       drag?.mode === "opening" ||
-      drag?.mode === "rotate"
+      drag?.mode === "coverSupport" ||
+      drag?.mode === "rotate" ||
+      drag?.mode === "depthStation"
     ) {
       let next = designRef.current;
       // After reshaping a spa shell, reflow benches/equipment/plumbing inside.
@@ -1763,7 +1951,7 @@ export function CadWorkspace({
       : tool === "house_poly"
         ? "Trace the house footprint. Hold Shift for 90°. Close near start. Set stories below."
         : tool === "opening"
-          ? `Click a house wall to place a ${openingKindLabel(openingKind).toLowerCase()}. Edit width/height in Properties; drag to slide along the wall.`
+          ? `Click a house wall to place a ${openingKindLabel(openingKind).toLowerCase()} on story ${openingStory}. Edit story/size in Properties; drag to slide along the wall.`
           : tool === "cover_rect"
           ? draftPoints.length === 0
             ? coverKind === "roof"
@@ -1831,6 +2019,7 @@ export function CadWorkspace({
           projectId={projectId}
           design={design}
           unitSystem={unitSystem}
+          onDesignChange={commitDesign}
         />
       ) : (
         <div
@@ -1840,59 +2029,101 @@ export function CadWorkspace({
           tabIndex={0}
         >
           <section className="panel cad-canvas-panel">
+            <div className="cad-canvas-toolbar row">
+              <div className="cad-mode-toggle" role="group" aria-label="Design view">
+                <button
+                  type="button"
+                  className={`btn ${designMode === "2d" ? "" : "secondary"}`}
+                  onClick={() => setDesignMode("2d")}
+                >
+                  2D
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${designMode === "3d" ? "" : "secondary"}`}
+                  onClick={() => setDesignMode("3d")}
+                >
+                  3D
+                </button>
+              </div>
+              {designMode === "3d" ? (
+                <span className="muted cad-mode-note">
+                  Preview only — switch to 2D to edit
+                </span>
+              ) : null}
+            </div>
             <div
-              className="cad-canvas-wrap"
+              className={`cad-canvas-wrap ${designMode === "3d" ? "cad-canvas-wrap-3d" : ""}`}
               style={{
-                cursor: spaceDown || drag?.mode === "pan" ? "grab" : "crosshair",
+                cursor:
+                  designMode === "3d"
+                    ? "default"
+                    : spaceDown || drag?.mode === "pan"
+                      ? "grab"
+                      : "crosshair",
               }}
             >
-              <canvas
-                ref={canvasRef}
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerLeave={onPointerUp}
-                onWheel={onWheel}
-                onDoubleClick={() => {
-                  if (
-                    tool === "plumbing" ||
-                    tool === "pool_poly" ||
-                    tool === "patio" ||
-                    tool === "house_poly"
-                  ) {
-                    finishDraft();
-                  }
-                }}
-              />
-              <div className="hud">
-                <div>
-                  {(tool === "pool_rect" ||
-                    tool === "house_rect" ||
-                    tool === "cover_rect") &&
-                  draftPoints.length === 2
-                    ? "Depth"
-                    : "Segment"}
-                  :{" "}
-                  {draftPoints.length > 0
-                    ? formatLength(draftSegmentMm, unitSystem)
-                    : "—"}
-                </div>
-                <div>
-                  {tool === "plumbing" ? "Run total" : "Path"}:{" "}
-                  {draftPoints.length > 0
-                    ? formatLength(
-                        polylineLengthMm(draftPoints) + draftSegmentMm,
-                        unitSystem,
-                      )
-                    : selectedRun
-                      ? formatLength(
-                          polylineLengthMm(selectedRun.points),
-                          unitSystem,
-                        )
-                      : "—"}
-                </div>
-                {lengthBuffer && <div>Typed: {lengthBuffer}</div>}
-              </div>
+              {designMode === "3d" ? (
+                <CadScene3DDynamic
+                  design={design}
+                  projectId={projectId}
+                  selection={selection}
+                  onSelect={(sel) => {
+                    setSelection(sel);
+                    if (sel) setSideTab("properties");
+                  }}
+                />
+              ) : (
+                <>
+                  <canvas
+                    ref={canvasRef}
+                    onPointerDown={onPointerDown}
+                    onPointerMove={onPointerMove}
+                    onPointerUp={onPointerUp}
+                    onPointerLeave={onPointerUp}
+                    onWheel={onWheel}
+                    onDoubleClick={() => {
+                      if (
+                        tool === "plumbing" ||
+                        tool === "pool_poly" ||
+                        tool === "patio" ||
+                        tool === "house_poly"
+                      ) {
+                        finishDraft();
+                      }
+                    }}
+                  />
+                  <div className="hud">
+                    <div>
+                      {(tool === "pool_rect" ||
+                        tool === "house_rect" ||
+                        tool === "cover_rect") &&
+                      draftPoints.length === 2
+                        ? "Depth"
+                        : "Segment"}
+                      :{" "}
+                      {draftPoints.length > 0
+                        ? formatLength(draftSegmentMm, unitSystem)
+                        : "—"}
+                    </div>
+                    <div>
+                      {tool === "plumbing" ? "Run total" : "Path"}:{" "}
+                      {draftPoints.length > 0
+                        ? formatLength(
+                            polylineLengthMm(draftPoints) + draftSegmentMm,
+                            unitSystem,
+                          )
+                        : selectedRun
+                          ? formatLength(
+                              polylineLengthMm(selectedRun.points),
+                              unitSystem,
+                            )
+                          : "—"}
+                    </div>
+                    {lengthBuffer && <div>Typed: {lengthBuffer}</div>}
+                  </div>
+                </>
+              )}
             </div>
           </section>
 
@@ -1925,6 +2156,7 @@ export function CadWorkspace({
                   waterKind={waterKind}
                   coverKind={coverKind}
                   openingKind={openingKind}
+                  openingStory={openingStory}
                   houseStories={houseStories}
                   placeItemId={placeItemId}
                   placeLibrary={placeLibrary}
@@ -1961,6 +2193,7 @@ export function CadWorkspace({
                   onWaterKind={setWaterKind}
                   onCoverKind={setCoverKind}
                   onOpeningKind={setOpeningKind}
+                  onOpeningStory={setOpeningStory}
                   onHouseStories={setHouseStories}
                   onPlaceItemId={setPlaceItemId}
                   onOrtho={() => setOrtho((v) => !v)}
@@ -2101,39 +2334,28 @@ export function CadWorkspace({
                         </button>
                       ))}
                     </div>
-                    <DepthFields
-                      key={`${selectedPool.id}-${waterBodyKind(selectedPool)}`}
-                      shallowMm={selectedPool.depthShallowMm}
-                      deepMm={selectedPool.depthDeepMm}
+                    <RectDimensionFields
+                      key={`pool-rect-${selectedPool.id}-${selectedPool.outline.map((p) => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join("|")}`}
+                      outline={selectedPool.outline}
                       unitSystem={unitSystem}
-                      spa={waterBodyKind(selectedPool) === "spa"}
-                      onChange={(shallowMm, deepMm) =>
-                        commitDesign({
-                          ...design,
-                          poolBodies: design.poolBodies.map((p) =>
-                            p.id === selectedPool.id
-                              ? {
-                                  ...p,
-                                  depthShallowMm: shallowMm,
-                                  depthDeepMm: deepMm,
-                                }
-                              : p,
-                          ),
-                        })
+                      widthLabel={
+                        waterBodyKind(selectedPool) === "spa"
+                          ? "Outside width"
+                          : "Width"
                       }
-                    />
-                    {waterBodyKind(selectedPool) === "spa" && (
-                      <SpaDimensionFields
-                        key={`spa-dims-${selectedPool.id}-${selectedPool.outline.map((p) => `${p.x},${p.y}`).join("|")}-${spaWallThicknessMm(selectedPool)}-${spaShellHeightMm(selectedPool)}`}
-                        body={selectedPool}
-                        unitSystem={unitSystem}
-                        onOutsideSize={(widthMm, depthMm) => {
-                          const outline = resizeAxisAlignedOutline(
-                            selectedPool.outline,
-                            widthMm,
-                            depthMm,
-                          );
-                          const updated = { ...selectedPool, outline };
+                      lengthLabel={
+                        waterBodyKind(selectedPool) === "spa"
+                          ? "Outside length"
+                          : "Length"
+                      }
+                      onResize={(widthMm, lengthMm) => {
+                        const outline = resizeRectangleOutline(
+                          selectedPool.outline,
+                          widthMm,
+                          lengthMm,
+                        );
+                        const updated = { ...selectedPool, outline };
+                        if (waterBodyKind(selectedPool) === "spa") {
                           commitDesign(
                             relayoutSpaPackage(
                               {
@@ -2145,7 +2367,35 @@ export function CadWorkspace({
                               updated,
                             ),
                           );
-                        }}
+                        } else {
+                          commitDesign({
+                            ...design,
+                            poolBodies: design.poolBodies.map((p) =>
+                              p.id === selectedPool.id ? updated : p,
+                            ),
+                          });
+                        }
+                      }}
+                    />
+                    <DepthFields
+                      key={`${selectedPool.id}-${waterBodyKind(selectedPool)}`}
+                      body={selectedPool}
+                      unitSystem={unitSystem}
+                      spa={waterBodyKind(selectedPool) === "spa"}
+                      onChangeBody={(next) =>
+                        commitDesign({
+                          ...design,
+                          poolBodies: design.poolBodies.map((p) =>
+                            p.id === selectedPool.id ? next : p,
+                          ),
+                        })
+                      }
+                    />
+                    {waterBodyKind(selectedPool) === "spa" && (
+                      <SpaShellFields
+                        key={`spa-shell-${selectedPool.id}-${spaWallThicknessMm(selectedPool)}-${spaShellHeightMm(selectedPool)}`}
+                        body={selectedPool}
+                        unitSystem={unitSystem}
                         onWallThickness={(wallThicknessMm) => {
                           const updated = {
                             ...selectedPool,
@@ -2248,6 +2498,41 @@ export function CadWorkspace({
                 {selectedPatio && (
                   <div className="stack">
                     <strong>{selectedPatio.name}</strong>
+                    <RectDimensionFields
+                      key={`patio-rect-${selectedPatio.id}-${selectedPatio.outline.map((p) => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join("|")}`}
+                      outline={selectedPatio.outline}
+                      unitSystem={unitSystem}
+                      onResize={(widthMm, lengthMm) =>
+                        commitDesign({
+                          ...design,
+                          patios: design.patios.map((p) =>
+                            p.id === selectedPatio.id
+                              ? {
+                                  ...p,
+                                  outline: resizeRectangleOutline(
+                                    p.outline,
+                                    widthMm,
+                                    lengthMm,
+                                  ),
+                                }
+                              : p,
+                          ),
+                        })
+                      }
+                    />
+                    <PatioFinishPicker
+                      value={selectedPatio.materialId}
+                      onChange={(materialId) =>
+                        commitDesign({
+                          ...design,
+                          patios: design.patios.map((p) =>
+                            p.id === selectedPatio.id
+                              ? { ...p, materialId }
+                              : p,
+                          ),
+                        })
+                      }
+                    />
                     <button
                       type="button"
                       className="btn danger"
@@ -2313,95 +2598,119 @@ export function CadWorkspace({
                         <option value="window">Window</option>
                       </select>
                     </div>
-                    <div className="field">
-                      <label htmlFor="opening-width">Width</label>
-                      <input
-                        id="opening-width"
-                        key={`opening-w-${selectedOpening.opening.id}-${selectedOpening.opening.widthMm}`}
-                        defaultValue={formatLength(
-                          selectedOpening.opening.widthMm,
-                          unitSystem,
-                        )}
-                        onBlur={(e) => {
-                          const mm = parseLengthToMm(
-                            e.target.value,
-                            unitSystem,
-                          );
-                          if (mm == null || mm <= 0) return;
-                          const b = selectedOpening.building;
-                          const n = b.outline.length;
-                          const i =
-                            ((selectedOpening.opening.edgeIndex % n) + n) % n;
-                          const edgeLen = segmentLengthMm(
-                            b.outline[i],
-                            b.outline[(i + 1) % n],
-                          );
-                          const widthMm = Math.min(mm, edgeLen);
-                          commitDesign({
-                            ...design,
-                            buildings: (design.buildings ?? []).map((bld) =>
-                              bld.id === b.id
-                                ? {
-                                    ...bld,
-                                    openings: (bld.openings ?? []).map((o) =>
-                                      o.id === selectedOpening.opening.id
-                                        ? {
-                                            ...o,
-                                            widthMm,
-                                            t: clampOpeningT(
-                                              edgeLen,
-                                              widthMm,
-                                              o.t,
-                                            ),
-                                          }
-                                        : o,
-                                    ),
-                                  }
-                                : bld,
-                            ),
-                          });
-                        }}
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor="opening-height">Height</label>
-                      <input
-                        id="opening-height"
-                        key={`opening-h-${selectedOpening.opening.id}-${selectedOpening.opening.heightMm}`}
-                        defaultValue={formatLength(
-                          selectedOpening.opening.heightMm,
-                          unitSystem,
-                        )}
-                        onBlur={(e) => {
-                          const mm = parseLengthToMm(
-                            e.target.value,
-                            unitSystem,
-                          );
-                          if (mm == null || mm <= 0) return;
-                          commitDesign({
-                            ...design,
-                            buildings: (design.buildings ?? []).map((bld) =>
-                              bld.id === selectedOpening.building.id
-                                ? {
-                                    ...bld,
-                                    openings: (bld.openings ?? []).map((o) =>
-                                      o.id === selectedOpening.opening.id
-                                        ? { ...o, heightMm: mm }
-                                        : o,
-                                    ),
-                                  }
-                                : bld,
-                            ),
-                          });
-                        }}
-                      />
-                    </div>
+                    {Math.max(1, selectedOpening.building.stories || 1) > 1 && (
+                      <div className="field">
+                        <label htmlFor="opening-story">Story</label>
+                        <select
+                          id="opening-story"
+                          value={clampOpeningStory(
+                            selectedOpening.opening.story,
+                            selectedOpening.building.stories,
+                          )}
+                          onChange={(e) => {
+                            const story = Number(e.target.value);
+                            commitDesign({
+                              ...design,
+                              buildings: (design.buildings ?? []).map((b) =>
+                                b.id === selectedOpening.building.id
+                                  ? {
+                                      ...b,
+                                      openings: (b.openings ?? []).map((o) =>
+                                        o.id === selectedOpening.opening.id
+                                          ? {
+                                              ...o,
+                                              story: clampOpeningStory(
+                                                story,
+                                                b.stories,
+                                              ),
+                                            }
+                                          : o,
+                                      ),
+                                    }
+                                  : b,
+                              ),
+                            });
+                          }}
+                        >
+                          {Array.from(
+                            {
+                              length: Math.max(
+                                1,
+                                selectedOpening.building.stories || 1,
+                              ),
+                            },
+                            (_, i) => i + 1,
+                          ).map((n) => (
+                            <option key={n} value={n}>
+                              {n === 1
+                                ? "1 — ground floor"
+                                : n === 2
+                                  ? "2 — second story"
+                                  : `${n}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <OpeningSizeFields
+                      opening={selectedOpening.opening}
+                      building={selectedOpening.building}
+                      unitSystem={unitSystem}
+                      onChange={(patch) => {
+                        const b = selectedOpening.building;
+                        const n = b.outline.length;
+                        const i =
+                          ((selectedOpening.opening.edgeIndex % n) + n) % n;
+                        const edgeLen = segmentLengthMm(
+                          b.outline[i],
+                          b.outline[(i + 1) % n],
+                        );
+                        commitDesign({
+                          ...design,
+                          buildings: (design.buildings ?? []).map((bld) =>
+                            bld.id === b.id
+                              ? {
+                                  ...bld,
+                                  openings: (bld.openings ?? []).map((o) => {
+                                    if (o.id !== selectedOpening.opening.id) {
+                                      return o;
+                                    }
+                                    const widthMm =
+                                      patch.widthMm != null
+                                        ? Math.min(
+                                            Math.max(50, patch.widthMm),
+                                            edgeLen,
+                                          )
+                                        : o.widthMm;
+                                    const heightMm =
+                                      patch.heightMm != null
+                                        ? Math.max(50, patch.heightMm)
+                                        : o.heightMm;
+                                    return {
+                                      ...o,
+                                      widthMm,
+                                      heightMm,
+                                      t: clampOpeningT(
+                                        edgeLen,
+                                        widthMm,
+                                        o.t,
+                                      ),
+                                    };
+                                  }),
+                                }
+                              : bld,
+                          ),
+                        });
+                      }}
+                    />
                     <p
                       className="muted"
                       style={{ margin: 0, fontSize: "0.78rem" }}
                     >
-                      Defaults: door 3′×6′8″, sliding 6′×6′8″, window 3′×4′.
-                      Drag on the plan to slide along the wall.
+                      Type sizes like 3′-0″, 36″, or 6′8″ then press Enter.
+                      Defaults match common stock: door 3′×6′8″, sliding
+                      6′×6′8″, window 3′×4′. Drag on the plan to slide along
+                      the wall.
                     </p>
                     <button
                       type="button"
@@ -2422,6 +2731,28 @@ export function CadWorkspace({
                       )}{" "}
                       footprint
                     </div>
+                    <RectDimensionFields
+                      key={`bldg-rect-${selectedBuilding.id}-${selectedBuilding.outline.map((p) => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join("|")}`}
+                      outline={selectedBuilding.outline}
+                      unitSystem={unitSystem}
+                      onResize={(widthMm, lengthMm) =>
+                        commitDesign({
+                          ...design,
+                          buildings: (design.buildings ?? []).map((b) =>
+                            b.id === selectedBuilding.id
+                              ? {
+                                  ...b,
+                                  outline: resizeRectangleOutline(
+                                    b.outline,
+                                    widthMm,
+                                    lengthMm,
+                                  ),
+                                }
+                              : b,
+                          ),
+                        })
+                      }
+                    />
                     <div className="field">
                       <label htmlFor="bldg-name">Name</label>
                       <input
@@ -2455,13 +2786,18 @@ export function CadWorkspace({
                         onBlur={(e) => {
                           const n = Number(e.target.value);
                           if (!Number.isFinite(n) || n < 1) return;
+                          const stories = Math.min(12, Math.round(n));
                           commitDesign({
                             ...design,
                             buildings: (design.buildings ?? []).map((b) =>
                               b.id === selectedBuilding.id
                                 ? {
                                     ...b,
-                                    stories: Math.min(12, Math.round(n)),
+                                    stories,
+                                    openings: (b.openings ?? []).map((o) => ({
+                                      ...o,
+                                      story: clampOpeningStory(o.story, stories),
+                                    })),
                                   }
                                 : b,
                             ),
@@ -2498,6 +2834,33 @@ export function CadWorkspace({
                       )}{" "}
                       {selectedCover.kind === "roof" ? "roof" : "pergola"}
                     </div>
+                    <RectDimensionFields
+                      key={`cover-rect-${selectedCover.id}-${selectedCover.outline.map((p) => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join("|")}`}
+                      outline={selectedCover.outline}
+                      unitSystem={unitSystem}
+                      onResize={(widthMm, lengthMm) =>
+                        commitDesign({
+                          ...design,
+                          patioCovers: (design.patioCovers ?? []).map((c) => {
+                            if (c.id !== selectedCover.id) return c;
+                            const outline = resizeRectangleOutline(
+                              c.outline,
+                              widthMm,
+                              lengthMm,
+                            );
+                            return {
+                              ...c,
+                              outline,
+                              supports: createCoverSupports(
+                                outline,
+                                design.buildings ?? [],
+                                () => newId("sup"),
+                              ),
+                            };
+                          }),
+                        })
+                      }
+                    />
                     <div className="field">
                       <label htmlFor="cover-name">Name</label>
                       <input
@@ -2596,12 +2959,199 @@ export function CadWorkspace({
                         ))}
                       </select>
                     </div>
+                    <div className="cad-side-section">
+                      <strong style={{ fontSize: "0.9rem" }}>
+                        Posts & footings (
+                        {(selectedCover.supports ?? []).length})
+                      </strong>
+                      <p
+                        className="muted"
+                        style={{ margin: "0.35rem 0", fontSize: "0.75rem" }}
+                      >
+                        Standard layout: ~
+                        {formatLength(COVER_MAX_POST_SPACING_MM, unitSystem)}{" "}
+                        o.c.,{" "}
+                        {formatLength(COVER_POST_SIZE_MM, unitSystem)} posts on{" "}
+                        {formatLength(COVER_FOOTING_SIZE_MM, unitSystem)}{" "}
+                        footings. Posts against the house are omitted (ledger).
+                        Select and drag a footing to move it.
+                      </p>
+                      <div className="cad-compact-list">
+                        {(selectedCover.supports ?? []).map((s, i) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className="btn secondary"
+                            style={{
+                              justifyContent: "flex-start",
+                              fontSize: "0.8rem",
+                              outline:
+                                selection?.kind === "coverSupport" &&
+                                selection.id === s.id
+                                  ? "2px solid var(--accent-strong)"
+                                  : undefined,
+                            }}
+                            onClick={() =>
+                              setSelection({
+                                kind: "coverSupport",
+                                coverId: selectedCover.id,
+                                id: s.id,
+                              })
+                            }
+                          >
+                            Post {i + 1}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        style={{ marginTop: "0.5rem" }}
+                        onClick={() =>
+                          commitDesign({
+                            ...design,
+                            patioCovers: (design.patioCovers ?? []).map((c) =>
+                              c.id === selectedCover.id
+                                ? {
+                                    ...c,
+                                    supports: createCoverSupports(
+                                      c.outline,
+                                      design.buildings ?? [],
+                                      (i) => newId("sup"),
+                                    ),
+                                  }
+                                : c,
+                            ),
+                          })
+                        }
+                      >
+                        Reset posts to standard layout
+                      </button>
+                    </div>
                     <button
                       type="button"
                       className="btn danger"
                       onClick={deleteSelection}
                     >
                       Delete
+                    </button>
+                  </div>
+                )}
+                {selection?.kind === "coverSupport" && (
+                  <div className="stack">
+                    <strong>Cover post</strong>
+                    <div className="muted" style={{ fontSize: "0.85rem" }}>
+                      {(design.patioCovers ?? []).find(
+                        (c) => c.id === selection.coverId,
+                      )?.name ?? "Patio cover"}{" "}
+                      · drag on plan to relocate
+                    </div>
+                    {(() => {
+                      const cover = (design.patioCovers ?? []).find(
+                        (c) => c.id === selection.coverId,
+                      );
+                      const support = cover?.supports?.find(
+                        (s) => s.id === selection.id,
+                      );
+                      if (!support || !cover) return null;
+                      return (
+                        <>
+                          <div className="field">
+                            <label htmlFor="support-post">Post size</label>
+                            <input
+                              id="support-post"
+                              key={`sup-post-${support.id}-${support.postSizeMm}`}
+                              defaultValue={formatLength(
+                                coverSupportPostSizeMm(support),
+                                unitSystem,
+                              )}
+                              onBlur={(e) => {
+                                const mm = parseLengthToMm(
+                                  e.target.value,
+                                  unitSystem,
+                                );
+                                if (mm == null || mm <= 0) return;
+                                commitDesign({
+                                  ...design,
+                                  patioCovers: (design.patioCovers ?? []).map(
+                                    (c) =>
+                                      c.id === cover.id
+                                        ? {
+                                            ...c,
+                                            supports: (c.supports ?? []).map(
+                                              (s) =>
+                                                s.id === support.id
+                                                  ? { ...s, postSizeMm: mm }
+                                                  : s,
+                                            ),
+                                          }
+                                        : c,
+                                  ),
+                                });
+                              }}
+                            />
+                          </div>
+                          <div className="field">
+                            <label htmlFor="support-footing">
+                              Footing size
+                            </label>
+                            <input
+                              id="support-footing"
+                              key={`sup-foot-${support.id}-${support.footingSizeMm}`}
+                              defaultValue={formatLength(
+                                coverSupportFootingSizeMm(support),
+                                unitSystem,
+                              )}
+                              onBlur={(e) => {
+                                const mm = parseLengthToMm(
+                                  e.target.value,
+                                  unitSystem,
+                                );
+                                if (mm == null || mm <= 0) return;
+                                commitDesign({
+                                  ...design,
+                                  patioCovers: (design.patioCovers ?? []).map(
+                                    (c) =>
+                                      c.id === cover.id
+                                        ? {
+                                            ...c,
+                                            supports: (c.supports ?? []).map(
+                                              (s) =>
+                                                s.id === support.id
+                                                  ? {
+                                                      ...s,
+                                                      footingSizeMm: mm,
+                                                    }
+                                                  : s,
+                                            ),
+                                          }
+                                        : c,
+                                  ),
+                                });
+                              }}
+                            />
+                          </div>
+                        </>
+                      );
+                    })()}
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() =>
+                        setSelection({
+                          kind: "cover",
+                          id: selection.coverId,
+                        })
+                      }
+                    >
+                      Select cover
+                    </button>
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
+                    >
+                      Delete post
                     </button>
                   </div>
                 )}
@@ -2625,7 +3175,7 @@ export function CadWorkspace({
                 )}
                 {selectedObject && (
                   <FurnitureFields
-                    key={`${selectedObject.id}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.rotationDeg}`}
+                    key={`${selectedObject.id}-${selectedObject.catalogItemId}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.rotationDeg}`}
                     object={selectedObject}
                     unitSystem={unitSystem}
                     onRotate={(deg) =>
@@ -2651,6 +3201,33 @@ export function CadWorkspace({
                         ),
                       })
                     }
+                    onDiningShape={(shape) => {
+                      const catalogItemId = diningSetCatalogId(shape);
+                      const item = getPlaceableItem(catalogItemId);
+                      commitDesign({
+                        ...design,
+                        objects: design.objects.map((o) => {
+                          if (o.id !== selectedObject.id) return o;
+                          let widthMm = o.widthMm;
+                          let depthMm = o.depthMm;
+                          if (shape === "round") {
+                            const dia = Math.max(widthMm, depthMm);
+                            widthMm = dia;
+                            depthMm = dia;
+                          } else if (Math.abs(widthMm - depthMm) < 1) {
+                            // Coming from a round table — use catalog rect depth.
+                            depthMm = item?.depthMm ?? widthMm * 0.58;
+                          }
+                          return {
+                            ...o,
+                            catalogItemId,
+                            name: item?.name ?? o.name,
+                            widthMm,
+                            depthMm,
+                          };
+                        }),
+                      });
+                    }}
                     onDelete={deleteSelection}
                   />
                 )}
@@ -2669,29 +3246,75 @@ export function CadWorkspace({
                         unitSystem,
                       )}
                     </div>
+                    <RectDimensionFields
+                      key={`feat-rect-${selectedFeature.id}-${selectedFeature.outline.map((p) => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join("|")}`}
+                      outline={selectedFeature.outline}
+                      unitSystem={unitSystem}
+                      onResize={(widthMm, lengthMm) =>
+                        commitDesign({
+                          ...design,
+                          features: (design.features ?? []).map((f) =>
+                            f.id === selectedFeature.id
+                              ? {
+                                  ...f,
+                                  outline: resizeRectangleOutline(
+                                    f.outline,
+                                    widthMm,
+                                    lengthMm,
+                                  ),
+                                }
+                              : f,
+                          ),
+                        })
+                      }
+                    />
                     {selectedFeature.kind === "steps" && (
-                      <div className="field">
-                        <label htmlFor="risers">Riser count</label>
-                        <input
-                          id="risers"
-                          type="number"
-                          min={1}
-                          max={12}
-                          defaultValue={selectedFeature.riserCount ?? 3}
-                          onBlur={(e) => {
-                            const n = Number(e.target.value);
-                            if (!Number.isFinite(n) || n < 1) return;
-                            commitDesign({
-                              ...design,
-                              features: (design.features ?? []).map((f) =>
-                                f.id === selectedFeature.id
-                                  ? { ...f, riserCount: Math.round(n) }
-                                  : f,
-                              ),
-                            });
-                          }}
-                        />
-                      </div>
+                      <>
+                        <div className="field">
+                          <label htmlFor="risers">Riser count</label>
+                          <input
+                            id="risers"
+                            type="number"
+                            min={1}
+                            max={12}
+                            key={`risers-${selectedFeature.id}-${selectedFeature.riserCount ?? 3}`}
+                            defaultValue={selectedFeature.riserCount ?? 3}
+                            onBlur={(e) => {
+                              const n = Number(e.target.value);
+                              if (!Number.isFinite(n) || n < 1) return;
+                              const riserCount = Math.min(12, Math.round(n));
+                              commitDesign({
+                                ...design,
+                                features: (design.features ?? []).map((f) =>
+                                  f.id === selectedFeature.id
+                                    ? {
+                                        ...f,
+                                        riserCount,
+                                        outline: applyStepsStandardFootprint(
+                                          f.outline,
+                                          riserCount,
+                                        ),
+                                      }
+                                    : f,
+                                ),
+                              });
+                            }}
+                          />
+                        </div>
+                        <p
+                          className="muted"
+                          style={{ margin: 0, fontSize: "0.78rem" }}
+                        >
+                          Run into pool set to{" "}
+                          {formatLength(
+                            stepsRunMm(selectedFeature.riserCount),
+                            unitSystem,
+                          )}{" "}
+                          ({selectedFeature.riserCount ?? 3} ×{" "}
+                          {formatLength(STANDARD_STEP_TREAD_MM, unitSystem)}{" "}
+                          treads). Width stays at least 4′.
+                        </p>
+                      </>
                     )}
                     {selectedFeature.kind === "sunshelf" && (
                       <div className="field">
@@ -2796,66 +3419,222 @@ export function CadWorkspace({
   );
 }
 
-function SpaDimensionFields({
+/** Door / window size editors with defaults, Enter-to-commit, and parse feedback. */
+function OpeningSizeFields({
+  opening,
+  building,
+  unitSystem,
+  onChange,
+}: {
+  opening: BuildingOpening;
+  building: Building;
+  unitSystem: UnitSystem;
+  onChange: (patch: { widthMm?: number; heightMm?: number }) => void;
+}) {
+  const defaults = defaultOpeningSize(opening.kind);
+  const n = building.outline.length;
+  const edgeIndex = ((opening.edgeIndex % n) + n) % n;
+  const edgeLen =
+    n >= 2
+      ? segmentLengthMm(
+          building.outline[edgeIndex],
+          building.outline[(edgeIndex + 1) % n],
+        )
+      : Infinity;
+  const stories = Math.max(1, building.stories || 1);
+  const sillMm = openingSillMm(opening.kind, opening.story, stories);
+  const maxHeightMm = Math.max(
+    100,
+    buildingHeightMm(stories) - sillMm - 50,
+  );
+  const [widthError, setWidthError] = useState<string | null>(null);
+  const [heightError, setHeightError] = useState<string | null>(null);
+
+  function commitWidth(raw: string) {
+    const mm = parseLengthToMm(raw, unitSystem);
+    if (mm == null || mm <= 0) {
+      setWidthError("Couldn’t read that size — try 3′-0″, 36″, or 914mm");
+      return;
+    }
+    setWidthError(null);
+    if (mm > edgeLen + 0.5) {
+      setWidthError(
+        `Wall is only ${formatLength(edgeLen, unitSystem)} — clamped to fit`,
+      );
+    }
+    onChange({ widthMm: mm });
+  }
+
+  function commitHeight(raw: string) {
+    const mm = parseLengthToMm(raw, unitSystem);
+    if (mm == null || mm <= 0) {
+      setHeightError("Couldn’t read that size — try 6′-8″, 80″, or 2032mm");
+      return;
+    }
+    setHeightError(null);
+    const clamped = Math.min(mm, maxHeightMm);
+    if (clamped < mm - 0.5) {
+      setHeightError(
+        `Max on this story is ${formatLength(maxHeightMm, unitSystem)}`,
+      );
+    }
+    onChange({ heightMm: clamped });
+  }
+
+  return (
+    <div className="stack" style={{ gap: "0.55rem" }}>
+      <div className="field">
+        <label htmlFor="opening-width">Width</label>
+        <input
+          id="opening-width"
+          key={`opening-w-${opening.id}-${opening.widthMm}`}
+          defaultValue={formatLength(opening.widthMm, unitSystem)}
+          placeholder={formatLength(defaults.widthMm, unitSystem)}
+          onBlur={(e) => commitWidth(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+        />
+        <div className="muted" style={{ fontSize: "0.72rem" }}>
+          Default {formatLength(defaults.widthMm, unitSystem)}
+          {Number.isFinite(edgeLen)
+            ? ` · wall ${formatLength(edgeLen, unitSystem)}`
+            : ""}
+        </div>
+        {widthError && (
+          <div className="error" style={{ fontSize: "0.75rem" }}>
+            {widthError}
+          </div>
+        )}
+      </div>
+      <div className="field">
+        <label htmlFor="opening-height">Height</label>
+        <input
+          id="opening-height"
+          key={`opening-h-${opening.id}-${opening.heightMm}`}
+          defaultValue={formatLength(opening.heightMm, unitSystem)}
+          placeholder={formatLength(defaults.heightMm, unitSystem)}
+          onBlur={(e) => commitHeight(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+        />
+        <div className="muted" style={{ fontSize: "0.72rem" }}>
+          Default {formatLength(defaults.heightMm, unitSystem)}
+          {opening.kind === "window"
+            ? ` · sill ~${formatLength(914.4, unitSystem)} above floor`
+            : ""}
+        </div>
+        {heightError && (
+          <div className="error" style={{ fontSize: "0.75rem" }}>
+            {heightError}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        className="btn secondary"
+        onClick={() => {
+          setWidthError(null);
+          setHeightError(null);
+          onChange({
+            widthMm: defaults.widthMm,
+            heightMm: defaults.heightMm,
+          });
+        }}
+      >
+        Reset to {openingKindLabel(opening.kind).toLowerCase()} default (
+        {formatLength(defaults.widthMm, unitSystem)} ×{" "}
+        {formatLength(defaults.heightMm, unitSystem)})
+      </button>
+    </div>
+  );
+}
+
+/** Length / width editors for any rectangular footprint. */
+function RectDimensionFields({
+  outline,
+  unitSystem,
+  onResize,
+  widthLabel = "Width",
+  lengthLabel = "Length",
+}: {
+  outline: PointMm[];
+  unitSystem: UnitSystem;
+  onResize: (widthMm: number, lengthMm: number) => void;
+  widthLabel?: string;
+  lengthLabel?: string;
+}) {
+  const frame = rectangleFrame(outline);
+  if (!frame) {
+    return (
+      <p className="muted" style={{ margin: 0, fontSize: "0.8rem" }}>
+        Drag vertices to resize — length/width editing is available for
+        rectangular shapes.
+      </p>
+    );
+  }
+  return (
+    <div className="stack" style={{ gap: "0.45rem" }}>
+      <strong style={{ fontSize: "0.85rem" }}>Size</strong>
+      <div className="field">
+        <label htmlFor="rect-w">{widthLabel}</label>
+        <input
+          id="rect-w"
+          defaultValue={formatLength(frame.widthMm, unitSystem)}
+          onBlur={(e) => {
+            const mm = parseLengthToMm(e.target.value, unitSystem);
+            if (mm != null && mm > 50) onResize(mm, frame.lengthMm);
+          }}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="rect-l">{lengthLabel}</label>
+        <input
+          id="rect-l"
+          defaultValue={formatLength(frame.lengthMm, unitSystem)}
+          onBlur={(e) => {
+            const mm = parseLengthToMm(e.target.value, unitSystem);
+            if (mm != null && mm > 50) onResize(frame.widthMm, mm);
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SpaShellFields({
   body,
   unitSystem,
-  onOutsideSize,
   onWallThickness,
   onShellHeight,
 }: {
   body: PoolBody;
   unitSystem: UnitSystem;
-  onOutsideSize: (widthMm: number, depthMm: number) => void;
   onWallThickness: (wallThicknessMm: number) => void;
   onShellHeight: (shellHeightMm: number) => void;
 }) {
-  const outside = outlineBounds(body.outline);
   const wall = spaWallThicknessMm(body);
   const shellHeight = spaShellHeightMm(body);
   const inside = insideBoundsFromOutside(body.outline, wall);
-  const rect = isAxisAlignedRect(body.outline);
+
+  const commitShellHeight = (raw: string) => {
+    const mm = parseLengthToMm(raw, unitSystem);
+    // Any non-negative length (0 = flush with deck; no upper cap).
+    if (mm != null && Number.isFinite(mm) && mm >= 0) onShellHeight(mm);
+  };
 
   return (
     <div className="stack" style={{ gap: "0.55rem" }}>
-      <strong style={{ fontSize: "0.9rem" }}>Outside dimensions</strong>
       <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
-        You draw and edit the outside shell. Inside waterline = outside − wall
-        thickness on each side.
+        Inside waterline = outside − wall thickness on each side.
       </p>
-      {rect ? (
-        <>
-          <div className="field">
-            <label htmlFor="spa-out-w">Outside width</label>
-            <input
-              id="spa-out-w"
-              defaultValue={formatLength(outside.width, unitSystem)}
-              onBlur={(e) => {
-                const mm = parseLengthToMm(e.target.value, unitSystem);
-                if (mm != null && mm > wall * 2 + 50) {
-                  onOutsideSize(mm, outside.height);
-                }
-              }}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="spa-out-d">Outside length</label>
-            <input
-              id="spa-out-d"
-              defaultValue={formatLength(outside.height, unitSystem)}
-              onBlur={(e) => {
-                const mm = parseLengthToMm(e.target.value, unitSystem);
-                if (mm != null && mm > wall * 2 + 50) {
-                  onOutsideSize(outside.width, mm);
-                }
-              }}
-            />
-          </div>
-        </>
-      ) : (
-        <p className="muted" style={{ margin: 0, fontSize: "0.8rem" }}>
-          Drag shell vertices to resize — package reflows when you release.
-        </p>
-      )}
       <div className="field">
         <label htmlFor="spa-wall">Wall thickness</label>
         <input
@@ -2868,18 +3647,25 @@ function SpaDimensionFields({
         />
       </div>
       <div className="field">
-        <label htmlFor="spa-shell-h">Shell height (above deck)</label>
+        <label htmlFor="spa-shell-h">Shell height (above patio)</label>
         <input
           id="spa-shell-h"
+          key={`spa-shell-h-${body.id}-${shellHeight}`}
           defaultValue={formatLength(shellHeight, unitSystem)}
-          onBlur={(e) => {
-            const mm = parseLengthToMm(e.target.value, unitSystem);
-            if (mm != null && mm >= 0) onShellHeight(mm);
+          placeholder={unitSystem === "metric" ? "e.g. 450mm" : "e.g. 18\" or 2'"}
+          onBlur={(e) => commitShellHeight(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitShellHeight((e.target as HTMLInputElement).value);
+              (e.target as HTMLInputElement).blur();
+            }
           }}
         />
       </div>
       <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
-        Raised spa wall height above the surrounding deck — set per customer.
+        Height of the spa rim above the patio surface. 0″ = flush with the
+        patio (not below it).
       </p>
       <div className="muted" style={{ fontSize: "0.8rem" }}>
         Inside waterline: {formatLength(inside.width, unitSystem)} ×{" "}
@@ -2890,16 +3676,14 @@ function SpaDimensionFields({
 }
 
 function DepthFields({
-  shallowMm,
-  deepMm,
+  body,
   unitSystem,
-  onChange,
+  onChangeBody,
   spa = false,
 }: {
-  shallowMm: number;
-  deepMm: number;
+  body: PoolBody;
   unitSystem: UnitSystem;
-  onChange: (shallowMm: number, deepMm: number) => void;
+  onChangeBody: (next: PoolBody) => void;
   spa?: boolean;
 }) {
   if (spa) {
@@ -2908,40 +3692,132 @@ function DepthFields({
         <label htmlFor="spa-depth">Water depth</label>
         <input
           id="spa-depth"
-          defaultValue={formatLength(shallowMm, unitSystem)}
+          defaultValue={formatLength(body.depthShallowMm, unitSystem)}
           onBlur={(e) => {
             const mm = parseLengthToMm(e.target.value, unitSystem);
-            if (mm != null) onChange(mm, mm);
+            if (mm != null) {
+              onChangeBody({
+                ...body,
+                depthShallowMm: mm,
+                depthDeepMm: mm,
+              });
+            }
           }}
         />
       </div>
     );
   }
+
+  const profile = depthProfileForBody(body);
+  const stations = profile.stations;
+
   return (
-    <>
-      <div className="field">
-        <label htmlFor="shallow">Shallow depth</label>
-        <input
-          id="shallow"
-          defaultValue={formatLength(shallowMm, unitSystem)}
-          onBlur={(e) => {
-            const mm = parseLengthToMm(e.target.value, unitSystem);
-            if (mm != null) onChange(mm, deepMm);
-          }}
-        />
+    <div className="stack" style={{ gap: "0.55rem" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: "0.4rem",
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <strong style={{ fontSize: "0.85rem" }}>Depth profile</strong>
+        <button
+          type="button"
+          className="btn secondary"
+          style={{ fontSize: "0.78rem", padding: "0.25rem 0.5rem" }}
+          onClick={() => onChangeBody(flipDepthEnds(body))}
+        >
+          Flip ends
+        </button>
+        <button
+          type="button"
+          className="btn secondary"
+          style={{ fontSize: "0.78rem", padding: "0.25rem 0.5rem" }}
+          onClick={() => onChangeBody(addDepthBreak(body, 0))}
+        >
+          Add break
+        </button>
       </div>
-      <div className="field">
-        <label htmlFor="deep">Deep depth</label>
-        <input
-          id="deep"
-          defaultValue={formatLength(deepMm, unitSystem)}
-          onBlur={(e) => {
-            const mm = parseLengthToMm(e.target.value, unitSystem);
-            if (mm != null) onChange(shallowMm, mm);
-          }}
-        />
-      </div>
-    </>
+      <p className="muted" style={{ fontSize: "0.75rem", margin: 0 }}>
+        Drag markers on the pool to place breaks. Smooth curves by default;
+        set Drop-off for a sharp step.
+      </p>
+      {stations.map((s, i) => {
+        const isEnd = i === 0 || i === stations.length - 1;
+        const label =
+          i === 0 ? "Shallow end" : i === stations.length - 1 ? "Deep end" : `Break ${i}`;
+        return (
+          <div
+            key={`${s.id}-${s.t.toFixed(3)}-${s.depthMm}-${s.transition}`}
+            className="stack"
+            style={{
+              gap: "0.35rem",
+              padding: "0.45rem 0.5rem",
+              background: "rgba(15,92,74,0.06)",
+              borderRadius: 8,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "0.4rem",
+              }}
+            >
+              <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>{label}</span>
+              {!isEnd && (
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ fontSize: "0.72rem", padding: "0.15rem 0.4rem" }}
+                  onClick={() => onChangeBody(removeDepthBreak(body, s.id))}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+            <div className="field">
+              <label htmlFor={`depth-${s.id}`}>Depth</label>
+              <input
+                id={`depth-${s.id}`}
+                defaultValue={formatLength(s.depthMm, unitSystem)}
+                onBlur={(e) => {
+                  const mm = parseLengthToMm(e.target.value, unitSystem);
+                  if (mm == null) return;
+                  onChangeBody(
+                    updateDepthStation(materializeDepthStations(body), s.id, {
+                      depthMm: mm,
+                    }),
+                  );
+                }}
+              />
+            </div>
+            {i > 0 && (
+              <div className="field">
+                <label htmlFor={`trans-${s.id}`}>Transition</label>
+                <select
+                  id={`trans-${s.id}`}
+                  value={s.transition}
+                  onChange={(e) => {
+                    const transition = e.target.value as DepthTransition;
+                    onChangeBody(
+                      updateDepthStation(materializeDepthStations(body), s.id, {
+                        transition,
+                      }),
+                    );
+                  }}
+                >
+                  <option value="smooth">Smooth curve</option>
+                  <option value="dropoff">Drop-off</option>
+                </select>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -2950,41 +3826,90 @@ function FurnitureFields({
   unitSystem,
   onRotate,
   onDimensions,
+  onDiningShape,
   onDelete,
 }: {
   object: PlacedObject;
   unitSystem: UnitSystem;
   onRotate: (deg: number) => void;
   onDimensions: (widthMm: number, depthMm: number) => void;
+  onDiningShape?: (shape: "rect" | "round") => void;
   onDelete: () => void;
 }) {
+  const dining = isDiningSetId(object.catalogItemId);
+  const diningShape = dining ? diningTableShape(object.catalogItemId) : null;
+  const plan = objectPlanSizeMm(object);
+
   return (
     <div className="stack">
       <strong>{object.name}</strong>
-      <div className="field">
-        <label htmlFor="furn-width">Width</label>
-        <input
-          id="furn-width"
-          defaultValue={formatLength(object.widthMm, unitSystem)}
-          placeholder={unitSystem === "imperial" ? `e.g. 6'` : "e.g. 1.8m"}
-          onBlur={(e) => {
-            const mm = parseLengthToMm(e.target.value, unitSystem);
-            if (mm != null && mm > 0) onDimensions(mm, object.depthMm);
-          }}
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="furn-depth">Depth / length</label>
-        <input
-          id="furn-depth"
-          defaultValue={formatLength(object.depthMm, unitSystem)}
-          placeholder={unitSystem === "imperial" ? `e.g. 3'` : "e.g. 0.9m"}
-          onBlur={(e) => {
-            const mm = parseLengthToMm(e.target.value, unitSystem);
-            if (mm != null && mm > 0) onDimensions(object.widthMm, mm);
-          }}
-        />
-      </div>
+      {dining && onDiningShape && (
+        <div className="field">
+          <label htmlFor="dining-shape">Table shape</label>
+          <select
+            id="dining-shape"
+            value={diningShape ?? "round"}
+            onChange={(e) =>
+              onDiningShape(e.target.value === "rect" ? "rect" : "round")
+            }
+          >
+            <option value="rect">Rectangular</option>
+            <option value="round">Round</option>
+          </select>
+        </div>
+      )}
+      {dining && diningShape === "round" ? (
+        <div className="field">
+          <label htmlFor="furn-width">Table diameter</label>
+          <input
+            id="furn-width"
+            defaultValue={formatLength(object.widthMm, unitSystem)}
+            placeholder={unitSystem === "imperial" ? `e.g. 5'` : "e.g. 1.5m"}
+            onBlur={(e) => {
+              const mm = parseLengthToMm(e.target.value, unitSystem);
+              if (mm != null && mm > 0) onDimensions(mm, mm);
+            }}
+          />
+        </div>
+      ) : (
+        <>
+          <div className="field">
+            <label htmlFor="furn-width">
+              {dining ? "Table width" : "Width"}
+            </label>
+            <input
+              id="furn-width"
+              defaultValue={formatLength(object.widthMm, unitSystem)}
+              placeholder={unitSystem === "imperial" ? `e.g. 6'` : "e.g. 1.8m"}
+              onBlur={(e) => {
+                const mm = parseLengthToMm(e.target.value, unitSystem);
+                if (mm != null && mm > 0) onDimensions(mm, object.depthMm);
+              }}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="furn-depth">
+              {dining ? "Table depth" : "Depth / length"}
+            </label>
+            <input
+              id="furn-depth"
+              defaultValue={formatLength(object.depthMm, unitSystem)}
+              placeholder={unitSystem === "imperial" ? `e.g. 3'` : "e.g. 0.9m"}
+              onBlur={(e) => {
+                const mm = parseLengthToMm(e.target.value, unitSystem);
+                if (mm != null && mm > 0) onDimensions(object.widthMm, mm);
+              }}
+            />
+          </div>
+        </>
+      )}
+      {dining && (
+        <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
+          Dimensions are the tabletop. Plan footprint with chairs:{" "}
+          {formatLength(plan.widthMm, unitSystem)} ×{" "}
+          {formatLength(plan.depthMm, unitSystem)}.
+        </p>
+      )}
       <div className="field">
         <label htmlFor="furn-rot">Rotation (degrees)</label>
         <input
@@ -3058,6 +3983,7 @@ function placeLibraryItem(
     layerId: item.layerId,
     widthMm: item.widthMm,
     depthMm: item.depthMm,
+    heightMm: item.heightMm,
     parentBodyId,
   };
   let layers = design.layers;
@@ -3196,7 +4122,16 @@ function translateDesign(
     return {
       ...d,
       patioCovers: (d.patioCovers ?? []).map((c) =>
-        c.id === id ? { ...c, outline: c.outline.map(shift) } : c,
+        c.id === id
+          ? {
+              ...c,
+              outline: c.outline.map(shift),
+              supports: (c.supports ?? []).map((s) => ({
+                ...s,
+                position: shift(s.position),
+              })),
+            }
+          : c,
       ),
     };
   }

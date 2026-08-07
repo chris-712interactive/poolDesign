@@ -115,6 +115,136 @@ export function resizeAxisAlignedOutline(
   return rect(b.cx - hw, b.cy - hh, b.cx + hw, b.cy + hh);
 }
 
+function openOutline(outline: PointMm[]): PointMm[] {
+  if (outline.length < 2) return outline;
+  const a = outline[0];
+  const b = outline[outline.length - 1];
+  if (Math.hypot(a.x - b.x, a.y - b.y) < 1) return outline.slice(0, -1);
+  return outline;
+}
+
+export type RectangleFrame = {
+  /** Side A length (mm) — first edge of the outline. */
+  widthMm: number;
+  /** Side B length (mm) — adjacent edge. */
+  lengthMm: number;
+  center: PointMm;
+  /** Unit vector along width (first edge). */
+  axisWidth: PointMm;
+  /** Unit vector along length (adjacent edge). */
+  axisLength: PointMm;
+};
+
+/**
+ * True for axis-aligned or rotated rectangles (4 corners, opposite sides equal,
+ * adjacent sides nearly perpendicular). Tolerates slight hand-drawn skew.
+ */
+export function isRectangularOutline(
+  outline: PointMm[],
+  tolMm = 80,
+): boolean {
+  const pts = openOutline(outline);
+  if (pts.length !== 4) return false;
+  if (isAxisAlignedRect(pts, Math.max(2, tolMm * 0.15))) return true;
+
+  const lens = [0, 1, 2, 3].map((i) =>
+    Math.hypot(
+      pts[(i + 1) % 4].x - pts[i].x,
+      pts[(i + 1) % 4].y - pts[i].y,
+    ),
+  );
+  if (lens.some((l) => l < tolMm)) return false;
+  // Opposite sides similar
+  if (Math.abs(lens[0] - lens[2]) > tolMm) return false;
+  if (Math.abs(lens[1] - lens[3]) > tolMm) return false;
+
+  const ux = (pts[1].x - pts[0].x) / lens[0];
+  const uy = (pts[1].y - pts[0].y) / lens[0];
+  const vx = (pts[2].x - pts[1].x) / lens[1];
+  const vy = (pts[2].y - pts[1].y) / lens[1];
+  // Adjacent edges nearly perpendicular
+  return Math.abs(ux * vx + uy * vy) < 0.12;
+}
+
+/** Local width/length frame for a rectangular outline, or null. */
+export function rectangleFrame(
+  outline: PointMm[],
+  tolMm = 80,
+): RectangleFrame | null {
+  const pts = openOutline(outline);
+  if (!isRectangularOutline(pts, tolMm)) {
+    // Fall back: treat AABB as an editable rectangle when 4-ish points
+    if (pts.length !== 4 && pts.length !== 5) return null;
+    const b = outlineBounds(pts);
+    if (b.width < 50 || b.height < 50) return null;
+    // Only if corners are close to AABB (skewed hand-drawn decks)
+    let nearAabb = true;
+    for (const p of pts.slice(0, 4)) {
+      const onX =
+        Math.abs(p.x - b.minX) <= tolMm || Math.abs(p.x - b.maxX) <= tolMm;
+      const onY =
+        Math.abs(p.y - b.minY) <= tolMm || Math.abs(p.y - b.maxY) <= tolMm;
+      if (!onX || !onY) {
+        nearAabb = false;
+        break;
+      }
+    }
+    if (!nearAabb) return null;
+    return {
+      widthMm: b.width,
+      lengthMm: b.height,
+      center: { x: b.cx, y: b.cy },
+      axisWidth: { x: 1, y: 0 },
+      axisLength: { x: 0, y: 1 },
+    };
+  }
+
+  const w = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+  const l = Math.hypot(pts[2].x - pts[1].x, pts[2].y - pts[1].y);
+  const axisWidth = { x: (pts[1].x - pts[0].x) / w, y: (pts[1].y - pts[0].y) / w };
+  // Orient length axis to the left of width so CCW winding is preserved
+  let axisLength = { x: (pts[2].x - pts[1].x) / l, y: (pts[2].y - pts[1].y) / l };
+  const cross = axisWidth.x * axisLength.y - axisWidth.y * axisLength.x;
+  if (cross < 0) {
+    axisLength = { x: -axisLength.x, y: -axisLength.y };
+  }
+  const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
+  const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+  return {
+    widthMm: w,
+    lengthMm: l,
+    center: { x: cx, y: cy },
+    axisWidth,
+    axisLength,
+  };
+}
+
+/**
+ * Resize a rectangle about its center, preserving rotation.
+ * `widthMm` follows the first edge; `lengthMm` the adjacent edge.
+ */
+export function resizeRectangleOutline(
+  outline: PointMm[],
+  widthMm: number,
+  lengthMm: number,
+): PointMm[] {
+  const frame = rectangleFrame(outline);
+  const w = Math.max(50, widthMm);
+  const l = Math.max(50, lengthMm);
+  if (!frame) {
+    return resizeAxisAlignedOutline(outline, w, l);
+  }
+  const hw = w / 2;
+  const hl = l / 2;
+  const { center: c, axisWidth: u, axisLength: v } = frame;
+  return [
+    { x: c.x - u.x * hw - v.x * hl, y: c.y - u.y * hw - v.y * hl },
+    { x: c.x + u.x * hw - v.x * hl, y: c.y + u.y * hw - v.y * hl },
+    { x: c.x + u.x * hw + v.x * hl, y: c.y + u.y * hw + v.y * hl },
+    { x: c.x - u.x * hw + v.x * hl, y: c.y - u.y * hw + v.y * hl },
+  ];
+}
+
 export function spaWallThicknessMm(body: PoolBody): number {
   return body.wallThicknessMm ?? DEFAULT_SPA_WALL_THICKNESS_MM;
 }
@@ -171,6 +301,7 @@ function placeEquip(
     layerId: item?.layerId ?? "equipment",
     widthMm: item?.widthMm ?? 8 * IN,
     depthMm: item?.depthMm ?? 8 * IN,
+    heightMm: item?.heightMm,
     parentBodyId,
   };
 }
