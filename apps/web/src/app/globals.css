@@ -80,7 +80,9 @@ textarea {
   height: 1.55rem;
   object-fit: contain;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.12rem;
+  box-sizing: content-box;
 }
 
 .topbar nav {

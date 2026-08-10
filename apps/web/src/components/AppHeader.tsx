@@ -6,7 +6,7 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
     <header className="topbar">
       <Link href="/" className="brand">
         <img
-          src="/brand/mark.png"
+          src="/brand/mark.svg"
           alt=""
           width={28}
           height={28}

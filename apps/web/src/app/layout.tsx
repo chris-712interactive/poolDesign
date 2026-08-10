@@ -4,6 +4,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "PoolShape",
   description: "Professional pool design, estimating, and client proposals",
+  icons: {
+    icon: [{ url: "/brand/mark.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/brand/mark.png" }],
+  },
 };
 
 export default function RootLayout({
