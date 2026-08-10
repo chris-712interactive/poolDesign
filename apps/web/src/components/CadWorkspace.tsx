@@ -126,6 +126,7 @@ import {
   type BuildingOpening,
   type BuildingOpeningKind,
   type DepthTransition,
+  type CatalogItem,
   type DesignDocument,
   type DesignLevel,
   type FenceGate,
@@ -149,6 +150,8 @@ import {
 } from "@pool-design/shared";
 import { EstimatePanel } from "@/components/EstimatePanel";
 import { CadScene3DDynamic } from "@/components/CadScene3DDynamic";
+import type { CadScene3DHandle } from "@/components/CadScene3DCanvas";
+import { ShareProposalButton } from "@/components/ShareProposalButton";
 import { FenceFinishPicker } from "@/components/FenceFinishPicker";
 import { HouseFinishPicker } from "@/components/HouseFinishPicker";
 import { FurnitureFinishPicker } from "@/components/FurnitureFinishPicker";
@@ -280,6 +283,7 @@ type Props = {
   designLevel: DesignLevel;
   unitSystem: UnitSystem;
   initialDesign: DesignDocument;
+  catalog?: CatalogItem[];
 };
 
 const CLOSE_TOLERANCE_MM = 150;
@@ -381,8 +385,10 @@ export function CadWorkspace({
   designLevel,
   unitSystem,
   initialDesign,
+  catalog,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const scene3dHandleRef = useRef<CadScene3DHandle | null>(null);
   const dragOriginRef = useRef<DesignDocument | null>(null);
   const designRef = useRef<DesignDocument>(initialDesign);
   const [view, setView] = useState<WorkspaceView>("design");
@@ -2696,6 +2702,16 @@ export function CadWorkspace({
           <span className="badge">{DESIGN_LEVEL_LABELS[designLevel]}</span>
         </div>
         <div className="row">
+          <ShareProposalButton
+            projectId={projectId}
+            ensure3d={() => {
+              setView("design");
+              setDesignMode("3d");
+            }}
+            capturePreview={() =>
+              scene3dHandleRef.current?.capturePngDataUrl() ?? null
+            }
+          />
           <button
             type="button"
             className={`btn ${view === "design" ? "" : "secondary"}`}
@@ -2719,6 +2735,7 @@ export function CadWorkspace({
           design={design}
           unitSystem={unitSystem}
           onDesignChange={commitDesign}
+          catalog={catalog}
         />
       ) : (
         <div
@@ -2767,6 +2784,7 @@ export function CadWorkspace({
                   design={design}
                   projectId={projectId}
                   projectName={projectName}
+                  exportHandleRef={scene3dHandleRef}
                   selection={
                     selection?.kind === "gradeSample" ? null : selection
                   }

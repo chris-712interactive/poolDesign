@@ -5,12 +5,18 @@ import { DESIGN_LEVEL_LABELS, type DesignLevel } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
 import { CreateProjectForm } from "@/components/CreateProjectForm";
+import { SubscriptionBlocked } from "@/components/SubscriptionBlocked";
+import { companyHasAppAccess } from "@/lib/subscription";
 
 export default async function ProjectsPage() {
   const user = await getSessionUser();
   if (!user) redirect("/login");
   if (user.role === "platform_owner") redirect("/platform");
   if (!user.companyId) redirect("/login");
+
+  if (!companyHasAppAccess(user.company)) {
+    return <SubscriptionBlocked user={user} />;
+  }
 
   const company = user.company!;
   const enabled = company.enabledDesignLevels.split(",") as DesignLevel[];

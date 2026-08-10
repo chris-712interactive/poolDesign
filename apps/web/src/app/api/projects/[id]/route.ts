@@ -6,6 +6,7 @@ import {
   type DesignLevel,
 } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
+import { companyHasAppAccess } from "@/lib/subscription";
 
 export async function PUT(
   request: Request,
@@ -14,6 +15,9 @@ export async function PUT(
   const user = await getSessionUser();
   if (!user?.companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!companyHasAppAccess(user.company)) {
+    return NextResponse.json({ error: "Subscription inactive" }, { status: 402 });
   }
 
   const { id } = await context.params;

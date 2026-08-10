@@ -14,10 +14,12 @@
     "@pool-design/shared": "workspace:*",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
+    "@vercel/blob": "^2.7.0",
     "bcryptjs": "^3.0.2",
     "next": "^15.2.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "stripe": "^22.4.0",
     "three": "^0.185.1",
     "zod": "^3.24.2"
   },

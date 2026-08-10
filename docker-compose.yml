@@ -1,0 +1,16 @@
+# Local Postgres for development (production uses Neon / Vercel Postgres).
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: pooldesign
+      POSTGRES_PASSWORD: pooldesign
+      POSTGRES_DB: pooldesign
+    volumes:
+      - pooldesign_pg:/var/lib/postgresql/data
+
+volumes:
+  pooldesign_pg:

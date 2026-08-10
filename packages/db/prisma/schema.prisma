@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -63,21 +63,23 @@ model Company {
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
-  users              User[]
-  projects           Project[]
-  milestoneStatuses  CompanyMilestoneStatus[]
+  users             User[]
+  projects          Project[]
+  milestoneStatuses CompanyMilestoneStatus[]
+  priceOverrides    CompanyPriceOverride[]
+  invites           CompanyInvite[]
 }
 
 model User {
-  id              String     @id @default(cuid())
-  email           String     @unique
-  name            String
-  passwordHash    String
-  role            UserRole
-  companyId       String?
-  unitSystem      UnitSystem @default(imperial)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id           String     @id @default(cuid())
+  email        String     @unique
+  name         String
+  passwordHash String
+  role         UserRole
+  companyId    String?
+  unitSystem   UnitSystem @default(imperial)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
   company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -97,9 +99,71 @@ model Project {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  shares  ProjectShare[]
+
+  @@index([companyId])
+}
+
+/** Public client proposal link (no login required). */
+model ProjectShare {
+  id                 String    @id @default(cuid())
+  projectId          String
+  token              String    @unique
+  includeEstimate    Boolean   @default(true)
+  /** Snapshot of design JSON at share time */
+  designSnapshotJson String
+  /** Snapshot of takeoff JSON at share time (optional) */
+  estimateSnapshotJson String?
+  /** Public URL or data-URL for a 3D still */
+  previewImageUrl    String?
+  /** Optional orbit clip URL */
+  previewVideoUrl    String?
+  createdByUserId    String?
+  expiresAt          DateTime?
+  revokedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([token])
+}
+
+/** Per-company catalog unit price overrides (cents). */
+model CompanyPriceOverride {
+  id              String   @id @default(cuid())
+  companyId       String
+  catalogItemId   String
+  unitPriceCents  Int
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, catalogItemId])
+  @@index([companyId])
+}
+
+/** Pending team invite (email + temp password until accepted). */
+model CompanyInvite {
+  id              String    @id @default(cuid())
+  companyId       String
+  email           String
+  name            String
+  role            UserRole  @default(designer)
+  token           String    @unique
+  temporaryPasswordHash String
+  invitedByUserId String?
+  acceptedAt      DateTime?
+  expiresAt       DateTime
+  createdAt       DateTime  @default(now())
+
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
+  @@index([email])
 }
 
 model OnboardingMilestone {
@@ -113,16 +177,16 @@ model OnboardingMilestone {
 }
 
 model CompanyMilestoneStatus {
-  id           String         @id @default(cuid())
-  companyId    String
-  milestoneId  String
-  state        MilestoneState @default(pending)
-  source       MilestoneSource?
-  note         String?
-  updatedBy    String?
-  completedAt  DateTime?
-  dismissedAt  DateTime?
-  updatedAt    DateTime       @updatedAt
+  id          String          @id @default(cuid())
+  companyId   String
+  milestoneId String
+  state       MilestoneState  @default(pending)
+  source      MilestoneSource?
+  note        String?
+  updatedBy   String?
+  completedAt DateTime?
+  dismissedAt DateTime?
+  updatedAt   DateTime        @updatedAt
 
   company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   milestone OnboardingMilestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)

@@ -4,6 +4,9 @@ import { parseDesignDocument } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
 import { CadWorkspace } from "@/components/CadWorkspace";
+import { SubscriptionBlocked } from "@/components/SubscriptionBlocked";
+import { companyHasAppAccess } from "@/lib/subscription";
+import { catalogWithCompanyPrices } from "@/lib/shares";
 
 export default async function ProjectCadPage({
   params,
@@ -14,6 +17,10 @@ export default async function ProjectCadPage({
   if (!user) redirect("/login");
   if (user.role === "platform_owner") redirect("/platform");
   if (!user.companyId) redirect("/login");
+
+  if (!companyHasAppAccess(user.company)) {
+    return <SubscriptionBlocked user={user} />;
+  }
 
   const { id } = await params;
   const project = await prisma.project.findFirst({
@@ -26,6 +33,10 @@ export default async function ProjectCadPage({
     project.designLevel,
     user.unitSystem,
   );
+  const catalog = await catalogWithCompanyPrices(
+    user.companyId,
+    project.designLevel,
+  );
 
   return (
     <div className="app-shell">
@@ -37,6 +48,7 @@ export default async function ProjectCadPage({
           designLevel={project.designLevel}
           unitSystem={user.unitSystem}
           initialDesign={design}
+          catalog={catalog}
         />
       </main>
     </div>

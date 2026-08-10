@@ -1,8 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { MutableRefObject } from "react";
 import type { DesignDocument } from "@pool-design/shared";
 import type { SceneSelection } from "@/lib/cad3d/buildScene";
+import type { CadScene3DHandle } from "@/components/CadScene3DCanvas";
 
 const CadScene3DInner = dynamic(
   () =>
@@ -24,6 +26,7 @@ type Props = {
   selection: SceneSelection | null;
   onSelect: (sel: SceneSelection | null) => void;
   onDelete?: () => void;
+  exportHandleRef?: MutableRefObject<CadScene3DHandle | null>;
 };
 
 export function CadScene3DDynamic(props: Props) {

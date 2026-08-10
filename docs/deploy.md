@@ -1,0 +1,91 @@
+# Deploy: Vercel + Postgres
+
+## Why not SQLite on Vercel?
+
+Vercel’s serverless filesystem is ephemeral. This app uses **Postgres** (Neon or Vercel Postgres).
+
+## Local development
+
+```bash
+# Start Postgres
+docker compose up -d
+
+# Env (from repo root and/or apps/web)
+cp .env.example apps/web/.env
+cp .env.example packages/db/.env
+# Ensure DATABASE_URL points at local Postgres
+
+pnpm install
+pnpm db:generate
+pnpm db:push
+pnpm db:seed
+pnpm dev
+```
+
+## Vercel project
+
+1. Import the GitHub repo into Vercel.
+2. **Root Directory:** leave monorepo root; set:
+   - **Framework:** Next.js
+   - **Build Command:** `pnpm db:generate && pnpm --filter @pool-design/web build`
+   - **Install Command:** `pnpm install`
+   - **Output:** default for Next.js (`apps/web` via pnpm filter — or set Root Directory to `apps/web` and ensure workspace packages resolve)
+3. Recommended: set Vercel **Root Directory** to `apps/web`, and in that project’s settings allow access to the monorepo (`pnpm-workspace.yaml` at parent). Alternatively use:
+
+```
+Build Command: cd ../.. && pnpm db:generate && pnpm --filter @pool-design/web build
+Install Command: cd ../.. && pnpm install
+```
+
+Simplest reliable setup: **Root Directory = repository root**, with `vercel.json` (see below).
+
+4. Environment variables:
+
+| Name | Value |
+|------|--------|
+| `DATABASE_URL` | Neon/Vercel Postgres URL (use pooled + `sslmode=require`) |
+| `SESSION_SECRET` | Long random string |
+| `NEXT_PUBLIC_APP_URL` | `https://your-domain.com` |
+| `NEXT_PUBLIC_ROOT_DOMAIN` | `your-domain.com` (no protocol) |
+| `BLOB_READ_WRITE_TOKEN` | Optional — Vercel Blob |
+| `STRIPE_SECRET_KEY` | Stripe secret |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
+| `STRIPE_PRICE_STARTER_MONTHLY` | Price ID |
+| `STRIPE_PRICE_PRO_MONTHLY` | Price ID |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Publishable key |
+
+5. After first deploy, run migrate/push against production DB:
+
+```bash
+DATABASE_URL="postgresql://..." pnpm db:push
+DATABASE_URL="postgresql://..." pnpm db:seed
+```
+
+Or add a one-off Vercel cron / GitHub Action.
+
+## Wildcard subdomains
+
+1. Add `your-domain.com` and `*.your-domain.com` in Vercel Domains.
+2. Set `NEXT_PUBLIC_ROOT_DOMAIN=your-domain.com`.
+3. Company slug `acme-pools` resolves as `acme-pools.your-domain.com` via [apps/web/src/lib/tenant.ts](../apps/web/src/lib/tenant.ts).
+
+## Stripe webhooks
+
+Point Stripe to `https://your-domain.com/api/stripe/webhook` for:
+
+- `checkout.session.completed`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+
+Company admins start Checkout / open the Customer Portal from `/app/admin`.
+
+## Client proposals (Phase 1)
+
+- Designer: **Share with client** in CAD → creates `ProjectShare` + optional Blob/data-URL PNG
+- Public page: `/p/[token]` (no login)
+- APIs: `/api/projects/[id]/shares`, `/api/public/shares/[token]`
+
+## Team invites (Phase 3)
+
+- Company admin invites from `/app/admin`
+- Invitee accepts at `/invite/[token]` with the temporary password

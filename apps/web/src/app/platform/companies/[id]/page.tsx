@@ -89,6 +89,17 @@ export default async function CompanyDetailPage({
           <p className="muted">
             {company.slug} · {company.planKey} · {company.subscriptionStatus}
           </p>
+          <div className="muted" style={{ marginTop: "0.5rem" }}>
+            Stripe customer: {company.stripeCustomerId || "—"}
+            <br />
+            Subscription: {company.stripeSubscriptionId || "—"}
+            {company.trialEndsAt ? (
+              <>
+                <br />
+                Trial ends: {company.trialEndsAt.toLocaleDateString()}
+              </>
+            ) : null}
+          </div>
           <div className="row" style={{ marginTop: "0.75rem" }}>
             <span className="badge">{summary.label} milestones</span>
             {summary.stuckOn && (

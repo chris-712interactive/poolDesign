@@ -8,11 +8,13 @@ import {
   type DesignLevel,
 } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
+import { companyHasAppAccess } from "@/lib/subscription";
 
 async function createProjectAction(formData: FormData) {
   "use server";
   const user = await getSessionUser();
   if (!user?.companyId) redirect("/login");
+  if (!companyHasAppAccess(user.company)) redirect("/app/admin");
 
   const name = String(formData.get("name") || "").trim();
   const clientName = String(formData.get("clientName") || "").trim() || null;

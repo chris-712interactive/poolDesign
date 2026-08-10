@@ -6,6 +6,7 @@ import {
   formatMoney,
   formatQuantity,
   type CatalogCategory,
+  type CatalogItem,
   type CatalogUnit,
   type DesignDocument,
   type EstimateCustomLine,
@@ -17,6 +18,8 @@ type Props = {
   design: DesignDocument;
   unitSystem: UnitSystem;
   onDesignChange: (next: DesignDocument) => void;
+  /** Optional company price-book catalog */
+  catalog?: CatalogItem[];
 };
 
 const ADD_CATEGORIES: Array<CatalogCategory | "other"> = [
@@ -66,10 +69,11 @@ export function EstimatePanel({
   design,
   unitSystem,
   onDesignChange,
+  catalog,
 }: Props) {
   const takeoff = useMemo(
-    () => buildTakeoff(design, unitSystem),
-    [design, unitSystem],
+    () => buildTakeoff(design, unitSystem, catalog),
+    [design, unitSystem, catalog],
   );
   const [milestoneState, setMilestoneState] = useState<
     "idle" | "saving" | "saved" | "error"

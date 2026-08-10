@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
-import { DESIGN_LEVEL_LABELS } from "@pool-design/shared";
+import { CompanyAdminClient } from "@/components/CompanyAdminClient";
+import { companyHasAppAccess } from "@/lib/subscription";
 
 export default async function CompanyAdminPage() {
   const user = await getSessionUser();
@@ -9,72 +10,39 @@ export default async function CompanyAdminPage() {
   if (user.role !== "company_admin") redirect("/app");
   if (!user.company) redirect("/login");
 
+  // Admins may always reach billing to renew; other admin tools still load.
   const company = user.company;
-  const levels = company.enabledDesignLevels.split(",");
+  const rootDomain =
+    process.env.NEXT_PUBLIC_ROOT_DOMAIN || "localhost:3000";
 
   return (
     <div className="app-shell">
       <AppHeader user={user} />
       <main className="page stack">
-        <div className="panel">
-          <h1>Company admin</h1>
-          <p className="muted">
-            Billing, branding, domains, and Connect onboarding will plug in here.
-            Core tenant settings are already wired.
-          </p>
-        </div>
-        <div className="grid-2">
-          <div className="panel stack">
-            <h2>Tenant</h2>
-            <div>
-              <strong>Subdomain</strong>
-              <div className="muted">{company.slug}.localhost:3000</div>
-            </div>
-            <div>
-              <strong>Custom domain</strong>
-              <div className="muted">
-                {company.customDomain || "Not configured"}
-              </div>
-            </div>
-            <div>
-              <strong>Default units</strong>
-              <div className="muted">{company.defaultUnitSystem}</div>
-            </div>
-            <div>
-              <strong>Enabled design levels</strong>
-              <div className="row">
-                {levels.map((level) => (
-                  <span className="badge" key={level}>
-                    {DESIGN_LEVEL_LABELS[level as keyof typeof DESIGN_LEVEL_LABELS] ||
-                      level}
-                  </span>
-                ))}
-              </div>
-            </div>
+        {!companyHasAppAccess(company) ? (
+          <div className="panel">
+            <p>
+              Access to projects is paused until billing is active. You can still
+              manage subscription below.
+            </p>
           </div>
-          <div className="panel stack">
-            <h2>Billing & payments</h2>
-            <div>
-              <strong>Subscription</strong>
-              <div className="muted">
-                {company.planKey} · {company.subscriptionStatus}
-              </div>
-            </div>
-            <div>
-              <strong>Stripe customer</strong>
-              <div className="muted">
-                {company.stripeCustomerId || "Not connected yet"}
-              </div>
-            </div>
-            <div>
-              <strong>Stripe Connect (optional card pay)</strong>
-              <div className="muted">
-                {company.stripeConnectId ||
-                  "Optional — cash, check, and loan tracking work without Connect"}
-              </div>
-            </div>
-          </div>
-        </div>
+        ) : null}
+        <CompanyAdminClient
+          initialProfile={{
+            name: company.name,
+            logoUrl: company.logoUrl,
+            region: company.region,
+            defaultUnitSystem: company.defaultUnitSystem,
+            slug: company.slug,
+          }}
+          billing={{
+            planKey: company.planKey,
+            status: company.subscriptionStatus,
+            hasCustomer: Boolean(company.stripeCustomerId),
+            stripeCustomerId: company.stripeCustomerId,
+          }}
+          rootDomain={rootDomain}
+        />
       </main>
     </div>
   );

@@ -1828,7 +1828,12 @@ function CameraRig({
 
 type ExportApi = {
   capturePng: () => void;
+  capturePngDataUrl: () => string;
   recordOrbit: () => Promise<void>;
+};
+
+export type CadScene3DHandle = {
+  capturePngDataUrl: () => string | null;
 };
 
 /** "Kendig Residence Pool" → "kendig_residence_pool" */
@@ -1852,6 +1857,10 @@ function ExportBridge({
 
   useEffect(() => {
     apiRef.current = {
+      capturePngDataUrl: () => {
+        gl.render(scene, camera);
+        return gl.domElement.toDataURL("image/png");
+      },
       capturePng: () => {
         gl.render(scene, camera);
         const url = gl.domElement.toDataURL("image/png");
@@ -1931,6 +1940,8 @@ type Props = {
   selection: SceneSelection | null;
   onSelect: (sel: SceneSelection | null) => void;
   onDelete?: () => void;
+  /** Optional handle for parent Share / capture flows. */
+  exportHandleRef?: MutableRefObject<CadScene3DHandle | null>;
 };
 
 export function CadScene3DCanvas({
@@ -1940,6 +1951,7 @@ export function CadScene3DCanvas({
   selection,
   onSelect,
   onDelete,
+  exportHandleRef,
 }: Props) {
   const [showPlumbing, setShowPlumbing] = useState(false);
   const [hideDeck, setHideDeck] = useState(false);
@@ -1952,6 +1964,16 @@ export function CadScene3DCanvas({
   const [cutOffset, setCutOffset] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
   const exportApi = useRef<ExportApi | null>(null);
+
+  useEffect(() => {
+    if (!exportHandleRef) return;
+    exportHandleRef.current = {
+      capturePngDataUrl: () => exportApi.current?.capturePngDataUrl() ?? null,
+    };
+    return () => {
+      exportHandleRef.current = null;
+    };
+  }, [exportHandleRef]);
   const textures = useSceneTextures();
   const tod = TIME_OF_DAY_PRESETS[timeOfDay];
 

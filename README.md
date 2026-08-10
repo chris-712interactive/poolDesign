@@ -12,6 +12,7 @@ Multi-tenant pool CAD and estimating SaaS for pool companies — residential, co
 
 ```bash
 pnpm install
+docker compose up -d
 cp .env.example apps/web/.env
 cp .env.example packages/db/.env
 pnpm db:generate
@@ -22,6 +23,8 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000) (or the port shown in the terminal if 3000 is busy).
 
+**Database:** Postgres is required (local Docker via `docker compose`, or Neon / Vercel Postgres in production). See [docs/deploy.md](docs/deploy.md).
+
 ### What’s in this first build
 
 - Multi-tenant data model (companies, roles, projects, onboarding milestones)
@@ -29,9 +32,13 @@ Open [http://localhost:3000](http://localhost:3000) (or the port shown in the te
 - Company projects with **residential / commercial / water park** levels
 - Designer **imperial / metric** setting
 - CAD workspace (design-platform focus): pool/patio/steps/bench/plumbing/library, zoom/pan, vertex edit + move, rotate furniture, measure tool, typed length entry, ortho + 15° snap, design checklist, layers, undo/redo
-- **Estimate / BOM**: automatic takeoffs with starter catalog pricing
+- **3D preview** with PNG / orbit clip export
+- **Client share links** (`/p/[token]`) — read-only proposal with still + estimate
+- **Estimate / BOM**: automatic takeoffs with starter catalog pricing + company price overrides
+- **Stripe** trial → paid billing (Checkout + Customer Portal)
+- **Team invites** from company admin
 - **Object library**: furniture/amenities filtered by design level; counts roll into the BOM
-- **Priority:** polish the 2D design platform before client portal / contracts
+- **Deploy:** Vercel + Postgres — [docs/deploy.md](docs/deploy.md)
 
 ### Seed logins
 

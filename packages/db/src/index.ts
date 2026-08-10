@@ -1,27 +1,26 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 
-/** Prisma SQLite URLs are fragile across cwd; pin to packages/db/prisma/dev.db */
-function resolveDatabaseUrl(): string {
-  const existing = process.env.DATABASE_URL;
-  if (existing?.startsWith("file:") && !existing.includes("..") && existing.endsWith("prisma/dev.db")) {
-    return existing;
-  }
-
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const dbFile = path.join(here, "..", "prisma", "dev.db");
-  return `file:${dbFile}`;
-}
-
-process.env.DATABASE_URL = resolveDatabaseUrl();
-
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+
+function databaseUrl(): string {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      "DATABASE_URL is required (Postgres). See .env.example and docs/deploy.md",
+    );
+  }
+  if (url.startsWith("file:")) {
+    throw new Error(
+      "SQLite file URLs are no longer supported. Use Postgres (Neon / local Docker). See docs/deploy.md",
+    );
+  }
+  return url;
+}
 
 export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
-    datasources: { db: { url: process.env.DATABASE_URL } },
+    datasources: { db: { url: databaseUrl() } },
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
 
