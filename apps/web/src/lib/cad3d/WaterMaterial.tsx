@@ -47,16 +47,22 @@ export function WaterMaterial({
   const matRef = useRef<THREE.MeshPhysicalMaterial | THREE.MeshStandardMaterial>(
     null,
   );
+  const timeRef = useRef(0);
 
   // Clone maps so offset animation doesn't fight other water bodies.
   const maps = useMemo(() => {
     if (!textures || layer !== "surface") return null;
-    return {
-      map: textures.albedo.clone(),
-      normalMap: textures.normalA.clone(),
-      clearcoatNormalMap: textures.normalB.clone(),
-    };
-  }, [textures, layer]);
+    const map = textures.albedo.clone();
+    const normalMap = textures.normalA.clone();
+    const clearcoatNormalMap = textures.normalB.clone();
+    // Spa: tighter, busier chop from jet agitation. Pool: broader calm ripples.
+    const rep = spa ? 3.4 : 1.6;
+    const repB = spa ? 2.6 : 1.25;
+    map.repeat.set(spa ? 2.2 : 1.2, spa ? 2.2 : 1.2);
+    normalMap.repeat.set(rep, rep);
+    clearcoatNormalMap.repeat.set(repB, repB);
+    return { map, normalMap, clearcoatNormalMap };
+  }, [textures, layer, spa]);
 
   useEffect(
     () => () => {
@@ -70,12 +76,29 @@ export function WaterMaterial({
   useFrame((_, dt) => {
     if (!maps) return;
     const t = Math.min(dt, 0.05);
-    maps.map.offset.x -= t * 0.018;
-    maps.map.offset.y += t * 0.011;
-    maps.normalMap.offset.x += t * 0.045;
-    maps.normalMap.offset.y += t * 0.028;
-    maps.clearcoatNormalMap.offset.x -= t * 0.032;
-    maps.clearcoatNormalMap.offset.y += t * 0.051;
+    timeRef.current += t;
+    if (spa) {
+      // Faster cross-currents — spa surface churns from jets.
+      const swirl = Math.sin(timeRef.current * 1.7) * 0.02;
+      maps.map.offset.x -= t * 0.048;
+      maps.map.offset.y += t * 0.038;
+      maps.normalMap.offset.x += t * (0.16 + swirl);
+      maps.normalMap.offset.y += t * 0.13;
+      maps.clearcoatNormalMap.offset.x -= t * 0.14;
+      maps.clearcoatNormalMap.offset.y += t * (0.18 - swirl);
+      const mat = matRef.current as THREE.MeshPhysicalMaterial | null;
+      if (mat?.normalScale) {
+        const pulse = 1.25 + Math.sin(timeRef.current * 3.2) * 0.18;
+        mat.normalScale.set(pulse, pulse);
+      }
+    } else {
+      maps.map.offset.x -= t * 0.018;
+      maps.map.offset.y += t * 0.011;
+      maps.normalMap.offset.x += t * 0.045;
+      maps.normalMap.offset.y += t * 0.028;
+      maps.clearcoatNormalMap.offset.x -= t * 0.032;
+      maps.clearcoatNormalMap.offset.y += t * 0.051;
+    }
   });
 
   // Chlorinated residential pool: turquoise body, deeper teal absorption.
@@ -111,15 +134,15 @@ export function WaterMaterial({
       color={baseColor}
       map={maps?.map ?? undefined}
       normalMap={maps?.normalMap ?? undefined}
-      normalScale={[0.7, 0.7]}
+      normalScale={spa ? [1.25, 1.25] : [0.7, 0.7]}
       clearcoatNormalMap={maps?.clearcoatNormalMap ?? undefined}
-      clearcoatNormalScale={[0.55, 0.55]}
-      roughness={0.045}
+      clearcoatNormalScale={spa ? [1.05, 1.05] : [0.55, 0.55]}
+      roughness={spa ? 0.14 : 0.045}
       metalness={0}
-      clearcoat={1}
-      clearcoatRoughness={0.08}
+      clearcoat={spa ? 0.85 : 1}
+      clearcoatRoughness={spa ? 0.28 : 0.08}
       // Transmission + attenuation = see the floor with depth tint.
-      transmission={0.55}
+      transmission={spa ? 0.42 : 0.55}
       thickness={spa ? 0.5 : 1.6}
       ior={1.333}
       attenuationColor={attenuation}
@@ -131,13 +154,168 @@ export function WaterMaterial({
       polygonOffset
       polygonOffsetFactor={-2}
       polygonOffsetUnits={-2}
-      envMapIntensity={1.85}
-      specularIntensity={1}
+      envMapIntensity={spa ? 1.25 : 1.85}
+      specularIntensity={spa ? 0.85 : 1}
       specularColor="#d8f0ff"
       emissive={selected ? "#1f8a70" : "#000000"}
       emissiveIntensity={selected ? 0.18 : 0}
       clippingPlanes={clippingPlanes}
       clipShadows={clippingPlanes.length > 0}
+    />
+  );
+}
+
+/**
+ * Procedural spa→pool waterfall sheet.
+ * Vertical streaks, crest foam, and bottom splash — not a flat tinted plane.
+ */
+export function SpilloverWaterMaterial({
+  selected,
+  opacity = 0.75,
+  /** 0 = main sheet, 1 = soft veil (more transparent, softer foam) */
+  layer = 0,
+}: {
+  selected: boolean;
+  opacity?: number;
+  layer?: 0 | 1;
+}) {
+  const clippingPlanes = useContext(ClipPlanesContext);
+  const matRef = useRef<THREE.ShaderMaterial>(null);
+
+  const uniforms = useMemo(
+    () => ({
+      uTime: { value: 0 },
+      uOpacity: { value: opacity },
+      uSelected: { value: selected ? 1 : 0 },
+      uLayer: { value: layer },
+    }),
+    // opacity/selected/layer applied each frame below; keep stable uniform object
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  useFrame((state, dt) => {
+    const mat = matRef.current;
+    if (!mat) return;
+    mat.uniforms.uTime.value += Math.min(dt, 0.05);
+    mat.uniforms.uOpacity.value = opacity;
+    mat.uniforms.uSelected.value = selected ? 1 : 0;
+    mat.uniforms.uLayer.value = layer;
+    // Keep clip planes in sync with section cutaway.
+    mat.clipping = clippingPlanes.length > 0;
+    mat.clippingPlanes = clippingPlanes;
+  });
+
+  return (
+    <shaderMaterial
+      ref={matRef}
+      transparent
+      depthWrite={false}
+      side={THREE.DoubleSide}
+      blending={THREE.NormalBlending}
+      uniforms={uniforms}
+      vertexShader={/* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldNormal;
+        varying vec3 vViewDir;
+        void main() {
+          vUv = uv;
+          vec4 world = modelMatrix * vec4(position, 1.0);
+          vWorldNormal = normalize(mat3(modelMatrix) * normal);
+          vViewDir = normalize(cameraPosition - world.xyz);
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }
+      `}
+      fragmentShader={/* glsl */ `
+        uniform float uTime;
+        uniform float uOpacity;
+        uniform float uSelected;
+        uniform float uLayer;
+        varying vec2 vUv;
+        varying vec3 vWorldNormal;
+        varying vec3 vViewDir;
+
+        float hash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+        }
+        float noise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          float a = hash(i);
+          float b = hash(i + vec2(1.0, 0.0));
+          float c = hash(i + vec2(0.0, 1.0));
+          float d = hash(i + vec2(1.0, 1.0));
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+        }
+        float fbm(vec2 p) {
+          float v = 0.0;
+          float a = 0.5;
+          for (int i = 0; i < 4; i++) {
+            v += a * noise(p);
+            p *= 2.05;
+            a *= 0.5;
+          }
+          return v;
+        }
+
+        void main() {
+          // Flow downward: uv.y 1 at crest → 0 at pool.
+          // +t on v scrolls pattern toward decreasing uv.y (spa → pool).
+          float t = uTime;
+          vec2 flowUv = vec2(vUv.x * 6.0, vUv.y * 5.0 + t * 2.8);
+          vec2 flowUv2 = vec2(vUv.x * 11.0 + 1.7, vUv.y * 9.0 + t * 4.2);
+
+          // Vertical filaments / curtain strands
+          float strands =
+            0.55 * sin(flowUv.x * 6.2831 + fbm(flowUv) * 4.0) +
+            0.35 * sin(flowUv2.x * 6.2831 - t * 1.5);
+          strands = strands * 0.5 + 0.5;
+          float detail = fbm(flowUv2 + strands);
+          float curtain = smoothstep(0.25, 0.85, strands * 0.65 + detail * 0.55);
+
+          // Bright chlorinated water vs deeper teal in gaps between strands
+          vec3 deep = vec3(0.12, 0.55, 0.68);
+          vec3 mid = vec3(0.32, 0.78, 0.88);
+          vec3 bright = vec3(0.72, 0.94, 1.0);
+          vec3 col = mix(deep, mid, curtain);
+          col = mix(col, bright, pow(curtain, 2.2) * 0.65);
+
+          // Specular sparkle traveling down the sheet
+          float sparkle = pow(max(0.0, sin(flowUv2.x * 18.0 + flowUv.y * 30.0)), 18.0);
+          col += vec3(0.85, 0.95, 1.0) * sparkle * 0.55;
+
+          // Crest foam (top of sheet)
+          float crestN = fbm(vec2(vUv.x * 14.0 + t * 0.8, t * 1.2));
+          float crest = smoothstep(0.72, 0.98, vUv.y) * (0.55 + 0.45 * crestN);
+          col = mix(col, vec3(0.95, 0.98, 1.0), crest * 0.9);
+
+          // Bottom splash / whitewater where sheet hits pool
+          float splashN = fbm(vec2(vUv.x * 18.0 + t * 1.4, vUv.y * 6.0 + t * 3.0));
+          float splash = smoothstep(0.28, 0.0, vUv.y) * (0.4 + 0.6 * splashN);
+          col = mix(col, vec3(0.9, 0.97, 1.0), splash * 0.85);
+
+          // Soft side fade so the sheet isn't a hard rectangle
+          float side = smoothstep(0.0, 0.07, vUv.x) * smoothstep(1.0, 0.93, vUv.x);
+
+          // Fresnel rim — brighter glancing edges
+          float fres = pow(1.0 - max(0.0, dot(normalize(vWorldNormal), normalize(vViewDir))), 2.4);
+          col += vec3(0.55, 0.85, 1.0) * fres * 0.35;
+
+          float alpha = uOpacity * side;
+          alpha *= mix(0.35, 0.95, curtain);
+          alpha = max(alpha, crest * 0.75);
+          alpha = max(alpha, splash * 0.55);
+          alpha *= mix(1.0, 0.45, uLayer); // veil layer softer
+          alpha = clamp(alpha, 0.0, 0.92);
+
+          if (uSelected > 0.5) {
+            col = mix(col, vec3(0.25, 0.75, 0.6), 0.18);
+          }
+
+          gl_FragColor = vec4(col, alpha);
+        }
+      `}
     />
   );
 }

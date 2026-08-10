@@ -50,11 +50,13 @@ import {
   spaShellParams,
   spaTotalDepthMm,
   subtractAabbHoles,
-  resolveSpaSpillover,
+  resolveSpaSpillovers,
   spilloverOmitIntervals,
   wallSegmentsMinusIntervals,
   waterBodiesConnected,
   waterBodyKind,
+  ensurePadManifoldPlumbing,
+  repairAutoPlumbingIfNeeded,
   type BuildingOpeningKind,
   type DepthTransition,
   type DesignDocument,
@@ -92,6 +94,7 @@ export type SceneMaterialKey =
   | "waterline"
   | "spaShell"
   | "spaWater"
+  | "spilloverWater"
   | "cover"
   | "pergola"
   | "object"
@@ -553,14 +556,15 @@ function pushSpilloverCascades(
     idPrefix: string;
   },
 ) {
-  const drop = Math.max(0.04, opts.crestY - opts.poolWaterTopY);
+  const drop = Math.max(0.05, opts.crestY - opts.poolWaterTopY);
   const sheetThickMm =
     opts.spill.style === "sheer"
-      ? 18
+      ? 12
       : opts.spill.style === "scuppers"
-        ? 55
-        : 40;
-  const outwardMm = opts.wallThicknessMm * 0.55 + sheetThickMm * 0.5;
+        ? 28
+        : 18;
+  // Hang just outside the spa outer face; the mesh flares further out as it falls.
+  const outwardMm = Math.max(10, opts.wallThicknessMm * 0.12) + sheetThickMm * 0.25;
 
   let i = 0;
   for (const opening of opts.spill.openings) {
@@ -585,25 +589,30 @@ function pushSpilloverCascades(
       y: mid.y + ny * outwardMm,
     };
     const xz = planToWorldXZ(centerPlan);
-    const ribbonH =
-      opts.spill.style === "sheer" ? drop * 1.05 : drop;
+    // Leave a hair of air under the rim so the sheet reads as pouring over.
+    const topY = opts.crestY - 0.008;
+    const bottomY = opts.poolWaterTopY + 0.004;
+    const ribbonH = Math.max(0.04, topY - bottomY);
+    const widthM = mmToMeters(len);
+    const thickM = mmToMeters(sheetThickMm);
     meshes.push({
       kind: "box",
       id: `${opts.idPrefix}_cascade_${i++}`,
-      material: "poolWater",
+      material: "spilloverWater",
       position: {
         x: xz.x,
-        y: opts.poolWaterTopY + ribbonH / 2,
+        y: bottomY + ribbonH / 2,
         z: xz.z,
       },
       size: {
-        x: mmToMeters(len),
+        x: widthM,
         y: ribbonH,
-        z: mmToMeters(sheetThickMm),
+        z: thickM,
       },
       rotationY: 0,
       axisX: planDirToWorldXZ(tx, ty),
       axisZ: planDirToWorldXZ(nx, ny),
+      opacity: opts.spill.style === "sheer" ? 0.55 : 0.72,
       select: opts.select,
     });
   }
@@ -1234,9 +1243,13 @@ export function selectionReadouts(
 }
 
 export function buildSceneModel(
-  design: DesignDocument,
+  designInput: DesignDocument,
   options: SceneBuildOptions = {},
 ): SceneModel {
+  // Fix clipped auto trenches; always materialize pad manifold for 3D.
+  const design = ensurePadManifoldPlumbing(
+    repairAutoPlumbingIfNeeded(designInput),
+  );
   const bounds = designBoundsMm(design);
   const center = planToWorldXZ({ x: bounds.cx, y: bounds.cy });
   const spanM = mmToMeters(Math.max(bounds.width, bounds.height, 10000));
@@ -1998,44 +2011,35 @@ export function buildSceneModel(
         const needsPit = spaNeedsDeckPit(body) || joinsPool;
         const elev = spaElevations(body, waterTopY, joinsPool);
         const { floorY, waterTopY: spaWaterTop, wallTopY, deckTopY } = elev;
-        const spill = joinsPool
-          ? resolveSpaSpillover(body, pools)
-          : null;
+        const spills = joinsPool
+          ? resolveSpaSpillovers(body, pools)
+          : [];
         const pts = ringPoints(outer);
-        const spillEdge =
-          spill && pts.length > spill.edgeIndex
-            ? {
-                a: pts[spill.edgeIndex],
-                b: pts[(spill.edgeIndex + 1) % pts.length],
-              }
-            : null;
-        const edgeOmits =
-          spill && spillEdge
-            ? [
-                {
-                  edgeIndex: spill.edgeIndex,
-                  intervals: spilloverOmitIntervals(
-                    spill,
-                    spillEdge.a,
-                    spillEdge.b,
-                  ),
-                },
-              ]
-            : undefined;
+        const edgeOmits = spills.length
+          ? spills.map((spill) => {
+              const edgeA = pts[spill.edgeIndex];
+              const edgeB = pts[(spill.edgeIndex + 1) % pts.length];
+              return {
+                edgeIndex: spill.edgeIndex,
+                intervals: spilloverOmitIntervals(spill, edgeA, edgeB),
+              };
+            })
+          : undefined;
+        const notchDepthMm = spills[0]?.notchDepthMm ?? 0;
         // Crest of the weir notch (below rim, at/above spa water).
-        const crestY = spill
+        const crestY = spills.length
           ? Math.min(
               wallTopY - 0.01,
               Math.max(
                 spaWaterTop - 0.005,
-                wallTopY - mmToMeters(spill.notchDepthMm),
+                wallTopY - mmToMeters(notchDepthMm),
               ),
             )
           : wallTopY;
 
         const pushSpaShell = (bottomY: number, topY: number) => {
           const h = Math.max(0.02, topY - bottomY);
-          if (!spill || !edgeOmits || crestY >= topY - 0.005) {
+          if (!spills.length || !edgeOmits || crestY >= topY - 0.005) {
             pushWallRing(meshes, {
               outlineMm: outer,
               bottomY,
@@ -2086,7 +2090,8 @@ export function buildSceneModel(
             floorY,
             waterTopY: spaWaterTop,
             select,
-            waterMaterial: joinsPool ? "poolWater" : "spaWater",
+            // Always spa water — jet agitation reads differently from the pool.
+            waterMaterial: "spaWater",
           });
         } else {
           // Fully raised spa — vessel sits on the deck; shell rises above patio.
@@ -2101,7 +2106,7 @@ export function buildSceneModel(
           });
         }
 
-        if (spill) {
+        for (const spill of spills) {
           pushSpilloverCascades(meshes, {
             spill,
             spaOutline: outer,
@@ -2109,7 +2114,7 @@ export function buildSceneModel(
             poolWaterTopY: waterTopY,
             wallThicknessMm: wallT,
             select,
-            idPrefix: `spa_${body.id}`,
+            idPrefix: `spa_${body.id}_e${spill.edgeIndex}`,
           });
         }
       } else {
@@ -2334,24 +2339,30 @@ export function buildSceneModel(
     }
   }
 
-  // Plumbing is underground — omitted unless cutaway review enables it.
-  if (options.showPlumbing && layerVisible(design, "plumbing")) {
-    for (const run of design.plumbingRuns ?? []) {
-      if (run.points.length < 2) continue;
-      const dia = Math.max(20, run.pipeDiameterMm ?? 50.8);
-      meshes.push({
-        kind: "tube",
-        id: `pipe_${run.id}`,
-        material: pipeMaterialForCircuit(run.circuit),
-        pointsMm: run.points,
-        radiusM: mmToMeters(dia / 2),
-        y: -0.42,
-        ...(run.elevationsMm?.length === run.points.length
-          ? { elevationsMm: run.elevationsMm }
-          : {}),
-        select: { kind: "run", id: run.id },
-      });
+  // Pad manifold (risers + above-grade hops) always draws with the equipment.
+  // Buried body↔pad trenches stay behind the Plumbing review toggle.
+  for (const run of design.plumbingRuns ?? []) {
+    if (run.points.length < 2) continue;
+    const isPadLocal = run.padLocal === true;
+    if (
+      !isPadLocal &&
+      !(options.showPlumbing && layerVisible(design, "plumbing"))
+    ) {
+      continue;
     }
+    const dia = Math.max(20, run.pipeDiameterMm ?? 50.8);
+    meshes.push({
+      kind: "tube",
+      id: `pipe_${run.id}`,
+      material: pipeMaterialForCircuit(run.circuit),
+      pointsMm: run.points,
+      radiusM: mmToMeters(dia / 2),
+      y: -0.42,
+      ...(run.elevationsMm?.length === run.points.length
+        ? { elevationsMm: run.elevationsMm }
+        : {}),
+      select: { kind: "run", id: run.id },
+    });
   }
 
   if (layerVisible(design, "fence")) {

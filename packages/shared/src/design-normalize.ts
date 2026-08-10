@@ -23,11 +23,13 @@ import {
   type PatioGradeStrategy,
   type SpaSpillover,
   isSpaSpilloverStyle,
+  type SpaSpilloverWeir,
 } from "./design-model";
 import {
   isWallWaterFixtureId,
   snapWaterWallFixture,
 } from "./water-fixtures";
+import { repairAutoPlumbingIfNeeded } from "./plumbing-route";
 
 const IN = 25.4;
 const ESTIMATE_UNITS: CatalogUnit[] = [
@@ -138,7 +140,7 @@ export function normalizeDesignDocument(
     layers = [...layers, { id: "fence", name: "fence", visible: true }];
   }
 
-  return {
+  const normalized: DesignDocument = {
     ...doc,
     version: DESIGN_DOCUMENT_VERSION,
     designLevel,
@@ -377,6 +379,8 @@ export function normalizeDesignDocument(
     fences: normalizeFences(doc.fences),
     estimate: normalizeEstimate(doc.estimate),
   };
+  // Rebuild auto trenches only when they currently clip a house/patio.
+  return repairAutoPlumbingIfNeeded(normalized);
 }
 
 function clampFinite(n: unknown, fallback: number, min: number, max: number): number {
@@ -396,14 +400,44 @@ function normalizeSpaSpillover(
   if (typeof raw.targetPoolId === "string" && raw.targetPoolId.trim()) {
     out.targetPoolId = raw.targetPoolId.trim();
   }
-  if (typeof raw.edgeIndex === "number" && Number.isFinite(raw.edgeIndex)) {
-    out.edgeIndex = Math.max(0, Math.floor(raw.edgeIndex));
-  }
-  if (raw.widthMm != null) {
-    out.widthMm = clampFinite(raw.widthMm, 24 * IN, 50, 50_000);
-  }
-  if (raw.offsetMm != null) {
-    out.offsetMm = clampFinite(raw.offsetMm, 0, -20_000, 20_000);
+  if (Array.isArray(raw.weirs)) {
+    out.weirs = raw.weirs
+      .filter(
+        (w) =>
+          w &&
+          typeof w === "object" &&
+          typeof w.edgeIndex === "number" &&
+          Number.isFinite(w.edgeIndex),
+      )
+      .map((w) => {
+        const weir: SpaSpilloverWeir = {
+          edgeIndex: Math.max(0, Math.floor(w.edgeIndex)),
+        };
+        if (w.enabled === false) weir.enabled = false;
+        if (w.widthMm != null) {
+          weir.widthMm = clampFinite(w.widthMm, 24 * IN, 50, 50_000);
+        }
+        if (w.offsetMm != null) {
+          weir.offsetMm = clampFinite(w.offsetMm, 0, -20_000, 20_000);
+        }
+        return weir;
+      });
+  } else if (
+    typeof raw.edgeIndex === "number" &&
+    Number.isFinite(raw.edgeIndex)
+  ) {
+    // Migrate legacy single-edge fields into weirs[].
+    const weir: SpaSpilloverWeir = {
+      edgeIndex: Math.max(0, Math.floor(raw.edgeIndex)),
+      enabled: true,
+    };
+    if (raw.widthMm != null) {
+      weir.widthMm = clampFinite(raw.widthMm, 24 * IN, 50, 50_000);
+    }
+    if (raw.offsetMm != null) {
+      weir.offsetMm = clampFinite(raw.offsetMm, 0, -20_000, 20_000);
+    }
+    out.weirs = [weir];
   }
   if (raw.notchDepthMm != null) {
     out.notchDepthMm = clampFinite(raw.notchDepthMm, 1.5 * IN, 5, 600);
@@ -415,7 +449,6 @@ function normalizeSpaSpillover(
   if (raw.scupperGapMm != null) {
     out.scupperGapMm = clampFinite(raw.scupperGapMm, 4 * IN, 10, 2000);
   }
-  // Explicit disable
   if (raw.enabled === false) out.enabled = false;
   return out;
 }

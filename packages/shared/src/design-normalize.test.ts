@@ -114,6 +114,7 @@ describe("normalizeDesignDocument", () => {
             enabled: true,
             style: "scuppers",
             scupperCount: 99,
+            edgeIndex: 0,
             widthMm: -10,
             notchDepthMm: 1,
             scupperGapMm: 1,
@@ -128,7 +129,8 @@ describe("normalizeDesignDocument", () => {
     assert.equal(s.enabled, true);
     assert.equal(s.style, "scuppers");
     assert.equal(s.scupperCount, 8);
-    assert.ok((s.widthMm ?? 0) >= 50);
+    assert.ok(s.weirs?.length);
+    assert.ok((s.weirs![0].widthMm ?? 0) >= 50);
     assert.ok((s.notchDepthMm ?? 0) >= 5);
     assert.ok((s.scupperGapMm ?? 0) >= 10);
   });

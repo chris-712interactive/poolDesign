@@ -10,7 +10,10 @@ import {
   attachFixturePlumbing,
   buildPadManifoldRuns,
   rebuildBodyPlumbing,
+  obstaclesFromDesign,
+  routeOrthoAvoiding,
   syncPlumbingAfterObjectRemoved,
+  TRENCH_ELEV_MM,
 } from "./plumbing-route";
 
 const FT = 304.8;
@@ -236,13 +239,64 @@ describe("pad manifold", () => {
     for (const r of padRuns) {
       assert.ok(r.elevationsMm);
       assert.equal(r.elevationsMm!.length, r.points.length);
-      // Every pad run should rise above grade at least once
+    }
+    // Ground risers dive into the trench; equipment hops stay above grade.
+    const risers = padRuns.filter((r) => /riser/i.test(r.name));
+    const hops = padRuns.filter((r) => !/riser/i.test(r.name));
+    assert.ok(risers.length >= 2);
+    for (const r of risers) {
       assert.ok(r.elevationsMm!.some((e) => e > 0));
       assert.ok(r.elevationsMm!.some((e) => e < 0));
     }
+    for (const r of hops) {
+      assert.ok(r.elevationsMm!.every((e) => e > 0));
+    }
 
-    const hops = buildPadManifoldRuns(design);
-    assert.equal(hops.length, 5);
+    const built = buildPadManifoldRuns(design);
+    assert.equal(built.length, 5);
+  });
+
+  it("drops suction/return at the pad front toward the pool", () => {
+    let design = baseDesign();
+    // Pool is left of pad (pad at 30ft, pool 0–20ft) → front should face −X.
+    design = {
+      ...design,
+      objects: [
+        ...design.objects,
+        equip("pump_1", "pump_variable_speed", 32 * FT, 22 * FT),
+        equip("filter_1", "filter_cartridge", 34 * FT, 22 * FT),
+      ],
+    };
+    const runs = buildPadManifoldRuns(design);
+    const suction = runs.find((r) => /suction riser/i.test(r.name));
+    const ret = runs.find((r) => /return riser/i.test(r.name));
+    assert.ok(suction && ret);
+
+    const padX = 30 * FT;
+    // Trench end of suction is the first point; return drops at the last point.
+    const suctionStub = suction!.points[0];
+    const returnStub = ret!.points[ret!.points.length - 1];
+    assert.ok(
+      suctionStub.x < padX,
+      `suction stub should be on pool side of pad (got x=${suctionStub.x})`,
+    );
+    assert.ok(
+      returnStub.x < padX,
+      `return stub should be on pool side of pad (got x=${returnStub.x})`,
+    );
+
+    // Drop happens at the stub (last/first point at trench elev), after a
+    // surface run that reaches the pad front (chase elev > 0 near the stub).
+    const sElev = suction!.elevationsMm!;
+    const rElev = ret!.elevationsMm!;
+    assert.equal(sElev[0], TRENCH_ELEV_MM);
+    assert.equal(rElev[rElev.length - 1], TRENCH_ELEV_MM);
+    assert.ok(sElev.some((e) => e > 0));
+    assert.ok(rElev.some((e) => e > 0));
+    // Immediately before/after the trench point should still be above grade
+    // (overhang off the front edge), not a mid-pad drop.
+    assert.ok(sElev[1]! > 0);
+    assert.ok(rElev[rElev.length - 2]! > 0);
   });
 
   it("rebuilds pad manifold when equipment moves", () => {
@@ -285,5 +339,132 @@ describe("pad manifold", () => {
     };
     design = syncPlumbingAfterObjectRemoved(design, pump);
     assert.equal(design.plumbingRuns.some((r) => r.padLocal), false);
+  });
+});
+
+describe("routeOrthoAvoiding obstacles", () => {
+  function boxHits(
+    path: { x: number; y: number }[],
+    box: { minX: number; minY: number; maxX: number; maxY: number },
+  ): boolean {
+    for (let i = 1; i < path.length; i++) {
+      const a = path[i - 1]!;
+      const b = path[i]!;
+      const minX = Math.min(a.x, b.x);
+      const maxX = Math.max(a.x, b.x);
+      const minY = Math.min(a.y, b.y);
+      const maxY = Math.max(a.y, b.y);
+      const horizontal = Math.abs(a.y - b.y) < 1;
+      if (horizontal) {
+        if (
+          a.y >= box.minY &&
+          a.y <= box.maxY &&
+          maxX >= box.minX &&
+          minX <= box.maxX
+        ) {
+          return true;
+        }
+      } else if (
+        a.x >= box.minX &&
+        a.x <= box.maxX &&
+        maxY >= box.minY &&
+        minY <= box.maxY
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  it("never routes under a house when a clear path exists", () => {
+    const house = {
+      outline: rect(25 * FT, 5 * FT, 20 * FT, 25 * FT),
+      priority: "hard" as const,
+    };
+    const from = { x: 10 * FT, y: 15 * FT };
+    const to = { x: 55 * FT, y: 15 * FT };
+    const path = routeOrthoAvoiding(from, to, [house]);
+    const box = {
+      minX: 25 * FT,
+      minY: 5 * FT,
+      maxX: 45 * FT,
+      maxY: 30 * FT,
+    };
+    assert.equal(boxHits(path, box), false);
+  });
+
+  it("auto body trenches go around house and patio deck", () => {
+    let design: DesignDocument = {
+      ...emptyDesignDocument("residential"),
+      poolBodies: [
+        {
+          id: "p1",
+          name: "Pool",
+          kind: "pool",
+          outline: rect(10 * FT, 25 * FT, 20 * FT, 30 * FT),
+          depthShallowMm: 900,
+          depthDeepMm: 1800,
+        },
+      ],
+      buildings: [
+        {
+          id: "h1",
+          name: "House",
+          outline: rect(5 * FT, 0, 30 * FT, 20 * FT),
+          stories: 1,
+        },
+      ],
+      patios: [
+        {
+          id: "pat1",
+          name: "Patio",
+          outline: rect(8 * FT, 18 * FT, 24 * FT, 40 * FT),
+        },
+      ],
+      objects: [
+        {
+          id: "pad",
+          catalogItemId: "equip_pad",
+          name: "Pad",
+          position: { x: 45 * FT, y: 8 * FT },
+          rotationDeg: 0,
+          layerId: "equipment",
+          widthMm: 8 * FT,
+          depthMm: 4 * FT,
+        },
+        {
+          id: "pump",
+          catalogItemId: "pump_variable_speed",
+          name: "Pump",
+          position: { x: 45 * FT, y: 8 * FT },
+          rotationDeg: 0,
+          layerId: "equipment",
+          widthMm: 600,
+          depthMm: 400,
+          heightMm: 500,
+        },
+      ],
+    };
+    design = rebuildBodyPlumbing(design, "p1");
+    const CLEAR = FT;
+    const blocked = obstaclesFromDesign(design).map((o) => {
+      const xs = o.outline.map((p) => p.x);
+      const ys = o.outline.map((p) => p.y);
+      return {
+        minX: Math.min(...xs) - CLEAR,
+        maxX: Math.max(...xs) + CLEAR,
+        minY: Math.min(...ys) - CLEAR,
+        maxY: Math.max(...ys) + CLEAR,
+      };
+    });
+    for (const r of design.plumbingRuns.filter((x) => !x.padLocal)) {
+      for (const box of blocked) {
+        assert.equal(
+          boxHits(r.points, box),
+          false,
+          `${r.circuit} should not cross blocked obstacle`,
+        );
+      }
+    }
   });
 });

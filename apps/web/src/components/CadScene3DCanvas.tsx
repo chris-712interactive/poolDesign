@@ -62,6 +62,7 @@ import { getPatioFinishTexture } from "@/lib/cad3d/patioFinishTextures";
 import { OpeningMesh } from "@/lib/cad3d/OpeningMesh";
 import {
   BasinCausticOverlay,
+  SpilloverWaterMaterial,
   WaterCausticOverlay,
   WaterEnvironment,
   WaterMaterial,
@@ -118,6 +119,7 @@ const MATERIALS: Record<SceneMaterialKey, MatDef> = {
     map: "deck",
   },
   poolWater: { color: "#0d7a9a", roughness: 0.06, metalness: 0 },
+  spilloverWater: { color: "#3ec4e0", roughness: 0.08, metalness: 0 },
   poolShell: {
     color: "#ffffff",
     roughness: 0.55,
@@ -348,12 +350,18 @@ function SelectableMaterial({
   const isWater =
     material === "poolWater" ||
     material === "spaWater" ||
-    material === "sectionWater";
+    material === "sectionWater" ||
+    material === "spilloverWater";
   const transparent =
     material === "cover"
       ? false
       : (opacity ?? 1) < 0.99 || material === "window" || isWater;
   const color = colorHex ?? mat.color;
+  if (material === "spilloverWater") {
+    return (
+      <SpilloverWaterMaterial selected={selected} opacity={opacity ?? 0.7} />
+    );
+  }
   if (isWater) {
     return (
       <WaterMaterial
@@ -548,6 +556,15 @@ function PlainBoxMesh({
   selected: boolean;
   onSelect?: (sel: SceneSelection | null) => void;
 }) {
+  if (desc.material === "spilloverWater") {
+    return (
+      <SpilloverCascadeMesh
+        desc={desc}
+        selected={selected}
+        onSelect={onSelect}
+      />
+    );
+  }
   const handlers = useSelectHandlers(desc.select, onSelect);
   const rotationY = useMemo(() => {
     if (desc.axisX) {
@@ -574,6 +591,155 @@ function PlainBoxMesh({
           opacity={desc.opacity}
           selected={selected}
           colorHex={desc.colorHex}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * Curved translucent sheet with procedural flowing water.
+ * Profile: attached at the weir crest, flares outward toward the pool as it falls.
+ */
+function SpilloverCascadeMesh({
+  desc,
+  selected,
+  onSelect,
+}: {
+  desc: BoxDescriptor;
+  selected: boolean;
+  onSelect?: (sel: SceneSelection | null) => void;
+}) {
+  const handlers = useSelectHandlers(desc.select, onSelect);
+
+  /** Local +X along weir, +Y up, +Z toward the pool (away from spa wall). */
+  const quaternion = useMemo(() => {
+    const ax = desc.axisX ?? { x: 1, z: 0 };
+    const az = desc.axisZ ?? { x: 0, z: 1 };
+    const xV = new THREE.Vector3(ax.x, 0, ax.z).normalize();
+    const zV = new THREE.Vector3(az.x, 0, az.z).normalize();
+    const yV = new THREE.Vector3(0, 1, 0);
+    // Quaternions need a right-handed basis. Flip tangent, never outward —
+    // flipping +Z buried the sheet inside the spa and made it vanish.
+    const cross = new THREE.Vector3().crossVectors(xV, yV);
+    if (cross.dot(zV) < 0) xV.negate();
+    const m = new THREE.Matrix4().makeBasis(xV, yV, zV);
+    return new THREE.Quaternion().setFromRotationMatrix(m);
+  }, [desc.axisX, desc.axisZ]);
+
+  const { sheetGeo, veilGeo, foamGeo, splashGeo } = useMemo(() => {
+    const w = Math.max(0.05, desc.size.x);
+    const h = Math.max(0.04, desc.size.y);
+    // Throw distance at the pool — enough that the pour arc reads from the side.
+    const flare = Math.max(0.09, Math.min(0.32, h * 0.9));
+
+    /**
+     * Free-fall pour in local +Z (toward pool):
+     * Crest hugs the lip; path follows a √fall-style curve so it leaves the
+     * ledge then steepens into the pool — a curtain, not a straight ramp.
+     */
+    const bend = (geo: THREE.PlaneGeometry, amount: number, height: number) => {
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i);
+        const t = (y + height / 2) / height; // 0 bottom → 1 crest
+        const fall = Math.min(1, Math.max(0, 1 - t));
+        // √fall ≈ horizontal leave at lip, more vertical toward the pool.
+        // fall*(2-fall) under sqrt keeps a finite slope on the first segment.
+        const pour = Math.sqrt(fall * (2 - fall));
+        pos.setZ(i, pour * amount);
+      }
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+    };
+
+    const sheet = new THREE.PlaneGeometry(w, h, 8, 40);
+    const veil = new THREE.PlaneGeometry(w * 1.04, h * 0.98, 4, 28);
+    bend(sheet, flare, h);
+    bend(veil, flare * 1.06, h);
+
+    // Crest foam — sits on the lip (z ≈ 0)
+    const foamH = Math.min(0.04, h * 0.12);
+    const foam = new THREE.PlaneGeometry(w * 1.02, foamH, 8, 2);
+    const foamPos = foam.attributes.position;
+    for (let i = 0; i < foamPos.count; i++) {
+      foamPos.setY(i, foamPos.getY(i) + h / 2 - foamH * 0.4);
+      foamPos.setZ(i, 0.006);
+    }
+    foamPos.needsUpdate = true;
+    foam.computeVertexNormals();
+
+    // Splash pad at pool surface, out where the sheet lands
+    const splashW = w * 1.12;
+    const splashD = Math.max(0.1, flare * 0.85);
+    const splash = new THREE.PlaneGeometry(splashW, splashD, 8, 4);
+    splash.rotateX(-Math.PI / 2);
+    const splashPos = splash.attributes.position;
+    for (let i = 0; i < splashPos.count; i++) {
+      splashPos.setY(i, -h / 2 + 0.005);
+      const z = splashPos.getZ(i);
+      splashPos.setZ(i, z + flare + splashD * 0.1);
+    }
+    splashPos.needsUpdate = true;
+    splash.computeVertexNormals();
+
+    return {
+      sheetGeo: sheet,
+      veilGeo: veil,
+      foamGeo: foam,
+      splashGeo: splash,
+    };
+  }, [desc.size.x, desc.size.y, desc.size.z]);
+
+  useEffect(
+    () => () => {
+      sheetGeo.dispose();
+      veilGeo.dispose();
+      foamGeo.dispose();
+      splashGeo.dispose();
+    },
+    [sheetGeo, veilGeo, foamGeo, splashGeo],
+  );
+
+  return (
+    <group
+      position={[desc.position.x, desc.position.y, desc.position.z]}
+      quaternion={quaternion}
+    >
+      <mesh geometry={sheetGeo} renderOrder={4} {...handlers}>
+        <SpilloverWaterMaterial
+          selected={selected}
+          opacity={desc.opacity ?? 0.78}
+          layer={0}
+        />
+      </mesh>
+      <mesh
+        geometry={veilGeo}
+        position={[0, -0.002, 0.006]}
+        renderOrder={4.05}
+        raycast={() => null}
+      >
+        <SpilloverWaterMaterial selected={false} opacity={0.4} layer={1} />
+      </mesh>
+      <mesh geometry={foamGeo} renderOrder={4.2} raycast={() => null}>
+        <meshBasicMaterial
+          color="#f2fbff"
+          transparent
+          opacity={0.72}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          toneMapped={false}
+        />
+      </mesh>
+      <mesh geometry={splashGeo} renderOrder={4.15} raycast={() => null}>
+        <meshBasicMaterial
+          color="#dff6ff"
+          transparent
+          opacity={0.45}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          blending={THREE.AdditiveBlending}
+          toneMapped={false}
         />
       </mesh>
     </group>
@@ -1918,8 +2084,9 @@ export function CadScene3DCanvas({
             className={`btn secondary cad-scene3d-tool-btn ${showPlumbing ? "active" : ""}`}
             onClick={() => setShowPlumbing((v) => !v)}
             aria-pressed={showPlumbing}
+            title="Show buried trench plumbing from the pool/spa to the pad"
           >
-            Plumbing
+            Buried pipes
           </button>
           <button
             type="button"

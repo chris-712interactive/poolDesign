@@ -4,11 +4,13 @@
  */
 
 import {
+  pointInPolygon,
   segmentLengthMm,
   type PointMm,
   type PoolBody,
   type SpaSpillover,
   type SpaSpilloverStyle,
+  type SpaSpilloverWeir,
   waterBodyKind,
 } from "./design-model";
 import {
@@ -24,6 +26,8 @@ const DEFAULT_SCUPPER_COUNT = 3;
 const DEFAULT_SCUPPER_GAP_MM = 4 * IN;
 const DEFAULT_WIDTH_FRAC = 0.6;
 const MIN_WEIR_WIDTH_MM = 24 * IN;
+/** Probe distance outside the spa shell to test "faces pool". */
+const FACE_PROBE_MM = 80;
 
 export type SharedSpilloverEdge = {
   poolId: string;
@@ -66,6 +70,76 @@ function edgePoint(a: PointMm, b: PointMm, tMm: number): PointMm {
   return { x: a.x + ux * tMm, y: a.y + uy * tMm };
 }
 
+/** Unit outward normal for a spa edge (points away from spa interior). */
+function spaEdgeOutwardNormal(
+  edgeA: PointMm,
+  edgeB: PointMm,
+  spaRing: PointMm[],
+): { nx: number; ny: number; ux: number; uy: number; len: number } {
+  const len = segmentLengthMm(edgeA, edgeB) || 1;
+  const ux = (edgeB.x - edgeA.x) / len;
+  const uy = (edgeB.y - edgeA.y) / len;
+  let nx = -uy;
+  let ny = ux;
+  const mid = {
+    x: (edgeA.x + edgeB.x) / 2,
+    y: (edgeA.y + edgeB.y) / 2,
+  };
+  const inward = {
+    x: mid.x - nx * (FACE_PROBE_MM * 0.5),
+    y: mid.y - ny * (FACE_PROBE_MM * 0.5),
+  };
+  if (!pointInPolygon(inward, spaRing)) {
+    nx = -nx;
+    ny = -ny;
+  }
+  return { nx, ny, ux, uy, len };
+}
+
+/**
+ * Interval along a spa edge that intersects the pool: faces into pool water,
+ * lies inside the pool footprint, or is colinear with a pool edge.
+ * Returns the span from the first to last intersecting sample on that edge.
+ */
+function spaEdgePoolIntersectInterval(
+  edgeA: PointMm,
+  edgeB: PointMm,
+  spaRing: PointMm[],
+  poolOutline: PointMm[],
+): [number, number] | null {
+  const { nx, ny, ux, uy, len } = spaEdgeOutwardNormal(edgeA, edgeB, spaRing);
+  if (len < MIN_OVERLAP_MM) return null;
+
+  const n = Math.max(12, Math.ceil(len / 50));
+  let tMin = Infinity;
+  let tMax = -Infinity;
+  let hits = 0;
+
+  for (let s = 0; s <= n; s++) {
+    const t = (s / n) * len;
+    const p = { x: edgeA.x + ux * t, y: edgeA.y + uy * t };
+    const probeOut = {
+      x: p.x + nx * FACE_PROBE_MM,
+      y: p.y + ny * FACE_PROBE_MM,
+    };
+    const intersects =
+      pointInPolygon(probeOut, poolOutline) || pointInPolygon(p, poolOutline);
+    if (intersects) {
+      hits += 1;
+      tMin = Math.min(tMin, t);
+      tMax = Math.max(tMax, t);
+    }
+  }
+
+  // Need a meaningful run (not a single corner sample).
+  if (hits < 2 || !Number.isFinite(tMin) || tMax - tMin < MIN_OVERLAP_MM) {
+    return null;
+  }
+  // Pad slightly toward edge ends so short sampling doesn't shrink the weir.
+  const pad = len / n;
+  return [Math.max(0, tMin - pad), Math.min(len, tMax + pad)];
+}
+
 /** Candidate shared edges between a spa outline and a pool outline. */
 export function sharedSpilloverEdges(
   spaOutline: PointMm[],
@@ -84,6 +158,7 @@ export function sharedSpilloverEdges(
     const edgeLen = segmentLengthMm(edgeA, edgeB);
     if (edgeLen < MIN_OVERLAP_MM) continue;
 
+    // 1) Classic: spa edge colinear with a pool outline edge (touching join).
     let best: [number, number] | null = null;
     for (let j = 0; j < poolRing.length; j++) {
       const iv = colinearOverlapInterval(
@@ -96,6 +171,18 @@ export function sharedSpilloverEdges(
       if (!iv) continue;
       if (!best || iv[1] - iv[0] > best[1] - best[0]) best = iv;
     }
+
+    // 2) Any spa edge that intersects / faces the pool (inset & overlapping joins).
+    const face = spaEdgePoolIntersectInterval(
+      edgeA,
+      edgeB,
+      spaRing,
+      pool.outline,
+    );
+    if (face && (!best || face[1] - face[0] > best[1] - best[0])) {
+      best = face;
+    }
+
     if (!best) continue;
     const overlapLenMm = best[1] - best[0];
     if (overlapLenMm < MIN_OVERLAP_MM) continue;
@@ -112,7 +199,10 @@ export function sharedSpilloverEdges(
   return out;
 }
 
-/** All spillover edge candidates for a spa against the given pools. */
+/**
+ * All spillover edge candidates for a spa against the given pools.
+ * Every spa outline edge that intersects a pool is included (sorted longest first).
+ */
 export function listSpaSpilloverEdges(
   spa: PoolBody,
   pools: PoolBody[],
@@ -122,12 +212,17 @@ export function listSpaSpilloverEdges(
       waterBodyKind(p) === "pool" &&
       waterBodiesConnected(spa.outline, p.outline),
   );
-  const all: SharedSpilloverEdge[] = [];
+  const byKey = new Map<string, SharedSpilloverEdge>();
   for (const pool of attached) {
-    all.push(...sharedSpilloverEdges(spa.outline, pool));
+    for (const edge of sharedSpilloverEdges(spa.outline, pool)) {
+      const key = `${edge.poolId}:${edge.edgeIndex}`;
+      const prev = byKey.get(key);
+      if (!prev || edge.overlapLenMm > prev.overlapLenMm) {
+        byKey.set(key, edge);
+      }
+    }
   }
-  all.sort((a, b) => b.overlapLenMm - a.overlapLenMm);
-  return all;
+  return [...byKey.values()].sort((a, b) => b.overlapLenMm - a.overlapLenMm);
 }
 
 /**
@@ -172,63 +267,81 @@ function defaultWidthMm(overlapLenMm: number): number {
   );
 }
 
-/**
- * Resolve authorable spillover into a concrete weir + openings.
- * Returns null when disabled or the spa does not join any pool.
- * When `spillover` is omitted, defaults to enabled on the longest shared edge.
- */
-export function resolveSpaSpillover(
-  spa: PoolBody,
-  pools: PoolBody[],
-): ResolvedSpaSpillover | null {
-  if (waterBodyKind(spa) !== "spa") return null;
-  const cfg: SpaSpillover | undefined = spa.spillover;
-  if (cfg?.enabled === false) return null;
+/** Project a plan point onto an edge; returns distance along edge from edgeA (mm). */
+export function projectPointToEdgeTMm(
+  edgeA: PointMm,
+  edgeB: PointMm,
+  point: PointMm,
+): number {
+  const len = segmentLengthMm(edgeA, edgeB) || 1;
+  const ux = (edgeB.x - edgeA.x) / len;
+  const uy = (edgeB.y - edgeA.y) / len;
+  return (point.x - edgeA.x) * ux + (point.y - edgeA.y) * uy;
+}
 
-  let edges = listSpaSpilloverEdges(spa, pools);
-  if (!edges.length) return null;
+/** Convert a weir span [t0,t1] on an overlap into width + offset from overlap mid. */
+export function weirParamsFromSpan(
+  overlapT0: number,
+  overlapT1: number,
+  t0: number,
+  t1: number,
+): { widthMm: number; offsetMm: number } {
+  const lo = Math.min(t0, t1);
+  const hi = Math.max(t0, t1);
+  const mid = (overlapT0 + overlapT1) / 2;
+  const widthMm = Math.max(50, hi - lo);
+  const center = (lo + hi) / 2;
+  return { widthMm, offsetMm: center - mid };
+}
 
-  if (cfg?.targetPoolId) {
-    const filtered = edges.filter((e) => e.poolId === cfg.targetPoolId);
-    if (filtered.length) edges = filtered;
-  }
-
-  let edge =
-    cfg?.edgeIndex != null
-      ? edges.find((e) => e.edgeIndex === cfg.edgeIndex)
-      : undefined;
-  if (!edge) edge = edges[0];
-
-  const mid = (edge.overlapT0 + edge.overlapT1) / 2;
-  const widthRaw =
-    cfg?.widthMm != null && Number.isFinite(cfg.widthMm)
-      ? cfg.widthMm
-      : defaultWidthMm(edge.overlapLenMm);
-  const widthMm = Math.min(
-    edge.overlapLenMm,
-    Math.max(50, widthRaw),
-  );
-  const offsetMm =
-    cfg?.offsetMm != null && Number.isFinite(cfg.offsetMm) ? cfg.offsetMm : 0;
-
-  let t0 = mid + offsetMm - widthMm / 2;
-  let t1 = mid + offsetMm + widthMm / 2;
-  if (t0 < edge.overlapT0) {
-    const d = edge.overlapT0 - t0;
+function clampWeirSpan(
+  overlapT0: number,
+  overlapT1: number,
+  widthMm: number,
+  offsetMm: number,
+): { t0: number; t1: number } | null {
+  const mid = (overlapT0 + overlapT1) / 2;
+  const width = Math.min(overlapT1 - overlapT0, Math.max(50, widthMm));
+  let t0 = mid + offsetMm - width / 2;
+  let t1 = mid + offsetMm + width / 2;
+  if (t0 < overlapT0) {
+    const d = overlapT0 - t0;
     t0 += d;
     t1 += d;
   }
-  if (t1 > edge.overlapT1) {
-    const d = t1 - edge.overlapT1;
+  if (t1 > overlapT1) {
+    const d = t1 - overlapT1;
     t0 -= d;
     t1 -= d;
   }
-  t0 = Math.max(edge.overlapT0, t0);
-  t1 = Math.min(edge.overlapT1, t1);
+  t0 = Math.max(overlapT0, t0);
+  t1 = Math.min(overlapT1, t1);
   if (t1 - t0 < 50) return null;
+  return { t0, t1 };
+}
 
-  const a = edgePoint(edge.edgeA, edge.edgeB, t0);
-  const b = edgePoint(edge.edgeA, edge.edgeB, t1);
+function resolveOneWeir(
+  spa: PoolBody,
+  edge: SharedSpilloverEdge,
+  weir: { widthMm?: number; offsetMm?: number },
+  cfg: SpaSpillover | undefined,
+): ResolvedSpaSpillover | null {
+  const widthRaw =
+    weir.widthMm != null && Number.isFinite(weir.widthMm)
+      ? weir.widthMm
+      : defaultWidthMm(edge.overlapLenMm);
+  const offsetMm =
+    weir.offsetMm != null && Number.isFinite(weir.offsetMm) ? weir.offsetMm : 0;
+  const span = clampWeirSpan(
+    edge.overlapT0,
+    edge.overlapT1,
+    widthRaw,
+    offsetMm,
+  );
+  if (!span) return null;
+
+  const a = edgePoint(edge.edgeA, edge.edgeB, span.t0);
+  const b = edgePoint(edge.edgeA, edge.edgeB, span.t1);
   const style: SpaSpilloverStyle =
     cfg?.style === "scuppers" || cfg?.style === "sheer" ? cfg.style : "sheet";
   const notchDepthMm = Math.max(
@@ -257,12 +370,181 @@ export function resolveSpaSpillover(
     style,
     a,
     b,
-    widthMm: t1 - t0,
+    widthMm: span.t1 - span.t0,
     notchDepthMm,
     openings,
     overlapT0: edge.overlapT0,
     overlapT1: edge.overlapT1,
   };
+}
+
+/**
+ * Active weir configs for a spa: explicit `weirs[]`, else legacy single-edge
+ * fields, else one default weir per pool-intersecting edge.
+ */
+export function spilloverWeirConfigs(
+  spa: PoolBody,
+  candidates: SharedSpilloverEdge[],
+): { edgeIndex: number; enabled: boolean; widthMm?: number; offsetMm?: number }[] {
+  const cfg = spa.spillover;
+  if (cfg?.weirs?.length) {
+    return cfg.weirs.map((w) => ({
+      edgeIndex: w.edgeIndex,
+      enabled: w.enabled !== false,
+      widthMm: w.widthMm,
+      offsetMm: w.offsetMm,
+    }));
+  }
+  if (cfg?.edgeIndex != null) {
+    return [
+      {
+        edgeIndex: cfg.edgeIndex,
+        enabled: true,
+        widthMm: cfg.widthMm,
+        offsetMm: cfg.offsetMm,
+      },
+    ];
+  }
+  // Default: every intersecting edge is an editable weir.
+  return candidates.map((c) => ({
+    edgeIndex: c.edgeIndex,
+    enabled: true,
+  }));
+}
+
+/**
+ * Resolve all active spa→pool weirs (one per enabled pool-facing edge).
+ */
+export function resolveSpaSpillovers(
+  spa: PoolBody,
+  pools: PoolBody[],
+): ResolvedSpaSpillover[] {
+  if (waterBodyKind(spa) !== "spa") return [];
+  const cfg = spa.spillover;
+  if (cfg?.enabled === false) return [];
+
+  let edges = listSpaSpilloverEdges(spa, pools);
+  if (!edges.length) return [];
+
+  if (cfg?.targetPoolId) {
+    const filtered = edges.filter((e) => e.poolId === cfg.targetPoolId);
+    if (filtered.length) edges = filtered;
+  }
+
+  const weirs = spilloverWeirConfigs(spa, edges);
+  const out: ResolvedSpaSpillover[] = [];
+  for (const w of weirs) {
+    if (w.enabled === false) continue;
+    const edge = edges.find((e) => e.edgeIndex === w.edgeIndex);
+    if (!edge) continue;
+    const resolved = resolveOneWeir(spa, edge, w, cfg);
+    if (resolved) out.push(resolved);
+  }
+  return out;
+}
+
+/**
+ * Resolve authorable spillover into a concrete weir + openings.
+ * @deprecated Prefer {@link resolveSpaSpillovers}; returns the longest weir.
+ */
+export function resolveSpaSpillover(
+  spa: PoolBody,
+  pools: PoolBody[],
+): ResolvedSpaSpillover | null {
+  const all = resolveSpaSpillovers(spa, pools);
+  if (!all.length) return null;
+  return all.reduce((best, r) => (r.widthMm > best.widthMm ? r : best), all[0]);
+}
+
+/** Patch one weir on a spa spillover config (creates weirs[] from defaults). */
+export function patchSpaSpilloverWeir(
+  spa: PoolBody,
+  pools: PoolBody[],
+  edgeIndex: number,
+  patch: Partial<SpaSpilloverWeir>,
+): SpaSpillover {
+  const candidates = listSpaSpilloverEdges(spa, pools);
+  const base = spilloverWeirConfigs(spa, candidates);
+  const nextWeirs = candidates.map((c) => {
+    const prev = base.find((w) => w.edgeIndex === c.edgeIndex);
+    const row: SpaSpilloverWeir = {
+      edgeIndex: c.edgeIndex,
+      enabled: prev?.enabled !== false,
+      widthMm: prev?.widthMm,
+      offsetMm: prev?.offsetMm,
+    };
+    if (c.edgeIndex === edgeIndex) {
+      return { ...row, ...patch, edgeIndex };
+    }
+    return row;
+  });
+  // Include an edge that isn't currently a candidate only if explicitly patched
+  if (!candidates.some((c) => c.edgeIndex === edgeIndex)) {
+    nextWeirs.push({
+      edgeIndex,
+      enabled: true,
+      ...patch,
+    });
+  }
+  const prev = spa.spillover ?? { enabled: true };
+  return {
+    ...prev,
+    enabled: prev.enabled !== false,
+    weirs: nextWeirs,
+    // Clear legacy single-edge fields once weirs are authoritative
+    edgeIndex: undefined,
+    widthMm: undefined,
+    offsetMm: undefined,
+  };
+}
+
+/**
+ * Update weir span from a dragged endpoint or body slide.
+ * `handle`: which end is dragged, or "body" to slide keeping width.
+ */
+export function spilloverWeirFromDrag(
+  candidate: SharedSpilloverEdge,
+  current: ResolvedSpaSpillover,
+  handle: "start" | "end" | "body",
+  point: PointMm,
+): { widthMm: number; offsetMm: number } {
+  const t = projectPointToEdgeTMm(candidate.edgeA, candidate.edgeB, point);
+  const curT0 = projectPointToEdgeTMm(candidate.edgeA, candidate.edgeB, current.a);
+  const curT1 = projectPointToEdgeTMm(candidate.edgeA, candidate.edgeB, current.b);
+  let t0 = Math.min(curT0, curT1);
+  let t1 = Math.max(curT0, curT1);
+  const width = t1 - t0;
+
+  if (handle === "start") {
+    t0 = Math.min(t, t1 - 50);
+  } else if (handle === "end") {
+    t1 = Math.max(t, t0 + 50);
+  } else {
+    const center = t;
+    t0 = center - width / 2;
+    t1 = center + width / 2;
+  }
+
+  const clamped = clampWeirSpan(
+    candidate.overlapT0,
+    candidate.overlapT1,
+    t1 - t0,
+    (t0 + t1) / 2 - (candidate.overlapT0 + candidate.overlapT1) / 2,
+  );
+  if (!clamped) {
+    return weirParamsFromSpan(
+      candidate.overlapT0,
+      candidate.overlapT1,
+      curT0,
+      curT1,
+    );
+  }
+  return weirParamsFromSpan(
+    candidate.overlapT0,
+    candidate.overlapT1,
+    clamped.t0,
+    clamped.t1,
+  );
 }
 
 /**

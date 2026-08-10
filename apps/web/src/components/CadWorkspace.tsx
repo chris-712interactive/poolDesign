@@ -119,6 +119,9 @@ import {
   waterBodyKind,
   listSpaSpilloverEdges,
   resolveSpaSpillover,
+  resolveSpaSpillovers,
+  patchSpaSpilloverWeir,
+  spilloverWeirFromDrag,
   type Building,
   type BuildingOpening,
   type BuildingOpeningKind,
@@ -263,6 +266,12 @@ type DragState =
   | {
       mode: "rotate";
       id: string;
+    }
+  | {
+      mode: "spilloverWeir";
+      spaId: string;
+      edgeIndex: number;
+      handle: "start" | "end" | "body";
     };
 
 type Props = {
@@ -840,6 +849,10 @@ export function CadWorkspace({
             vp,
             pool,
             design.poolBodies.filter((p) => waterBodyKind(p) === "pool"),
+            {
+              selected:
+                selection?.kind === "pool" && selection.id === pool.id,
+            },
           );
         } else if (selected) {
           drawDepthProfile(ctx, vp, pool, unitSystem);
@@ -1493,6 +1506,56 @@ export function CadWorkspace({
     return null;
   }
 
+  function hitSpilloverWeir(
+    point: PointMm,
+  ): {
+    spaId: string;
+    edgeIndex: number;
+    handle: "start" | "end" | "body";
+  } | null {
+    if (selection?.kind !== "pool" || !selectedPool) return null;
+    if (waterBodyKind(selectedPool) !== "spa") return null;
+    if (selectedPool.spillover?.enabled === false) return null;
+    const pools = design.poolBodies.filter((p) => waterBodyKind(p) === "pool");
+    const spills = resolveSpaSpillovers(selectedPool, pools);
+    const tol = (VERTEX_HIT_PX + 6) / vp.scale;
+    for (const spill of spills) {
+      if (segmentLengthMm(point, spill.a) <= tol) {
+        return {
+          spaId: selectedPool.id,
+          edgeIndex: spill.edgeIndex,
+          handle: "start",
+        };
+      }
+      if (segmentLengthMm(point, spill.b) <= tol) {
+        return {
+          spaId: selectedPool.id,
+          edgeIndex: spill.edgeIndex,
+          handle: "end",
+        };
+      }
+      const mid = {
+        x: (spill.a.x + spill.b.x) / 2,
+        y: (spill.a.y + spill.b.y) / 2,
+      };
+      if (segmentLengthMm(point, mid) <= tol) {
+        return {
+          spaId: selectedPool.id,
+          edgeIndex: spill.edgeIndex,
+          handle: "body",
+        };
+      }
+      if (distToSegment(point, spill.a, spill.b) <= tol) {
+        return {
+          spaId: selectedPool.id,
+          edgeIndex: spill.edgeIndex,
+          handle: "body",
+        };
+      }
+    }
+    return null;
+  }
+
   function hitDepthStation(
     point: PointMm,
   ): { poolId: string; stationId: string } | null {
@@ -1809,6 +1872,12 @@ export function CadWorkspace({
         setDrag({ mode: "rotate", id: rotateId });
         return;
       }
+      const spillHit = hitSpilloverWeir(point);
+      if (spillHit) {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({ mode: "spilloverWeir", ...spillHit });
+        return;
+      }
       const depthHit = hitDepthStation(point);
       if (depthHit) {
         dragOriginRef.current = structuredClone(design);
@@ -2030,6 +2099,39 @@ export function CadWorkspace({
           ...d,
           poolBodies: d.poolBodies.map((p) =>
             p.id === drag.poolId ? next : p,
+          ),
+        };
+      });
+      return;
+    }
+
+    if (drag.mode === "spilloverWeir") {
+      setDesign((d) => {
+        const spa = d.poolBodies.find((p) => p.id === drag.spaId);
+        if (!spa || waterBodyKind(spa) !== "spa") return d;
+        const pools = d.poolBodies.filter((p) => waterBodyKind(p) === "pool");
+        const candidates = listSpaSpilloverEdges(spa, pools);
+        const candidate = candidates.find(
+          (c) => c.edgeIndex === drag.edgeIndex,
+        );
+        const spills = resolveSpaSpillovers(spa, pools);
+        const current = spills.find((s) => s.edgeIndex === drag.edgeIndex);
+        if (!candidate || !current) return d;
+        const params = spilloverWeirFromDrag(
+          candidate,
+          current,
+          drag.handle,
+          point,
+        );
+        const spillover = patchSpaSpilloverWeir(spa, pools, drag.edgeIndex, {
+          enabled: true,
+          widthMm: params.widthMm,
+          offsetMm: params.offsetMm,
+        });
+        return {
+          ...d,
+          poolBodies: d.poolBodies.map((p) =>
+            p.id === drag.spaId ? { ...p, spillover } : p,
           ),
         };
       });
@@ -2358,7 +2460,8 @@ export function CadWorkspace({
       drag?.mode === "gate" ||
       drag?.mode === "coverSupport" ||
       drag?.mode === "rotate" ||
-      drag?.mode === "depthStation"
+      drag?.mode === "depthStation" ||
+      drag?.mode === "spilloverWeir"
     ) {
       let next = designRef.current;
       // After reshaping a spa shell, reflow benches/equipment/plumbing inside.
@@ -4960,7 +5063,8 @@ function SpaShellFields({
       </strong>
       {!canSpill ? (
         <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
-          Attach this spa to a pool wall to enable a spillover weir.
+          Move the spa so it shares a wall with the pool (touching or slightly
+          overlapping) to enable spillover.
         </p>
       ) : (
         <>
@@ -4984,32 +5088,65 @@ function SpaShellFields({
           </label>
           {enabled && (
             <>
-              {edges.length > 1 && (
-                <div className="field">
-                  <label htmlFor="spa-spill-edge">Weir edge</label>
-                  <select
-                    id="spa-spill-edge"
-                    value={
-                      spillCfg.edgeIndex ?? resolved?.edgeIndex ?? edges[0].edgeIndex
-                    }
-                    onChange={(e) => {
-                      const edgeIndex = Number(e.target.value);
-                      const edge = edges.find((x) => x.edgeIndex === edgeIndex);
-                      patchSpillover({
-                        edgeIndex,
-                        targetPoolId: edge?.poolId,
-                      });
-                    }}
-                  >
-                    {edges.map((e, i) => (
-                      <option key={`${e.poolId}-${e.edgeIndex}`} value={e.edgeIndex}>
-                        Side {i + 1} ({formatLength(e.overlapLenMm, unitSystem)}{" "}
-                        shared)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
+                On the 2D plan, select the spa and drag weir end handles to
+                resize, or the middle handle to slide along each pool-facing
+                edge.
+              </p>
+              <div className="stack" style={{ gap: "0.35rem" }}>
+                {edges.map((e) => {
+                  const weir = spillCfg.weirs?.find(
+                    (w) => w.edgeIndex === e.edgeIndex,
+                  );
+                  const edgeOn =
+                    spillCfg.weirs?.length
+                      ? weir?.enabled !== false && !!weir
+                      : true;
+                  const resolvedEdge = resolveSpaSpillovers(
+                    {
+                      ...body,
+                      spillover: { ...spillCfg, enabled: true },
+                    },
+                    pools,
+                  ).find((r) => r.edgeIndex === e.edgeIndex);
+                  return (
+                    <label
+                      key={`${e.poolId}-${e.edgeIndex}`}
+                      className="field"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.45rem",
+                        flexDirection: "row",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={edgeOn}
+                        onChange={(ev) => {
+                          const spillover = patchSpaSpilloverWeir(
+                            body,
+                            pools,
+                            e.edgeIndex,
+                            {
+                              enabled: ev.target.checked,
+                              widthMm: weir?.widthMm ?? resolvedEdge?.widthMm,
+                              offsetMm: weir?.offsetMm,
+                            },
+                          );
+                          onSpillover(spillover);
+                        }}
+                      />
+                      <span style={{ fontSize: "0.85rem" }}>
+                        Edge {e.edgeIndex + 1}
+                        {resolvedEdge
+                          ? ` · ${formatLength(resolvedEdge.widthMm, unitSystem)}`
+                          : ` · ${formatLength(e.overlapLenMm, unitSystem)} pool face`}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
               <div className="field">
                 <label htmlFor="spa-spill-style">Style</label>
                 <select
@@ -5025,35 +5162,6 @@ function SpaShellFields({
                   <option value="scuppers">Scuppers</option>
                   <option value="sheer">Sheer descent</option>
                 </select>
-              </div>
-              <div className="field">
-                <label htmlFor="spa-spill-w">Weir width</label>
-                <input
-                  id="spa-spill-w"
-                  key={`spill-w-${body.id}-${resolved?.widthMm ?? 0}`}
-                  defaultValue={formatLength(
-                    spillCfg.widthMm ?? resolved?.widthMm ?? 24 * 25.4,
-                    unitSystem,
-                  )}
-                  onBlur={(e) => {
-                    const mm = parseLengthToMm(e.target.value, unitSystem);
-                    if (mm != null && mm > 50) patchSpillover({ widthMm: mm });
-                  }}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="spa-spill-off">Offset along edge</label>
-                <input
-                  id="spa-spill-off"
-                  key={`spill-off-${body.id}-${spillCfg.offsetMm ?? 0}`}
-                  defaultValue={formatLength(spillCfg.offsetMm ?? 0, unitSystem)}
-                  onBlur={(e) => {
-                    const mm = parseLengthToMm(e.target.value, unitSystem);
-                    if (mm != null && Number.isFinite(mm)) {
-                      patchSpillover({ offsetMm: mm });
-                    }
-                  }}
-                />
               </div>
               <div className="field">
                 <label htmlFor="spa-spill-notch">Notch depth (below rim)</label>
@@ -5088,7 +5196,10 @@ function SpaShellFields({
                         const n = Number(e.target.value);
                         if (Number.isFinite(n)) {
                           patchSpillover({
-                            scupperCount: Math.min(8, Math.max(2, Math.round(n))),
+                            scupperCount: Math.min(
+                              8,
+                              Math.max(2, Math.round(n)),
+                            ),
                           });
                         }
                       }}

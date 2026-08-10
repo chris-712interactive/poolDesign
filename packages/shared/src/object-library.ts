@@ -396,6 +396,82 @@ export function diningOverallFootprintMm(
   };
 }
 
+/** Chair placement in table-local mm: +X along width, +Y along depth. */
+export type DiningChairSlotMm = {
+  xMm: number;
+  yMm: number;
+  /** Yaw so the seat faces the table center (0 = facing +Y). */
+  yawRad: number;
+};
+
+/**
+ * Chairs all the way around the table — long sides and ends for rect,
+ * evenly spaced orbit for round.
+ */
+export function diningChairSlotsMm(
+  shape: "rect" | "round",
+  tableWidthMm: number,
+  tableDepthMm: number,
+): DiningChairSlotMm[] {
+  const clear = DINING_CHAIR_CLEARANCE_MM;
+  /** Distance from tabletop edge to chair center. */
+  const pullOut = clear * 0.48;
+  /** Target spacing between chair centers along an edge. */
+  const pitch = 26 * IN;
+  /** Keep chairs this far from corners so sides/ends don't collide. */
+  const cornerPad = 14 * IN;
+
+  if (shape === "round") {
+    const dia = Math.max(tableWidthMm, tableDepthMm);
+    const n =
+      dia >= 7 * FT ? 8 : dia >= 5.5 * FT ? 6 : dia >= 4 * FT ? 4 : 2;
+    const orbit = dia / 2 + pullOut;
+    return Array.from({ length: n }, (_, i) => {
+      const a = (i / n) * Math.PI * 2;
+      return {
+        xMm: Math.sin(a) * orbit,
+        yMm: Math.cos(a) * orbit,
+        yawRad: a + Math.PI,
+      };
+    });
+  }
+
+  const slots: DiningChairSlotMm[] = [];
+  const halfW = tableWidthMm / 2;
+  const halfD = tableDepthMm / 2;
+  const sideY = halfD + pullOut;
+  const endX = halfW + pullOut;
+
+  const countAlong = (edgeLen: number) => {
+    const usable = Math.max(0, edgeLen - cornerPad * 2);
+    return Math.max(1, Math.round(usable / pitch) || 1);
+  };
+
+  // Long sides (±Y): chairs facing the table
+  const nSide = countAlong(tableWidthMm);
+  for (let i = 0; i < nSide; i++) {
+    const t = nSide === 1 ? 0.5 : i / (nSide - 1);
+    const span = Math.max(0, tableWidthMm - cornerPad * 2);
+    const x = -span / 2 + t * span;
+    slots.push({ xMm: x, yMm: sideY, yawRad: Math.PI });
+    slots.push({ xMm: x, yMm: -sideY, yawRad: 0 });
+  }
+
+  // Ends (±X): at least one chair per end when the end is wide enough
+  const nEnd = countAlong(tableDepthMm);
+  if (tableDepthMm >= 28 * IN || tableWidthMm >= 4 * FT) {
+    for (let i = 0; i < nEnd; i++) {
+      const t = nEnd === 1 ? 0.5 : i / (nEnd - 1);
+      const span = Math.max(0, tableDepthMm - cornerPad * 2);
+      const y = nEnd === 1 ? 0 : -span / 2 + t * span;
+      slots.push({ xMm: endX, yMm: y, yawRad: -Math.PI / 2 });
+      slots.push({ xMm: -endX, yMm: y, yawRad: Math.PI / 2 });
+    }
+  }
+
+  return slots;
+}
+
 /**
  * Plan / hit-test size for a placed object.
  * Dining sets store tabletop size; footprint includes chair clearance.

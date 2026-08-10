@@ -9,6 +9,7 @@ import {
   DEFAULT_FURNITURE_FABRIC_FINISH_ID,
   DEFAULT_FURNITURE_FRAME_FINISH_ID,
   DINING_CHAIR_CLEARANCE_MM,
+  diningChairSlotsMm,
   diningTableShape,
   isDiningSetId,
   resolvePersonOutfitId,
@@ -362,6 +363,156 @@ function BubblerPlume({
               metalness={0}
               emissive={hasLed ? "#ff2e6a" : "#000000"}
               emissiveIntensity={hasLed ? 0.6 : 0}
+              depthWrite={false}
+              clippingPlanes={clippingPlanes}
+              clipShadows={clippingPlanes.length > 0}
+            />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+}
+
+type JetBubbleSeed = {
+  phase: number;
+  radius: number;
+  speed: number;
+  spreadX: number;
+  spreadY: number;
+};
+
+/**
+ * Wall spa jet: aerated stream shooting into the vessel along local +Z,
+ * with bubbles that spread and rise as they dissipate.
+ */
+function SpaJetStream({ selected }: { selected: boolean }) {
+  const clippingPlanes = useContext(ClipPlanesContext);
+  const dropsRef = useRef<THREE.Group>(null);
+  const streamRef = useRef<THREE.Mesh>(null);
+  const streamMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const mistRef = useRef<THREE.Mesh>(null);
+  const mistMatRef = useRef<THREE.MeshStandardMaterial>(null);
+
+  const nozzleZ = 0.048;
+  const streamLen = 0.32;
+
+  const bubbles = useMemo<JetBubbleSeed[]>(
+    () =>
+      Array.from({ length: 18 }, (_, i) => ({
+        phase: (i * 0.618) % 1,
+        radius: 0.0055 + (i % 4) * 0.0022,
+        speed: 0.85 + (i % 6) * 0.1,
+        spreadX: ((i * 7) % 11) / 11 * 2 - 1,
+        spreadY: ((i * 13) % 11) / 11 * 2 - 1,
+      })),
+    [],
+  );
+
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    const g = dropsRef.current;
+    if (g) {
+      for (let i = 0; i < bubbles.length; i++) {
+        const child = g.children[i];
+        const d = bubbles[i];
+        if (!d || !(child instanceof THREE.Mesh)) continue;
+
+        const cycle = (t * d.speed * 0.75 + d.phase) % 1;
+        // Fast near the nozzle, ease out as the jet dissipates.
+        const u = 1 - (1 - cycle) * (1 - cycle);
+        const z = nozzleZ + u * streamLen;
+        const spread = 0.006 + u * 0.06;
+        // Buoyancy: bubbles climb as they travel into the spa.
+        const rise = u * u * 0.055;
+        const wobble = Math.sin(t * 13 + d.phase * 18) * 0.0035 * (0.4 + u);
+
+        child.position.set(
+          d.spreadX * spread + wobble,
+          d.spreadY * spread * 0.65 + rise,
+          z,
+        );
+
+        const fade =
+          cycle < 0.05
+            ? cycle / 0.05
+            : cycle > 0.72
+              ? Math.max(0, 1 - (cycle - 0.72) / 0.28)
+              : 1;
+        child.scale.setScalar((0.95 + u * 1.1) * fade);
+        const mat = child.material as THREE.MeshStandardMaterial;
+        mat.opacity = 0.62 * fade * (1 - u * 0.4);
+      }
+    }
+
+    if (streamRef.current && streamMatRef.current) {
+      const pulse = 0.88 + Math.sin(t * 12) * 0.12;
+      streamRef.current.scale.set(pulse, 1, pulse);
+      streamMatRef.current.opacity = 0.2 + Math.sin(t * 10) * 0.045;
+    }
+    if (mistRef.current && mistMatRef.current) {
+      const boil = 0.9 + Math.sin(t * 9 + 1.2) * 0.12;
+      mistRef.current.scale.set(boil, boil, 1);
+      mistMatRef.current.opacity = 0.14 + Math.sin(t * 8) * 0.04;
+    }
+  });
+
+  return (
+    <group>
+      {/* Soft translucent jet body along +Z */}
+      <mesh
+        ref={streamRef}
+        position={[0, 0.008, nozzleZ + streamLen * 0.42]}
+        rotation={[Math.PI / 2, 0, 0]}
+        frustumCulled={false}
+      >
+        <cylinderGeometry args={[0.038, 0.011, streamLen * 0.85, 14, 1, true]} />
+        <meshStandardMaterial
+          ref={streamMatRef}
+          color={selected ? "#a8ebe0" : "#9ad4e8"}
+          transparent
+          opacity={0.22}
+          roughness={0.18}
+          metalness={0}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+          clippingPlanes={clippingPlanes}
+          clipShadows={clippingPlanes.length > 0}
+        />
+      </mesh>
+
+      {/* Wider mist veil a bit further out */}
+      <mesh
+        ref={mistRef}
+        position={[0, 0.02, nozzleZ + streamLen * 0.62]}
+        rotation={[Math.PI / 2, 0, 0]}
+        frustumCulled={false}
+      >
+        <cylinderGeometry args={[0.055, 0.022, streamLen * 0.45, 14, 1, true]} />
+        <meshStandardMaterial
+          ref={mistMatRef}
+          color={selected ? "#c5f5ea" : "#c8eef8"}
+          transparent
+          opacity={0.14}
+          roughness={0.35}
+          metalness={0}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+          clippingPlanes={clippingPlanes}
+          clipShadows={clippingPlanes.length > 0}
+        />
+      </mesh>
+
+      <group ref={dropsRef}>
+        {bubbles.map((d, i) => (
+          <mesh key={i} frustumCulled={false}>
+            <sphereGeometry args={[d.radius, 7, 7]} />
+            <meshStandardMaterial
+              color={selected ? "#c5f5ea" : "#e8f7fc"}
+              transparent
+              opacity={0.6}
+              roughness={0.22}
+              metalness={0}
               depthWrite={false}
               clippingPlanes={clippingPlanes}
               clipShadows={clippingPlanes.length > 0}
@@ -735,33 +886,16 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
     const chairSeatT = 0.05;
     const backH = sy * 0.32;
 
-    const chairSlots: { x: number; z: number; yaw: number }[] = [];
-    if (shape === "round") {
-      const n = tableW >= 1.7 ? 6 : 4;
-      const orbit = tableW / 2 + clearM * 0.48;
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2;
-        chairSlots.push({
-          x: Math.sin(a) * orbit,
-          z: Math.cos(a) * orbit,
-          yaw: a + Math.PI,
-        });
-      }
-    } else {
-      const along = Math.max(2, Math.round(tableW / 0.7));
-      const sideZ = tableD / 2 + clearM * 0.48;
-      for (let i = 0; i < along; i++) {
-        const t = along === 1 ? 0.5 : i / (along - 1);
-        const x = -tableW * 0.38 + t * tableW * 0.76;
-        chairSlots.push({ x, z: sideZ, yaw: Math.PI });
-        chairSlots.push({ x, z: -sideZ, yaw: 0 });
-      }
-      if (tableW >= 1.6) {
-        const endX = tableW / 2 + clearM * 0.48;
-        chairSlots.push({ x: endX, z: 0, yaw: -Math.PI / 2 });
-        chairSlots.push({ x: -endX, z: 0, yaw: Math.PI / 2 });
-      }
-    }
+    // Shared layout: chairs on all four sides (rect) or full orbit (round).
+    const chairSlots = diningChairSlotsMm(
+      shape,
+      tableW * 1000,
+      tableD * 1000,
+    ).map((s) => ({
+      x: s.xMm / 1000,
+      z: s.yMm / 1000,
+      yaw: s.yawRad,
+    }));
 
     return (
       <group {...groupProps}>
@@ -1076,10 +1210,7 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
           <cylinderGeometry args={[r * 0.2, r * 0.28, 0.032, 14]} />
           <Mat color="#3d454c" metalness={0.65} selected={selected} />
         </mesh>
-        <mesh position={[0, 0, 0.09]} rotation={[Math.PI / 2, 0, 0]}>
-          <coneGeometry args={[0.032, 0.1, 14, 1, true]} />
-          <Mat color="#8ed0e8" opacity={0.22} roughness={0.15} selected={selected} />
-        </mesh>
+        <SpaJetStream selected={selected} />
       </group>
     );
   }

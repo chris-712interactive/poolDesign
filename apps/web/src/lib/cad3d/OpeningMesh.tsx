@@ -348,6 +348,19 @@ export function OpeningMesh({ desc, selected, onSelect }: Props) {
                 selected={selected}
               />
             </mesh>
+            {/* Pull on the outer jamb edge of each leaf (not the meeting stile). */}
+            <mesh
+              position={[side * (panelW * 0.42), 0, 0.055]}
+              castShadow
+            >
+              <boxGeometry args={[0.022, 0.16, 0.032]} />
+              <Mat
+                color="#b8c0c8"
+                metalness={0.8}
+                roughness={0.25}
+                selected={selected}
+              />
+            </mesh>
           </group>
         ))}
         {/* Track */}
@@ -357,16 +370,6 @@ export function OpeningMesh({ desc, selected, onSelect }: Props) {
             color="#5a6570"
             metalness={0.55}
             roughness={0.35}
-            selected={selected}
-          />
-        </mesh>
-        {/* Handle on right panel */}
-        <mesh position={[panelW * 0.35, 0, 0.055]} castShadow>
-          <boxGeometry args={[0.02, 0.14, 0.03]} />
-          <Mat
-            color="#b8c0c8"
-            metalness={0.8}
-            roughness={0.25}
             selected={selected}
           />
         </mesh>

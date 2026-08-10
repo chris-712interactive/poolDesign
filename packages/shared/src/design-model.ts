@@ -65,18 +65,32 @@ export const SPA_SPILLOVER_STYLES: SpaSpilloverStyle[] = [
   "sheer",
 ];
 
+/** Authorable weir on one pool-facing spa edge. */
+export type SpaSpilloverWeir = {
+  edgeIndex: number;
+  /** When false, this edge is not spilling (still a candidate on plan). */
+  enabled?: boolean;
+  widthMm?: number;
+  offsetMm?: number;
+};
+
 /** Authorable spa spillover into an attached pool. */
 export type SpaSpillover = {
   enabled: boolean;
   /** Target pool body id; validated against geometric join */
   targetPoolId?: string;
-  /** Spa outside-outline edge index for the weir */
+  /**
+   * Per-edge weirs on pool-facing edges. When omitted, every intersecting
+   * edge gets a default weir (editable on the 2D plan).
+   */
+  weirs?: SpaSpilloverWeir[];
+  /** @deprecated Prefer `weirs[]` — migrated on normalize */
   edgeIndex?: number;
-  /** Weir length along the edge (mm) */
+  /** @deprecated Prefer `weirs[]` */
   widthMm?: number;
-  /** Center offset along shared overlap from its midpoint (mm) */
+  /** @deprecated Prefer `weirs[]` */
   offsetMm?: number;
-  /** Notch depth below spa rim (mm) */
+  /** Notch depth below spa rim (mm) — shared across weirs */
   notchDepthMm?: number;
   style?: SpaSpilloverStyle;
   /** Scuppers only: number of openings (2–8) */

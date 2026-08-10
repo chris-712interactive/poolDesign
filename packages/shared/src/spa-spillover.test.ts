@@ -3,7 +3,10 @@ import { describe, it } from "node:test";
 import type { PoolBody } from "./design-model";
 import {
   listSpaSpilloverEdges,
+  patchSpaSpilloverWeir,
   resolveSpaSpillover,
+  resolveSpaSpillovers,
+  spilloverWeirFromDrag,
   splitScupperOpenings,
   wallSegmentsMinusIntervals,
 } from "./spa-spillover";
@@ -95,6 +98,70 @@ describe("spa spillover", () => {
     const resolved = resolveSpaSpillover(spa, [pool]);
     assert.ok(resolved);
     assert.ok(resolved!.widthMm <= resolved!.overlapT1 - resolved!.overlapT0 + 1);
+  });
+
+  it("lists every pool-intersecting spa edge as a candidate", () => {
+    // Corner inset: left + bottom spa edges both intersect the pool.
+    const pool = poolBody("pool_1", rect(0, 0, 8000, 4000));
+    const spa = spaBody("spa_1", rect(5500, 2500, 9000, 5000));
+    const edges = listSpaSpilloverEdges(spa, [pool]);
+    assert.ok(
+      edges.length >= 2,
+      `expected ≥2 candidates, got ${edges.length}`,
+    );
+    const indexes = new Set(edges.map((e) => e.edgeIndex));
+    assert.equal(indexes.size, edges.length);
+  });
+
+  it("defaults to a weir on every intersecting edge", () => {
+    const pool = poolBody("pool_1", rect(0, 0, 8000, 4000));
+    const spa = spaBody("spa_1", rect(5500, 2500, 9000, 5000));
+    const edges = listSpaSpilloverEdges(spa, [pool]);
+    const resolved = resolveSpaSpillovers(spa, [pool]);
+    assert.equal(resolved.length, edges.length);
+  });
+
+  it("updates weir width when dragging an endpoint", () => {
+    const pool = poolBody("pool_1", rect(0, 0, 20 * FT, 40 * FT));
+    const spa = spaBody("spa_1", rect(20 * FT, 10 * FT, 28 * FT, 20 * FT));
+    const edges = listSpaSpilloverEdges(spa, [pool]);
+    const before = resolveSpaSpillovers(spa, [pool])[0];
+    assert.ok(before);
+    const edge = edges.find((e) => e.edgeIndex === before.edgeIndex)!;
+    const params = spilloverWeirFromDrag(edge, before, "end", {
+      x: (before.a.x + before.b.x) / 2,
+      y: (before.a.y + before.b.y) / 2,
+    });
+    assert.ok(params.widthMm < before.widthMm);
+    const patched = patchSpaSpilloverWeir(spa, [pool], before.edgeIndex, params);
+    const after = resolveSpaSpillovers(
+      { ...spa, spillover: patched },
+      [pool],
+    ).find((r) => r.edgeIndex === before.edgeIndex)!;
+    assert.ok(after.widthMm < before.widthMm);
+  });
+
+  it("finds weir edges when spa is inset into the pool corner", () => {
+    // Same geometry as the L-wrap 3D join: spa overlaps pool corner.
+    const pool = poolBody("pool_1", rect(0, 0, 8000, 4000));
+    const spa = spaBody("spa_1", rect(5500, 2500, 9000, 5000));
+    const edges = listSpaSpilloverEdges(spa, [pool]);
+    assert.ok(edges.length >= 1, "expected pool-facing spa edges");
+    const resolved = resolveSpaSpillover(spa, [pool]);
+    assert.ok(resolved);
+    assert.ok(resolved!.widthMm >= 24 * IN);
+  });
+
+  it("finds weir edges when spa overlaps a pool long side", () => {
+    const pool = poolBody("pool_1", rect(0, 0, 20 * FT, 40 * FT));
+    // Spa overlaps into the pool along the right side (not merely touching).
+    const spa = spaBody(
+      "spa_1",
+      rect(18 * FT, 12 * FT, 26 * FT, 22 * FT),
+    );
+    const edges = listSpaSpilloverEdges(spa, [pool]);
+    assert.ok(edges.length >= 1);
+    assert.ok(resolveSpaSpillover(spa, [pool]));
   });
 
   it("splits scuppers into N openings", () => {

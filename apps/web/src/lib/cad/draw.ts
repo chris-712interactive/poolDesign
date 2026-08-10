@@ -4,6 +4,7 @@ import {
   depthProfileForBody,
   depthStationPlanPoint,
   diningTableShape,
+  diningChairSlotsMm,
   formatLength,
   gateEndpoints,
   houseExteriorPlanFill,
@@ -26,7 +27,8 @@ import {
   type PoolFeature,
   type RetainingSegment,
   type UnitSystem,
-  resolveSpaSpillover,
+  resolveSpaSpillovers,
+  listSpaSpilloverEdges,
 } from "@pool-design/shared";
 import { type Viewport, worldToScreen } from "@/lib/cad/math";
 
@@ -107,15 +109,18 @@ export function drawPolygon(
   }
 }
 
-/** Plan cue for spa→pool spillover weir (double tick + openings). */
+/** Plan cues for spa→pool spillover weirs (editable when selected). */
 export function drawSpaSpillover(
   ctx: CanvasRenderingContext2D,
   vp: Viewport,
   spa: PoolBody,
   pools: PoolBody[],
+  opts?: { selected?: boolean },
 ) {
-  const spill = resolveSpaSpillover(spa, pools);
-  if (!spill) return;
+  const selected = opts?.selected === true;
+  const spills = resolveSpaSpillovers(spa, pools);
+  const candidates = listSpaSpilloverEdges(spa, pools);
+  if (!candidates.length && !spills.length) return;
 
   const drawSeg = (a: PointMm, b: PointMm, width: number, color: string) => {
     const sa = worldToScreen(a, vp);
@@ -129,31 +134,73 @@ export function drawSpaSpillover(
     ctx.stroke();
   };
 
-  // Outer weir span
-  drawSeg(spill.a, spill.b, 5, "#7ec8e3");
-  drawSeg(spill.a, spill.b, 2, "#0d4f66");
+  const drawHandle = (p: PointMm) => {
+    const c = worldToScreen(p, vp);
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = "#0d4f66";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  };
 
-  // Perpendicular ticks at ends
-  const len =
-    Math.hypot(spill.b.x - spill.a.x, spill.b.y - spill.a.y) || 1;
-  const tx = (spill.b.x - spill.a.x) / len;
-  const ty = (spill.b.y - spill.a.y) / len;
-  const nx = -ty;
-  const ny = tx;
-  const tickMm = 180;
-  for (const p of [spill.a, spill.b]) {
-    drawSeg(
-      { x: p.x - nx * tickMm, y: p.y - ny * tickMm },
-      { x: p.x + nx * tickMm, y: p.y + ny * tickMm },
-      2,
-      "#0d4f66",
-    );
+  // Faint full pool-facing span for candidates (shows editable range).
+  if (selected) {
+    for (const edge of candidates) {
+      const len =
+        Math.hypot(edge.edgeB.x - edge.edgeA.x, edge.edgeB.y - edge.edgeA.y) ||
+        1;
+      const ux = (edge.edgeB.x - edge.edgeA.x) / len;
+      const uy = (edge.edgeB.y - edge.edgeA.y) / len;
+      const oa = {
+        x: edge.edgeA.x + ux * edge.overlapT0,
+        y: edge.edgeA.y + uy * edge.overlapT0,
+      };
+      const ob = {
+        x: edge.edgeA.x + ux * edge.overlapT1,
+        y: edge.edgeA.y + uy * edge.overlapT1,
+      };
+      ctx.setLineDash([6, 5]);
+      drawSeg(oa, ob, 1.5, "rgba(13,79,102,0.35)");
+      ctx.setLineDash([]);
+    }
   }
 
-  // Scupper openings as short bright marks
-  if (spill.style === "scuppers") {
-    for (const o of spill.openings) {
-      drawSeg(o.a, o.b, 3.5, "#b8e6f5");
+  for (const spill of spills) {
+    drawSeg(spill.a, spill.b, selected ? 6 : 5, "#7ec8e3");
+    drawSeg(spill.a, spill.b, selected ? 2.5 : 2, "#0d4f66");
+
+    const len =
+      Math.hypot(spill.b.x - spill.a.x, spill.b.y - spill.a.y) || 1;
+    const tx = (spill.b.x - spill.a.x) / len;
+    const ty = (spill.b.y - spill.a.y) / len;
+    const nx = -ty;
+    const ny = tx;
+    const tickMm = 180;
+    for (const p of [spill.a, spill.b]) {
+      drawSeg(
+        { x: p.x - nx * tickMm, y: p.y - ny * tickMm },
+        { x: p.x + nx * tickMm, y: p.y + ny * tickMm },
+        2,
+        "#0d4f66",
+      );
+    }
+
+    if (spill.style === "scuppers") {
+      for (const o of spill.openings) {
+        drawSeg(o.a, o.b, 3.5, "#b8e6f5");
+      }
+    }
+
+    if (selected) {
+      drawHandle(spill.a);
+      drawHandle(spill.b);
+      const mid = {
+        x: (spill.a.x + spill.b.x) / 2,
+        y: (spill.a.y + spill.b.y) / 2,
+      };
+      drawHandle(mid);
     }
   }
 }
@@ -729,6 +776,7 @@ export function drawPlacedObject(
   if (dining) {
     const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
     const shape = diningTableShape(obj.catalogItemId);
+    const slots = diningChairSlotsMm(shape, obj.widthMm, obj.depthMm);
     ctx.save();
     ctx.translate(center.x, center.y);
     ctx.rotate(rad);
@@ -743,6 +791,31 @@ export function drawPlacedObject(
       const hw = (obj.widthMm / 2) * vp.scale;
       const hd = (obj.depthMm / 2) * vp.scale;
       ctx.strokeRect(-hw, -hd, hw * 2, hd * 2);
+    }
+    // Chair footprints around the tabletop
+    const chairW = 16 * vp.scale;
+    const chairD = 14 * vp.scale;
+    ctx.fillStyle = selected
+      ? "rgba(120,70,30,0.45)"
+      : "rgba(160,100,50,0.35)";
+    ctx.strokeStyle = selected || preview ? "#6a3a0a" : "#8a5a28";
+    ctx.lineWidth = 1;
+    for (const s of slots) {
+      const x = s.xMm * vp.scale;
+      const y = s.yMm * vp.scale;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(s.yawRad);
+      ctx.beginPath();
+      ctx.rect(-chairW / 2, -chairD / 2, chairW, chairD);
+      ctx.fill();
+      ctx.stroke();
+      // Seat back tick
+      ctx.beginPath();
+      ctx.moveTo(-chairW * 0.4, -chairD * 0.45);
+      ctx.lineTo(chairW * 0.4, -chairD * 0.45);
+      ctx.stroke();
+      ctx.restore();
     }
     ctx.restore();
   }

@@ -63,12 +63,82 @@ function expandBounds(b: Bounds, margin: number): Bounds {
   };
 }
 
+function boundsFromOutline(outline: PointMm[]): Bounds {
+  return outlineBounds(outline);
+}
+
+function intersectBounds(a: Bounds, b: Bounds): Bounds | null {
+  const minX = Math.max(a.minX, b.minX);
+  const minY = Math.max(a.minY, b.minY);
+  const maxX = Math.min(a.maxX, b.maxX);
+  const maxY = Math.min(a.maxY, b.maxY);
+  if (maxX - minX < 1 || maxY - minY < 1) return null;
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY,
+    cx: (minX + maxX) / 2,
+    cy: (minY + maxY) / 2,
+  };
+}
+
+/** Up to four slabs = `outer` minus `hole` (AABB difference). */
+function subtractBounds(outer: Bounds, hole: Bounds): Bounds[] {
+  const hit = intersectBounds(outer, hole);
+  if (!hit) return [outer];
+  const out: Bounds[] = [];
+  const push = (minX: number, minY: number, maxX: number, maxY: number) => {
+    if (maxX - minX < 50 || maxY - minY < 50) return;
+    out.push({
+      minX,
+      minY,
+      maxX,
+      maxY,
+      width: maxX - minX,
+      height: maxY - minY,
+      cx: (minX + maxX) / 2,
+      cy: (minY + maxY) / 2,
+    });
+  };
+  // Left / right / bottom / top slabs around the intersection.
+  push(outer.minX, outer.minY, hit.minX, outer.maxY);
+  push(hit.maxX, outer.minY, outer.maxX, outer.maxY);
+  push(hit.minX, outer.minY, hit.maxX, hit.minY);
+  push(hit.minX, hit.maxY, hit.maxX, outer.maxY);
+  return out;
+}
+
+/**
+ * Punch water-body free zones out of a patio AABB so shell exits aren't
+ * trapped "inside" the deck obstacle, while the surrounding deck stays blocked.
+ */
+function punchBounds(outer: Bounds, holes: Bounds[]): Bounds[] {
+  let pieces = [outer];
+  for (const hole of holes) {
+    const next: Bounds[] = [];
+    for (const p of pieces) next.push(...subtractBounds(p, hole));
+    pieces = next;
+  }
+  return pieces;
+}
+
+function pointInBounds(p: PointMm, b: Bounds, margin = 0): boolean {
+  return (
+    p.x >= b.minX - margin &&
+    p.x <= b.maxX + margin &&
+    p.y >= b.minY - margin &&
+    p.y <= b.maxY + margin
+  );
+}
+
 const FT = 304.8;
 const IN = 25.4;
 /** Keep trenches outside structure footprints */
 const CLEARANCE_MM = 1 * FT;
-/** Extra cost for each soft (patio) crossing — prefer longer clear routes */
-const SOFT_HIT_PENALTY_MM = 40 * FT;
+/** Extra cost for each bend in a trench route */
 const BEND_PENALTY_MM = 3 * FT;
 
 /** Best-practice pipe sizes (mm). */
@@ -80,8 +150,10 @@ export const PIPE_FEATURE_MM = 25.4; // 1"
 export const PARALLEL_OFFSET_MM = 12 * IN;
 /** Buried trench centerline depth (mm below grade) */
 export const TRENCH_ELEV_MM = -420;
-/** Offset from equipment port to ground stub where body trenches land */
+/** How far past the pad front edge the trench stub sits */
 const STUB_OFFSET_MM = 14 * IN;
+/** Chase height across the pad before the front drop (mm above grade) */
+const PAD_CHASE_ELEV_MM = 120;
 
 export const PAD_EQUIPMENT_IDS = [
   "equip_pad",
@@ -162,18 +234,11 @@ function pathHits(
 
 function scorePath(
   path: PointMm[],
-  hardBoxes: Bounds[],
-  softBoxes: Bounds[],
+  blockedBoxes: Bounds[],
 ): number {
   if (path.length < 2) return Infinity;
-  const hard = pathHits(path, hardBoxes);
-  if (hard > 0) return Infinity;
-  const soft = pathHits(path, softBoxes);
-  return (
-    polylineLen(path) +
-    soft * SOFT_HIT_PENALTY_MM +
-    bendCount(path) * BEND_PENALTY_MM
-  );
+  if (pathHits(path, blockedBoxes) > 0) return Infinity;
+  return polylineLen(path) + bendCount(path) * BEND_PENALTY_MM;
 }
 
 function bypassCandidates(from: PointMm, to: PointMm, box: Bounds): PointMm[][] {
@@ -261,8 +326,8 @@ export function routeOrtho(from: PointMm, to: PointMm): PointMm[] {
 }
 
 /**
- * Ortho route that never crosses hard obstacles (houses) and prefers
- * avoiding soft obstacles (patios).
+ * Ortho route that never crosses houses or patio deck (auto-routes only).
+ * Manual plumbing runs are unchanged — designers can still draw under structures.
  */
 export function routeOrthoAvoiding(
   from: PointMm,
@@ -271,12 +336,11 @@ export function routeOrthoAvoiding(
 ): PointMm[] {
   if (!obstacles.length) return routeOrtho(from, to);
 
-  const hardBoxes = obstacles
-    .filter((o) => o.priority === "hard")
-    .map((o) => expandBounds(outlineBounds(o.outline), CLEARANCE_MM));
-  const softBoxes = obstacles
-    .filter((o) => o.priority === "soft")
-    .map((o) => expandBounds(outlineBounds(o.outline), CLEARANCE_MM / 2));
+  // Auto-routing treats both house and patio as blocked. Patio outlines are
+  // usually pre-punched around water bodies in obstaclesFromDesign.
+  const blockedBoxes = obstacles.map((o) =>
+    expandBounds(outlineBounds(o.outline), CLEARANCE_MM),
+  );
 
   const candidates: PointMm[][] = [];
   const viaH: PointMm[] = [from, { x: to.x, y: from.y }, to];
@@ -286,13 +350,13 @@ export function routeOrthoAvoiding(
     candidates.push([from, to]);
   }
 
-  for (const box of [...hardBoxes, ...softBoxes]) {
+  for (const box of blockedBoxes) {
     candidates.push(...bypassCandidates(from, to, box));
   }
 
-  // Dual-obstacle: route via a point outside both AABBs toward the open side
-  if (hardBoxes.length) {
-    const union = hardBoxes.reduce(
+  // Route around the union of all blocked AABBs (house + deck slabs).
+  if (blockedBoxes.length) {
+    const union = blockedBoxes.reduce(
       (acc, b) => ({
         minX: Math.min(acc.minX, b.minX),
         minY: Math.min(acc.minY, b.minY),
@@ -303,54 +367,98 @@ export function routeOrthoAvoiding(
         cx: 0,
         cy: 0,
       }),
-      hardBoxes[0],
+      blockedBoxes[0],
     );
-    candidates.push(...bypassCandidates(from, to, expandBounds(union, CLEARANCE_MM)));
+    candidates.push(
+      ...bypassCandidates(from, to, expandBounds(union, CLEARANCE_MM)),
+    );
+    // Extra ring further out — helps when pad and pool sit on opposite sides.
+    candidates.push(
+      ...bypassCandidates(from, to, expandBounds(union, CLEARANCE_MM * 3)),
+    );
   }
 
   let best: PointMm[] | null = null;
   let bestScore = Infinity;
-  let bestSoftAllowed: PointMm[] | null = null;
-  let bestSoftScore = Infinity;
 
   for (const raw of candidates) {
     const path = dedupePoints(raw);
-    const hardHits = pathHits(path, hardBoxes);
-    const softHits = pathHits(path, softBoxes);
-    const len = polylineLen(path) + bendCount(path) * BEND_PENALTY_MM;
-    if (hardHits === 0) {
-      const score = len + softHits * SOFT_HIT_PENALTY_MM;
-      if (score < bestScore) {
-        bestScore = score;
-        best = path;
-      }
-    }
-    // Track best that only violates soft (used if somehow all hit hard — shouldn't)
-    if (hardHits === 0 || softHits >= 0) {
-      if (hardHits === 0 && softHits > 0 && len < bestSoftScore) {
-        bestSoftScore = len;
-        bestSoftAllowed = path;
-      }
+    if (pathHits(path, blockedBoxes) > 0) continue;
+    const score =
+      polylineLen(path) + bendCount(path) * BEND_PENALTY_MM;
+    if (score < bestScore) {
+      bestScore = score;
+      best = path;
     }
   }
 
   if (best) return best;
-  if (bestSoftAllowed) return bestSoftAllowed;
-  // Last resort: shortest L (may clip — editable by user)
+
+  // No clear candidate — still refuse to tunnel through structures.
+  // Walk around the union on the longest clear side as a last resort.
+  if (blockedBoxes.length) {
+    const union = blockedBoxes.reduce(
+      (acc, b) => ({
+        minX: Math.min(acc.minX, b.minX),
+        minY: Math.min(acc.minY, b.minY),
+        maxX: Math.max(acc.maxX, b.maxX),
+        maxY: Math.max(acc.maxY, b.maxY),
+        width: 0,
+        height: 0,
+        cx: 0,
+        cy: 0,
+      }),
+      blockedBoxes[0],
+    );
+    const ring = expandBounds(union, CLEARANCE_MM * 4);
+    const ringPaths = bypassCandidates(from, to, ring);
+    for (const raw of ringPaths) {
+      const path = dedupePoints(raw);
+      if (pathHits(path, blockedBoxes) > 0) continue;
+      return path;
+    }
+  }
+
+  // Absolute fallback: direct ortho (may still clip if endpoints are inside
+  // blocked regions — user can edit). Prefer this over inventing nonsense.
   return routeOrtho(from, to);
 }
 
-/** Collect house (hard) and patio (soft) obstacles from the design. */
+/** Collect house + patio obstacles from the design (auto-route blockers). */
 export function obstaclesFromDesign(design: DesignDocument): RouteObstacle[] {
-  const hard = (design.buildings ?? []).map((b) => ({
-    outline: b.outline,
-    priority: "hard" as const,
-  }));
-  const soft = (design.patios ?? []).map((p) => ({
-    outline: p.outline,
-    priority: "soft" as const,
-  }));
-  return [...hard, ...soft];
+  const hard: RouteObstacle[] = (design.buildings ?? [])
+    .filter((b) => (b.outline?.length ?? 0) >= 3)
+    .map((b) => ({
+      outline: b.outline,
+      priority: "hard" as const,
+    }));
+
+  // Patio deck is also blocked for auto-routes, but punch out water bodies so
+  // shell exits aren't trapped inside the deck AABB.
+  const waterHoles = (design.poolBodies ?? [])
+    .filter((b) => (b.outline?.length ?? 0) >= 3)
+    .map((b) => expandBounds(boundsFromOutline(b.outline), 2 * FT));
+
+  for (const patio of design.patios ?? []) {
+    if ((patio.outline?.length ?? 0) < 3) continue;
+    const outer = boundsFromOutline(patio.outline);
+    const pieces = waterHoles.length
+      ? punchBounds(outer, waterHoles)
+      : [outer];
+    for (const piece of pieces) {
+      hard.push({
+        outline: [
+          { x: piece.minX, y: piece.minY },
+          { x: piece.maxX, y: piece.minY },
+          { x: piece.maxX, y: piece.maxY },
+          { x: piece.minX, y: piece.maxY },
+        ],
+        priority: "hard",
+      });
+    }
+  }
+
+  return hard;
 }
 
 /** Offset a polyline perpendicular to its overall from→to direction. */
@@ -522,6 +630,281 @@ function groundStubNear(
   };
 }
 
+type PadFrontFrame = {
+  center: PointMm;
+  /** Unit plan vector toward the pad face that exits to the yard/pool. */
+  front: PointMm;
+  /** Unit plan vector along that face. */
+  along: PointMm;
+  halfFront: number;
+  halfAlong: number;
+};
+
+function unitOr(
+  x: number,
+  y: number,
+  fallback: PointMm,
+): PointMm {
+  const len = Math.hypot(x, y);
+  if (len < 1e-6) return fallback;
+  return { x: x / len, y: y / len };
+}
+
+/** Prefer the pad face that points toward the nearest pool/spa. */
+function nearestWaterDir(design: DesignDocument, from: PointMm): PointMm {
+  let best: PointMm | null = null;
+  let bestD = Infinity;
+  for (const body of design.poolBodies ?? []) {
+    if (!body.outline?.length) continue;
+    const b = outlineBounds(body.outline);
+    const target = { x: b.cx, y: b.cy };
+    const d = dist(from, target);
+    if (d < bestD) {
+      bestD = d;
+      best = { x: target.x - from.x, y: target.y - from.y };
+    }
+  }
+  if (!best) return { x: -1, y: 0 };
+  return unitOr(best.x, best.y, { x: -1, y: 0 });
+}
+
+function buildingBoxes(design: DesignDocument): Bounds[] {
+  return (design.buildings ?? [])
+    .filter((b) => (b.outline?.length ?? 0) >= 3)
+    .map((b) => expandBounds(boundsFromOutline(b.outline), CLEARANCE_MM));
+}
+
+/** Score a pad face: prefer toward water, never exit into a house. */
+function scorePadFrontFace(
+  design: DesignDocument,
+  frame: PadFrontFrame,
+  toward: PointMm,
+): number {
+  const alignment = frame.front.x * toward.x + frame.front.y * toward.y;
+  const edgeMid = {
+    x: frame.center.x + frame.front.x * frame.halfFront,
+    y: frame.center.y + frame.front.y * frame.halfFront,
+  };
+  const stub = {
+    x: edgeMid.x + frame.front.x * STUB_OFFSET_MM,
+    y: edgeMid.y + frame.front.y * STUB_OFFSET_MM,
+  };
+  for (const box of buildingBoxes(design)) {
+    if (pointInBounds(stub, box) || pointInBounds(edgeMid, box)) {
+      return -Infinity;
+    }
+  }
+  return alignment;
+}
+
+/**
+ * Oriented pad footprint: equip_pad slab when present, else equipment cluster.
+ * Front edge faces the nearest water body so risers exit toward the yard,
+ * without dumping stubs into a house.
+ */
+function resolvePadFrontFrame(design: DesignDocument): PadFrontFrame | null {
+  const pad = (design.objects ?? []).find(
+    (o) => o.catalogItemId === "equip_pad",
+  );
+  const chain = padFlowEquipment(design);
+  if (!pad && !chain.length) return null;
+
+  const pickBest = (candidates: PadFrontFrame[], toward: PointMm) => {
+    let best = candidates[0];
+    let bestScore = -Infinity;
+    for (const c of candidates) {
+      const score = scorePadFrontFace(design, c, toward);
+      if (score > bestScore) {
+        bestScore = score;
+        best = c;
+      }
+    }
+    // If every face hits a house, fall back to best alignment alone.
+    if (bestScore === -Infinity) {
+      for (const c of candidates) {
+        const alignment = c.front.x * toward.x + c.front.y * toward.y;
+        if (alignment > bestScore) {
+          bestScore = alignment;
+          best = c;
+        }
+      }
+    }
+    return best;
+  };
+
+  if (pad) {
+    const halfW = Math.max(200, (pad.widthMm ?? 8 * FT) / 2);
+    const halfD = Math.max(200, (pad.depthMm ?? 4 * FT) / 2);
+    const rad = ((pad.rotationDeg ?? 0) * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    // Match equipmentLocalToPlan: local +X / +Z → plan.
+    const localX = { x: -cos, y: sin };
+    const localZ = { x: -sin, y: -cos };
+    const toward = nearestWaterDir(design, pad.position);
+    const candidates: PadFrontFrame[] = [
+      {
+        center: pad.position,
+        front: localX,
+        along: localZ,
+        halfFront: halfW,
+        halfAlong: halfD,
+      },
+      {
+        center: pad.position,
+        front: { x: -localX.x, y: -localX.y },
+        along: localZ,
+        halfFront: halfW,
+        halfAlong: halfD,
+      },
+      {
+        center: pad.position,
+        front: localZ,
+        along: localX,
+        halfFront: halfD,
+        halfAlong: halfW,
+      },
+      {
+        center: pad.position,
+        front: { x: -localZ.x, y: -localZ.y },
+        along: localX,
+        halfFront: halfD,
+        halfAlong: halfW,
+      },
+    ];
+    return pickBest(candidates, toward);
+  }
+
+  // No slab — AABB of flow equipment, front toward water.
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const o of chain) {
+    const hw = Math.max(100, (o.widthMm ?? 600) / 2);
+    const hd = Math.max(100, (o.depthMm ?? 400) / 2);
+    minX = Math.min(minX, o.position.x - hw);
+    maxX = Math.max(maxX, o.position.x + hw);
+    minY = Math.min(minY, o.position.y - hd);
+    maxY = Math.max(maxY, o.position.y + hd);
+  }
+  const center = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+  const halfW = Math.max(200, (maxX - minX) / 2);
+  const halfD = Math.max(200, (maxY - minY) / 2);
+  const toward = nearestWaterDir(design, center);
+  const axisX = { x: 1, y: 0 };
+  const axisY = { x: 0, y: 1 };
+  const candidates: PadFrontFrame[] = [
+    { center, front: axisX, along: axisY, halfFront: halfW, halfAlong: halfD },
+    {
+      center,
+      front: { x: -1, y: 0 },
+      along: axisY,
+      halfFront: halfW,
+      halfAlong: halfD,
+    },
+    { center, front: axisY, along: axisX, halfFront: halfD, halfAlong: halfW },
+    {
+      center,
+      front: { x: 0, y: -1 },
+      along: axisX,
+      halfFront: halfD,
+      halfAlong: halfW,
+    },
+  ];
+  return pickBest(candidates, toward);
+}
+
+/** Suction / return exits along the pad front face, then a stub just outside. */
+function padFrontExits(frame: PadFrontFrame): {
+  suctionEdge: PointMm;
+  returnEdge: PointMm;
+  suctionStub: PointMm;
+  returnStub: PointMm;
+} {
+  const edgeMid = {
+    x: frame.center.x + frame.front.x * frame.halfFront,
+    y: frame.center.y + frame.front.y * frame.halfFront,
+  };
+  const spacing = Math.min(frame.halfAlong * 0.55, 20 * IN);
+  const suctionEdge = {
+    x: edgeMid.x - frame.along.x * spacing,
+    y: edgeMid.y - frame.along.y * spacing,
+  };
+  const returnEdge = {
+    x: edgeMid.x + frame.along.x * spacing,
+    y: edgeMid.y + frame.along.y * spacing,
+  };
+  return {
+    suctionEdge,
+    returnEdge,
+    suctionStub: {
+      x: suctionEdge.x + frame.front.x * STUB_OFFSET_MM,
+      y: suctionEdge.y + frame.front.y * STUB_OFFSET_MM,
+    },
+    returnStub: {
+      x: returnEdge.x + frame.front.x * STUB_OFFSET_MM,
+      y: returnEdge.y + frame.front.y * STUB_OFFSET_MM,
+    },
+  };
+}
+
+/**
+ * Port → across pad to front edge (above grade) → drop outside into the trench.
+ * Or the reverse for suction coming up from the ground.
+ */
+function padFrontRiserPath(opts: {
+  port: PointMm;
+  portElev: number;
+  frontEdge: PointMm;
+  stubOutside: PointMm;
+  /** true: equipment → front → ground; false: ground → front → equipment */
+  toGround: boolean;
+}): { points: PointMm[]; elevationsMm: number[] } {
+  const chase = Math.min(
+    Math.max(60, opts.portElev - 15),
+    Math.max(PAD_CHASE_ELEV_MM, 80),
+  );
+  const surface = simpleOrtho(opts.port, opts.frontEdge);
+  const points: PointMm[] = [];
+  const elevationsMm: number[] = [];
+
+  const push = (p: PointMm, e: number) => {
+    points.push(p);
+    elevationsMm.push(e);
+  };
+
+  if (opts.toGround) {
+    // Port → chase → front edge on pad → outside overhang → drop
+    push(opts.port, opts.portElev);
+    if (Math.abs(opts.portElev - chase) > 1) push(opts.port, chase);
+    for (const p of surface.slice(1)) push(p, chase);
+    if (dist(points[points.length - 1]!, opts.frontEdge) > 1) {
+      push(opts.frontEdge, chase);
+    }
+    if (dist(opts.frontEdge, opts.stubOutside) > 1) {
+      push(opts.stubOutside, chase);
+    }
+    push(opts.stubOutside, TRENCH_ELEV_MM);
+  } else {
+    // Rise at front, run across pad, up into port
+    push(opts.stubOutside, TRENCH_ELEV_MM);
+    push(opts.stubOutside, chase);
+    if (dist(opts.stubOutside, opts.frontEdge) > 1) {
+      push(opts.frontEdge, chase);
+    }
+    for (const p of [...surface].reverse()) {
+      if (dist(points[points.length - 1]!, p) > 1) push(p, chase);
+    }
+    if (dist(points[points.length - 1]!, opts.port) > 1) {
+      push(opts.port, chase);
+    }
+    if (Math.abs(opts.portElev - chase) > 1) push(opts.port, opts.portElev);
+  }
+
+  return zipElevations(points, elevationsMm);
+}
+
 function simpleOrtho(a: PointMm, b: PointMm): PointMm[] {
   if (Math.abs(a.x - b.x) < 1 || Math.abs(a.y - b.y) < 1) {
     return dedupePoints([a, b]);
@@ -553,10 +936,10 @@ function zipElevations(
 }
 
 /**
- * Vertical riser + buried ortho between two pad ports (or stub ↔ port).
- * Elevations: port height → trench → trench → port height.
+ * Vertical risers + buried ortho between a ground stub and an equipment port.
+ * Elevations: port/stub height → trench → trench → port/stub height.
  */
-function padPipePath(
+function padBuriedPipePath(
   from: PointMm,
   fromElev: number,
   to: PointMm,
@@ -581,6 +964,43 @@ function padPipePath(
     elevationsMm.push(TRENCH_ELEV_MM);
   }
   if (Math.abs(toElev - TRENCH_ELEV_MM) > 1) {
+    points.push(to);
+    elevationsMm.push(toElev);
+  }
+  return zipElevations(points, elevationsMm);
+}
+
+/**
+ * Above-grade hop between two pad ports (pump→filter→heater→salt).
+ * Stays near equipment height so unions read on the pad, not buried.
+ */
+function padSurfaceHopPath(
+  from: PointMm,
+  fromElev: number,
+  to: PointMm,
+  toElev: number,
+): { points: PointMm[]; elevationsMm: number[] } {
+  // Chase just below the lower port so pipes hug the equipment, not the trench.
+  const hopElev = Math.max(60, Math.min(fromElev, toElev) - 20);
+  const ortho = simpleOrtho(from, to);
+  const points: PointMm[] = [];
+  const elevationsMm: number[] = [];
+  points.push(from);
+  elevationsMm.push(fromElev);
+  if (Math.abs(fromElev - hopElev) > 1) {
+    points.push(from);
+    elevationsMm.push(hopElev);
+  }
+  for (const p of ortho.slice(1)) {
+    points.push(p);
+    elevationsMm.push(hopElev);
+  }
+  const last = points[points.length - 1];
+  if (!last || dist(last, to) > 1) {
+    points.push(to);
+    elevationsMm.push(hopElev);
+  }
+  if (Math.abs(toElev - hopElev) > 1) {
     points.push(to);
     elevationsMm.push(toElev);
   }
@@ -621,22 +1041,36 @@ export function buildPadManifoldRuns(design: DesignDocument): PlumbingRun[] {
     chain[0].id;
   const pairs = chain.map(equipmentPortPair);
   const runs: PlumbingRun[] = [];
+  const frame = resolvePadFrontFrame(design);
+  const exits = frame
+    ? padFrontExits(frame)
+    : null;
 
-  // Suction: ground stub → pump (or first unit) suction port
+  // Suction: trench at pad front → across pad → pump suction port
   const first = pairs[0];
-  // Prefer the port facing away from the next unit for suction in
   const suctionPort =
     pairs.length === 1
       ? first.ports[0]
       : pickFacingPort(first, pairs[1].obj.position).far;
-  const suctionStub = groundStubNear(suctionPort, first.obj.position);
+  const suctionStub = exits
+    ? exits.suctionStub
+    : groundStubNear(suctionPort, first.obj.position);
+  const suctionEdge = exits?.suctionEdge ?? suctionStub;
   {
-    const path = padPipePath(
-      suctionStub,
-      TRENCH_ELEV_MM,
-      suctionPort,
-      first.elevMm,
-    );
+    const path = exits
+      ? padFrontRiserPath({
+          port: suctionPort,
+          portElev: first.elevMm,
+          frontEdge: suctionEdge,
+          stubOutside: suctionStub,
+          toGround: false,
+        })
+      : padBuriedPipePath(
+          suctionStub,
+          TRENCH_ELEV_MM,
+          suctionPort,
+          first.elevMm,
+        );
     runs.push(
       makePadRun({
         name: "Pad suction riser → pump",
@@ -655,7 +1089,7 @@ export function buildPadManifoldRuns(design: DesignDocument): PlumbingRun[] {
     const b = pairs[i + 1];
     const fromPort = pickFacingPort(a, b.obj.position).near;
     const toPort = pickFacingPort(b, a.obj.position).near;
-    const path = padPipePath(fromPort, a.elevMm, toPort, b.elevMm);
+    const path = padSurfaceHopPath(fromPort, a.elevMm, toPort, b.elevMm);
     const fromName = a.obj.name || a.obj.catalogItemId;
     const toName = b.obj.name || b.obj.catalogItemId;
     runs.push(
@@ -670,20 +1104,31 @@ export function buildPadManifoldRuns(design: DesignDocument): PlumbingRun[] {
     );
   }
 
-  // Return: last discharge → ground stub
+  // Return: last discharge → across pad front → drop into trench
   const last = pairs[pairs.length - 1];
   const returnPort =
     pairs.length === 1
       ? last.ports[1]
       : pickFacingPort(last, pairs[pairs.length - 2].obj.position).far;
-  const returnStub = groundStubNear(returnPort, last.obj.position);
+  const returnStub = exits
+    ? exits.returnStub
+    : groundStubNear(returnPort, last.obj.position);
+  const returnEdge = exits?.returnEdge ?? returnStub;
   {
-    const path = padPipePath(
-      returnPort,
-      last.elevMm,
-      returnStub,
-      TRENCH_ELEV_MM,
-    );
+    const path = exits
+      ? padFrontRiserPath({
+          port: returnPort,
+          portElev: last.elevMm,
+          frontEdge: returnEdge,
+          stubOutside: returnStub,
+          toGround: true,
+        })
+      : padBuriedPipePath(
+          returnPort,
+          last.elevMm,
+          returnStub,
+          TRENCH_ELEV_MM,
+        );
     runs.push(
       makePadRun({
         name: "Pad return riser → trench",
@@ -711,6 +1156,21 @@ export function padManifoldStubs(design: DesignDocument): {
     (o) => o.catalogItemId === "equip_pad",
   );
   if (!chain.length && !pad) return null;
+
+  const frame = resolvePadFrontFrame(design);
+  if (frame) {
+    const exits = padFrontExits(frame);
+    const label =
+      chain.length > 1
+        ? "Equipment pad"
+        : chain[0]?.name || pad?.name || "Equipment";
+    return {
+      suctionStub: exits.suctionStub,
+      returnStub: exits.returnStub,
+      equipmentObjectId: (chain[0] ?? pad)!.id,
+      label,
+    };
+  }
 
   if (!chain.length && pad) {
     return {
@@ -759,6 +1219,35 @@ export function ensurePadManifoldPlumbing(
     return design;
   }
   return { ...design, plumbingRuns: [...kept, ...padRuns] };
+}
+
+/**
+ * If any auto body trench currently crosses a house/patio, rebuild those runs.
+ * Manual runs (no parentBodyId) are left alone. Refreshes the pad manifold only
+ * when flow equipment exists but pad-local runs are missing/empty.
+ */
+export function repairAutoPlumbingIfNeeded(
+  design: DesignDocument,
+): DesignDocument {
+  const obstacles = obstaclesFromDesign(design);
+  const blocked = obstacles.map((o) =>
+    expandBounds(outlineBounds(o.outline), CLEARANCE_MM),
+  );
+  const clipped = design.plumbingRuns.some(
+    (r) =>
+      !!r.parentBodyId &&
+      !r.padLocal &&
+      r.points.length >= 2 &&
+      pathHits(r.points, blocked) > 0,
+  );
+  if (clipped) return syncAllBodiesPlumbing(design);
+
+  const hasFlowEquip = padFlowEquipment(design).length > 0;
+  const hasPadLocal = design.plumbingRuns.some((r) => r.padLocal);
+  if (hasFlowEquip && !hasPadLocal) {
+    return ensurePadManifoldPlumbing(design);
+  }
+  return design;
 }
 
 /** Resolve pad equipment into suction/return connection points. */
@@ -836,18 +1325,15 @@ function bestShellExit(
     { x: b.cx, y: b.maxY },
     nearestEdgePoint(outline, target),
   ];
-  const hardBoxes = obstacles
-    .filter((o) => o.priority === "hard")
-    .map((o) => expandBounds(outlineBounds(o.outline), CLEARANCE_MM));
-  const softBoxes = obstacles
-    .filter((o) => o.priority === "soft")
-    .map((o) => expandBounds(outlineBounds(o.outline), CLEARANCE_MM / 2));
+  const blockedBoxes = obstacles.map((o) =>
+    expandBounds(outlineBounds(o.outline), CLEARANCE_MM),
+  );
 
   let best = candidates[0];
   let bestScore = Infinity;
   for (const exit of candidates) {
     const path = routeOrthoAvoiding(exit, target, obstacles);
-    const score = scorePath(path, hardBoxes, softBoxes);
+    const score = scorePath(path, blockedBoxes);
     if (score < bestScore) {
       bestScore = score;
       best = exit;
@@ -868,13 +1354,13 @@ export type BodyPlumbingOptions = {
   suctionStart?: PointMm;
   returnEnds?: PointMm[];
   featureEnds?: PointMm[];
-  /** Houses (hard) and patios (soft) to route around */
+  /** Houses and patio deck slabs to route around (auto-routes never cross). */
   obstacles?: RouteObstacle[];
 };
 
 /**
  * Build editable trench runs from a water body to placed equipment.
- * Routes around houses; avoids patios when a clear path exists.
+ * Auto-routes around houses and patio decks; designers can still draw under them.
  */
 export function buildBodyPlumbingRuns(
   opts: BodyPlumbingOptions,
@@ -927,11 +1413,11 @@ export function buildBodyPlumbingRuns(
   // Parallel offset of the trench segment only (keep equipment endpoint)
   let returnMain = offsetPolyline(returnTrunk, PARALLEL_OFFSET_MM);
   returnMain[0] = connection.returnOrigin;
-  // Re-validate offset path; if it clips a house, fall back to unoffset trunk
-  const hardBoxes = obstacles
-    .filter((o) => o.priority === "hard")
-    .map((o) => expandBounds(outlineBounds(o.outline), CLEARANCE_MM));
-  if (pathHits(returnMain, hardBoxes) > 0) {
+  // Re-validate offset path; if it clips a blocked obstacle, fall back to unoffset trunk
+  const blockedBoxes = obstacles.map((o) =>
+    expandBounds(outlineBounds(o.outline), CLEARANCE_MM),
+  );
+  if (pathHits(returnMain, blockedBoxes) > 0) {
     returnMain = returnTrunk;
   }
 
@@ -1169,11 +1655,8 @@ export function syncAllBodiesPlumbing(design: DesignDocument): DesignDocument {
   for (const body of design.poolBodies) {
     next = rebuildBodyPlumbing(next, body.id);
   }
-  // When no bodies remain, still refresh / clear pad manifold.
-  if (design.poolBodies.length === 0) {
-    next = ensurePadManifoldPlumbing(next);
-  }
-  return next;
+  // Always refresh pad manifold (covers zero-body pads and hop rebuilds).
+  return ensurePadManifoldPlumbing(next);
 }
 
 /**
