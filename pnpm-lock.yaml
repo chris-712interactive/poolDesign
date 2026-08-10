@@ -49,6 +49,9 @@ importers:
         specifier: ^3.24.2
         version: 3.25.76
     devDependencies:
+      '@prisma/nextjs-monorepo-workaround-plugin':
+        specifier: ^7.9.1
+        version: 7.9.1
       '@types/bcryptjs':
         specifier: ^2.4.6
         version: 2.4.6
@@ -498,6 +501,9 @@ packages:
 
   '@prisma/get-platform@6.19.3':
     resolution: {integrity: sha512-xFj1VcJ1N3MKooOQAGO0W5tsd0W2QzIvW7DD7c/8H14Zmp4jseeWAITm+w2LLoLrlhoHdPPh0NMZ8mfL6puoHA==}
+
+  '@prisma/nextjs-monorepo-workaround-plugin@7.9.1':
+    resolution: {integrity: sha512-F81HLKW97Exi3ipmIlBmMCc6s0sGZ59lfs7jxWKr6PjvOHVhPPU42PCTz79rie4/HlCehZVyhatNui+8U3NBow==}
 
   '@react-three/drei@10.7.8':
     resolution: {integrity: sha512-rJXyuzLm2Xq0kafHuR47ajDGbOe/pEhzIr4m8E8zwzQs0iNjloFDqBwRhrXmP/w+onLeYyN3EYPFW/cwWK/4yA==}
@@ -1366,6 +1372,8 @@ snapshots:
   '@prisma/get-platform@6.19.3':
     dependencies:
       '@prisma/debug': 6.19.3
+
+  '@prisma/nextjs-monorepo-workaround-plugin@7.9.1': {}
 
   '@react-three/drei@10.7.8(@react-three/fiber@9.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.185.1))(@types/react@19.2.18)(@types/three@0.185.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.185.1)':
     dependencies:

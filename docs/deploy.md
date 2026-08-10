@@ -60,6 +60,14 @@ DATABASE_URL="postgresql://..." pnpm db:push
 DATABASE_URL="postgresql://..." pnpm db:seed
 ```
 
+Then open `https://your-deployment.vercel.app/api/health` — you should see `"ok": true` and `users` &gt; 0. If health fails, login will fail too (usually missing env, wrong URL, schema not pushed, or Prisma engine not traced — see below).
+
+### Prisma query engine on Vercel
+
+This monorepo generates the client into `packages/db/src/generated/client` (includes `libquery_engine-rhel-openssl-3.0.x.so.node`). `apps/web/next.config.ts` traces that folder into the serverless bundle via `outputFileTracingIncludes` + `@prisma/nextjs-monorepo-workaround-plugin`.
+
+If `/api/health` still says the query engine is missing after redeploy, confirm the Production build ran `pnpm --filter @pool-design/db generate` and that Root Directory is `apps/web`.
+
 Or add a one-off Vercel cron / GitHub Action.
 
 ## Wildcard subdomains

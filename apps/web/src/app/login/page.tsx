@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { authenticate, getSessionUser, setSessionCookie } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
 
@@ -6,13 +6,19 @@ async function loginAction(formData: FormData) {
   "use server";
   const email = String(formData.get("email") || "");
   const password = String(formData.get("password") || "");
-  const user = await authenticate(email, password);
-  if (!user) {
-    redirect("/login?error=1");
+  try {
+    const user = await authenticate(email, password);
+    if (!user) {
+      redirect("/login?error=1");
+    }
+    await setSessionCookie(user.id);
+    if (user.role === "platform_owner") redirect("/platform");
+    redirect("/app");
+  } catch (err) {
+    unstable_rethrow(err);
+    console.error("login failed", err);
+    redirect("/login?error=db");
   }
-  await setSessionCookie(user.id);
-  if (user.role === "platform_owner") redirect("/platform");
-  redirect("/app");
 }
 
 export default async function LoginPage({
@@ -20,7 +26,12 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const user = await getSessionUser();
+  let user = null;
+  try {
+    user = await getSessionUser();
+  } catch (err) {
+    console.error("session lookup failed", err);
+  }
   if (user) {
     if (user.role === "platform_owner") redirect("/platform");
     redirect("/app");
@@ -36,8 +47,17 @@ export default async function LoginPage({
           <p className="muted">
             Use a seeded demo account, or your company credentials.
           </p>
-          {params.error && (
+          {params.error === "1" && (
             <p className="error">Invalid email or password.</p>
+          )}
+          {params.error === "db" && (
+            <p className="error">
+              Could not reach the database. Confirm{" "}
+              <code>DATABASE_URL</code> is set in Vercel, then run{" "}
+              <code>pnpm db:push</code> and <code>pnpm db:seed</code> against
+              that database. Check{" "}
+              <a href="/api/health">/api/health</a> and Vercel function logs.
+            </p>
           )}
           <form action={loginAction} className="stack">
             <div className="field">

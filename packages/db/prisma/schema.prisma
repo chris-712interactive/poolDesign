@@ -1,5 +1,9 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // Stable path so Next.js/Vercel can trace & ship the query engine binary.
+  output        = "../src/generated/client"
+  // native = local; rhel-openssl-3.0.x = Vercel / AWS Lambda Node runtimes
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
