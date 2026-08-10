@@ -1,4 +1,4 @@
-# Pool Design
+# PoolShape
 
 Multi-tenant pool CAD and estimating SaaS for pool companies — residential, commercial, and water-park design levels, offline-capable field design, company admin, platform owner console, and homeowner client portal.
 
@@ -44,7 +44,7 @@ Open [http://localhost:3000](http://localhost:3000) (or the port shown in the te
 
 | Role | Email | Password |
 |------|-------|----------|
-| Platform owner | owner@pooldesign.app | password123 |
+| Platform owner | owner@poolshape.com | password123 |
 | Company admin | admin@acme-pools.test | password123 |
 | Designer | designer@acme-pools.test | password123 |
 

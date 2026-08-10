@@ -85,7 +85,7 @@ export default async function LoginPage({
             </button>
           </form>
           <div className="muted" style={{ fontSize: "0.9rem" }}>
-            <div>owner@pooldesign.app</div>
+            <div>owner@poolshape.com</div>
             <div>admin@acme-pools.test</div>
             <div>designer@acme-pools.test</div>
             <div>password: password123</div>

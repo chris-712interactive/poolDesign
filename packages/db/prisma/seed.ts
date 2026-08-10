@@ -28,10 +28,16 @@ async function main() {
 
   const passwordHash = await bcrypt.hash("password123", 10);
 
-  await prisma.user.upsert({
+  // Migrate legacy demo owner email if present
+  await prisma.user.updateMany({
     where: { email: "owner@pooldesign.app" },
+    data: { email: "owner@poolshape.com" },
+  });
+
+  await prisma.user.upsert({
+    where: { email: "owner@poolshape.com" },
     create: {
-      email: "owner@pooldesign.app",
+      email: "owner@poolshape.com",
       name: "Platform Owner",
       passwordHash,
       role: "platform_owner",
@@ -134,7 +140,7 @@ async function main() {
   }
 
   console.log("Seed complete.");
-  console.log("  owner@pooldesign.app / password123");
+  console.log("  owner@poolshape.com / password123");
   console.log("  admin@acme-pools.test / password123");
   console.log("  designer@acme-pools.test / password123");
 }

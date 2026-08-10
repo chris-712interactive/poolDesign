@@ -16,7 +16,10 @@ export default async function HomePage() {
       <AppHeader user={user} />
       <main>
         <section className="hero">
-          <h1>Pool design built for companies that sell and build water.</h1>
+          <h1>PoolShape</h1>
+          <p className="hero-lede">
+            Built for companies that sell and build water.
+          </p>
           <p>
             Draw residential, commercial, and water-park projects with field-ready
             precision, generate material lists, share designs with clients, and

@@ -156,7 +156,7 @@ export default async function PublicProposalPage({ params }: PageProps) {
           {share.expiresAt
             ? ` · Link expires ${share.expiresAt.toLocaleDateString()}`
             : ""}
-          . This page does not require a login.
+          . Powered by PoolShape.
         </p>
       </main>
     </div>

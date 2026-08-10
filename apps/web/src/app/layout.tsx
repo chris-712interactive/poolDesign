@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Pool Design",
+  title: "PoolShape",
   description: "Professional pool design, estimating, and client proposals",
 };
 

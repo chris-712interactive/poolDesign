@@ -5,7 +5,14 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
   return (
     <header className="topbar">
       <Link href="/" className="brand">
-        Pool Design
+        <img
+          src="/brand/mark.png"
+          alt=""
+          width={28}
+          height={28}
+          className="brand-mark"
+        />
+        PoolShape
       </Link>
       <nav>
         {user?.role === "platform_owner" && (
