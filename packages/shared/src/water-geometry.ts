@@ -41,7 +41,7 @@ export function spaBelowDeckMm(body: PoolBody): number {
 }
 
 /** Drop duplicate closing vertex so AABB helpers see 4-point rectangles. */
-function openRing(outline: PointMm[]): PointMm[] {
+export function openRing(outline: PointMm[]): PointMm[] {
   if (outline.length < 2) return outline;
   const a = outline[0];
   const b = outline[outline.length - 1];
@@ -654,7 +654,7 @@ export function shouldOmitPoolWallEdge(
 }
 
 /** Parametric overlap of two colinear segments along edgeA→edgeB, or null. */
-function colinearOverlapInterval(
+export function colinearOverlapInterval(
   a1: PointMm,
   a2: PointMm,
   b1: PointMm,

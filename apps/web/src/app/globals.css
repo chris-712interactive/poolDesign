@@ -384,6 +384,97 @@ textarea {
   text-shadow: 0 1px 2px rgba(255, 255, 255, 0.7);
 }
 
+.cad-scene3d-walk-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(12, 18, 24, 0.08),
+    rgba(12, 18, 24, 0.28)
+  );
+  transition: opacity 0.2s ease;
+}
+
+.cad-scene3d-walk-veil.is-locked {
+  background: transparent;
+}
+
+.cad-scene3d-walk-card {
+  pointer-events: auto;
+  max-width: 28rem;
+  margin: 1rem;
+  padding: 1rem 1.15rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 28px rgba(20, 32, 41, 0.14);
+  text-align: center;
+}
+
+.cad-scene3d-walk-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--panel-ink);
+}
+
+.cad-scene3d-walk-body {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--muted, #5a6a72);
+}
+
+.cad-scene3d-walk-body kbd {
+  display: inline-block;
+  min-width: 1.25rem;
+  margin: 0 0.1rem;
+  padding: 0.05rem 0.28rem;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: #f3f6f7;
+  font-size: 0.72rem;
+  font-family: inherit;
+  font-weight: 600;
+}
+
+.cad-scene3d-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.cad-scene3d-crosshair::before,
+.cad-scene3d-crosshair::after {
+  content: "";
+  position: absolute;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.55);
+}
+
+.cad-scene3d-crosshair::before {
+  left: 6px;
+  top: 0;
+  width: 2px;
+  height: 14px;
+}
+
+.cad-scene3d-crosshair::after {
+  left: 0;
+  top: 6px;
+  width: 14px;
+  height: 2px;
+}
+
 .cad-scene3d-toolbar {
   position: absolute;
   top: 0.65rem;

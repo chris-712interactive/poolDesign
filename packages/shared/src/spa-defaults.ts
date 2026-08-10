@@ -14,6 +14,7 @@ import {
 } from "./design-model";
 import {
   buildBodyPlumbingRuns,
+  ensurePadManifoldPlumbing,
   obstaclesFromDesign,
   resolveEquipmentConnection,
   virtualEquipmentPoint,
@@ -528,14 +529,14 @@ export function applySpaPackage(
   if (!layers.some((l) => l.id === "features")) {
     layers = [...layers, { id: "features", name: "features", visible: true }];
   }
-  return {
+  return ensurePadManifoldPlumbing({
     ...design,
     layers,
     poolBodies: [...design.poolBodies, pkg.body],
     features: [...(design.features ?? []), ...pkg.features],
     objects: [...(design.objects ?? []), ...pkg.objects],
     plumbingRuns: [...design.plumbingRuns, ...pkg.plumbingRuns],
-  };
+  });
 }
 
 /** Remove features/objects/runs linked to a water body. */
@@ -568,7 +569,7 @@ export function relayoutSpaPackage(
     wall,
     cleared,
   );
-  return {
+  return ensurePadManifoldPlumbing({
     ...cleared,
     poolBodies: cleared.poolBodies.map((p) =>
       p.id === body.id
@@ -582,7 +583,7 @@ export function relayoutSpaPackage(
     features: [...(cleared.features ?? []), ...contents.features],
     objects: [...(cleared.objects ?? []), ...contents.objects],
     plumbingRuns: [...cleared.plumbingRuns, ...contents.plumbingRuns],
-  };
+  });
 }
 
 /** Replace linked spa package pieces with a fresh standard package. */

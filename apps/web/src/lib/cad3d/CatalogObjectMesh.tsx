@@ -1,7 +1,8 @@
 "use client";
 
-import { useContext, useMemo } from "react";
-import type { ThreeEvent } from "@react-three/fiber";
+import { useContext, useLayoutEffect, useMemo, useRef } from "react";
+import { useFrame, type ThreeEvent } from "@react-three/fiber";
+import * as THREE from "three";
 import type { CanvasTexture } from "three";
 import {
   DEFAULT_FURNITURE_CANOPY_FINISH_ID,
@@ -10,10 +11,21 @@ import {
   DINING_CHAIR_CLEARANCE_MM,
   diningTableShape,
   isDiningSetId,
+  resolvePersonOutfitId,
+  resolvePersonSex,
 } from "@pool-design/shared";
+import { PersonMesh } from "@/lib/cad3d/PersonMesh";
+import {
+  isPadEquipmentCatalogId,
+  PadEquipmentMesh,
+} from "@/lib/cad3d/PadEquipmentMesh";
 import type { BoxDescriptor, SceneSelection } from "@/lib/cad3d/buildScene";
 import { ClipPlanesContext } from "@/lib/cad3d/clipContext";
 import { getFurnitureFinishTexture } from "@/lib/cad3d/furnitureFinishTextures";
+import {
+  ledBoostForTimeOfDay,
+  useTimeOfDay,
+} from "@/lib/cad3d/timeOfDay";
 
 type Props = {
   desc: BoxDescriptor;
@@ -83,6 +95,516 @@ function Mat({
   );
 }
 
+/** ~10.5″ above water — typical aerated pool bubbler fountain. */
+const BUBBLER_FOUNTAIN_HEIGHT_M = 0.267;
+
+type DropletSeed = {
+  phase: number;
+  radius: number;
+  dirX: number;
+  dirZ: number;
+  peakJitter: number;
+  speed: number;
+  /** How far out this droplet rides in the frothy column (0–1). */
+  columnR: number;
+};
+
+/** Full RGB show cycle period (seconds) — leisurely like a real pool LED program. */
+const BUBBLER_LED_CYCLE_SEC = 10;
+
+/**
+ * Aerated bubbler fountain: frothy column ~9–12″ above freeboard, falling back.
+ * Optional niche LED cycles smoothly through RGB colors from below.
+ */
+function BubblerPlume({
+  waterSurfaceLocalY,
+  sunshelf,
+  selected,
+  hasLed,
+}: {
+  waterSurfaceLocalY: number;
+  sunshelf: boolean;
+  selected: boolean;
+  hasLed: boolean;
+}) {
+  const clippingPlanes = useContext(ClipPlanesContext);
+  const timeOfDay = useTimeOfDay();
+  const ledBoost = ledBoostForTimeOfDay(timeOfDay);
+  const dropsRef = useRef<THREE.Group>(null);
+  const streamRef = useRef<THREE.Mesh>(null);
+  const streamMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const foamRef = useRef<THREE.Mesh>(null);
+  const foamMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const spotRef = useRef<THREE.SpotLight>(null);
+  const spotTargetRef = useRef<THREE.Object3D>(null);
+  const ledColor = useMemo(() => new THREE.Color(), []);
+  const ledTint = useMemo(() => new THREE.Color(), []);
+  const ledSoft = useMemo(() => new THREE.Color(), []);
+  const ledWhite = useMemo(() => new THREE.Color("#ffffff"), []);
+
+  const nozzleY = 0.028;
+  const peakY = waterSurfaceLocalY + BUBBLER_FOUNTAIN_HEIGHT_M;
+  const landY = waterSurfaceLocalY - 0.01;
+  const apexU = 0.4;
+  const streamH = Math.max(0.08, peakY - nozzleY);
+  const night = timeOfDay === "night";
+  const spotIntensity = (night ? 9 : 4.5) * ledBoost;
+
+  useLayoutEffect(() => {
+    if (spotRef.current && spotTargetRef.current) {
+      spotRef.current.target = spotTargetRef.current;
+    }
+  }, [hasLed]);
+
+  const droplets = useMemo<DropletSeed[]>(() => {
+    const n = sunshelf ? 28 : 22;
+    return Array.from({ length: n }, (_, i) => {
+      const a = (i / n) * Math.PI * 2 * 1.7 + i * 0.41;
+      return {
+        phase: (i * 0.618) % 1,
+        radius: 0.008 + (i % 5) * 0.003,
+        dirX: Math.cos(a),
+        dirZ: Math.sin(a),
+        peakJitter: ((i * 13) % 9) / 9 * 0.03 - 0.012,
+        speed: 0.95 + (i % 5) * 0.07,
+        columnR: 0.25 + ((i * 7) % 10) / 10 * 0.75,
+      };
+    });
+  }, [sunshelf]);
+
+  useFrame(({ clock }) => {
+    const g = dropsRef.current;
+    if (!g) return;
+    const t = clock.elapsedTime;
+
+    // Smooth RGB show: HSL hue walk (pool LED “color swim”).
+    if (hasLed) {
+      const hue = (t / BUBBLER_LED_CYCLE_SEC) % 1;
+      ledColor.setHSL(hue, 1, 0.55);
+      ledTint.copy(ledColor).lerp(ledWhite, 0.35);
+      ledSoft.copy(ledColor).lerp(ledWhite, 0.55);
+      if (spotRef.current) {
+        spotRef.current.color.copy(ledColor);
+        spotRef.current.intensity = spotIntensity + Math.sin(t * 6.5) * 0.4;
+        spotRef.current.target.updateMatrixWorld();
+      }
+      if (streamMatRef.current) {
+        streamMatRef.current.color.copy(ledTint);
+        streamMatRef.current.emissive.copy(ledColor);
+      }
+      if (foamMatRef.current) {
+        foamMatRef.current.color.copy(ledSoft);
+        foamMatRef.current.emissive.copy(ledColor);
+      }
+    }
+
+    for (let i = 0; i < droplets.length; i++) {
+      const child = g.children[i];
+      const d = droplets[i];
+      if (!d || !(child instanceof THREE.Mesh)) continue;
+
+      const cycle = (t * d.speed * 0.85 + d.phase) % 1;
+      const thisPeak = peakY + d.peakJitter;
+
+      let y: number;
+      let radialT: number;
+      if (cycle <= apexU) {
+        const u = cycle / apexU;
+        // Decelerate into the crest (frothy boil hangs at the top).
+        const ease = 1 - (1 - u) * (1 - u);
+        y = nozzleY + (thisPeak - nozzleY) * ease;
+        // Column wider near the waterline, tapers toward the peak.
+        const above = THREE.MathUtils.clamp(
+          (y - waterSurfaceLocalY) / BUBBLER_FOUNTAIN_HEIGHT_M,
+          0,
+          1,
+        );
+        radialT = (0.045 * (1 - above * 0.55) + 0.01) * d.columnR;
+      } else {
+        const u = (cycle - apexU) / (1 - apexU);
+        const ease = u * u;
+        y = thisPeak + (landY - thisPeak) * ease;
+        // Fall back with a slight outward mushroom.
+        radialT = (0.02 + 0.05 * Math.sin(u * Math.PI)) * d.columnR;
+      }
+
+      const wobble = Math.sin(t * 11 + d.phase * 20) * 0.004;
+      child.position.set(
+        d.dirX * radialT + wobble,
+        y,
+        d.dirZ * radialT - wobble * 0.6,
+      );
+
+      const nearEnds =
+        cycle < 0.04
+          ? cycle / 0.04
+          : cycle > 0.92
+            ? Math.max(0, 1 - (cycle - 0.92) / 0.08)
+            : 1;
+      const aboveFrac = THREE.MathUtils.clamp(
+        (y - waterSurfaceLocalY) / BUBBLER_FOUNTAIN_HEIGHT_M,
+        0,
+        1,
+      );
+      // Frothy blobs stay chunky near the base / mid column.
+      child.scale.setScalar((1.1 + (1 - aboveFrac) * 0.7) * nearEnds);
+      const mat = child.material as THREE.MeshStandardMaterial;
+      mat.opacity = (hasLed ? 0.7 : 0.55) * nearEnds * (0.75 + aboveFrac * 0.25);
+      if (hasLed) {
+        mat.color.copy(ledSoft);
+        mat.emissive.copy(ledColor);
+        mat.emissiveIntensity =
+          (0.55 + aboveFrac * 0.35 + Math.sin(t * 8 + d.phase) * 0.08) *
+          ledBoost;
+      }
+    }
+
+    if (streamRef.current && streamMatRef.current) {
+      const pulse = 0.92 + Math.sin(t * 10) * 0.08;
+      streamRef.current.scale.set(pulse, 1, pulse);
+      streamMatRef.current.opacity =
+        (hasLed ? 0.55 : 0.38) + Math.sin(t * 8) * 0.06;
+      if (hasLed) {
+        streamMatRef.current.emissiveIntensity =
+          (0.85 + Math.sin(t * 7) * 0.15) * ledBoost;
+      }
+    }
+
+    if (foamRef.current && foamMatRef.current) {
+      const boil = 0.9 + Math.sin(t * 12) * 0.12;
+      foamRef.current.scale.set(boil, 1, boil);
+      foamMatRef.current.opacity =
+        (hasLed ? 0.55 : 0.4) + Math.sin(t * 9) * 0.08;
+      if (hasLed) {
+        foamMatRef.current.emissiveIntensity =
+          (0.9 + Math.sin(t * 6) * 0.2) * ledBoost;
+      }
+    }
+  });
+
+  return (
+    <group>
+      {hasLed ? (
+        <>
+          {/* Upward beam only — no omni point light washing the house/deck. */}
+          <spotLight
+            ref={spotRef}
+            color="#ff2e6a"
+            intensity={spotIntensity}
+            distance={night ? 4.5 : 3}
+            decay={1.8}
+            angle={Math.PI / 5}
+            penumbra={0.55}
+            position={[0, nozzleY, 0]}
+          />
+          <object3D
+            ref={spotTargetRef}
+            position={[0, peakY + 0.35, 0]}
+          />
+        </>
+      ) : null}
+
+      {/* Dense aerated column — wider at the boil, tapers at the crest */}
+      <mesh
+        ref={streamRef}
+        position={[0, nozzleY + streamH * 0.5, 0]}
+        frustumCulled={false}
+      >
+        <cylinderGeometry args={[0.018, 0.055, streamH, 16, 1, true]} />
+        <meshStandardMaterial
+          ref={streamMatRef}
+          color={selected ? "#a8ebe0" : hasLed ? "#ff8eb0" : "#cfeef8"}
+          transparent
+          opacity={hasLed ? 0.55 : 0.38}
+          roughness={0.35}
+          metalness={0}
+          emissive={hasLed ? "#ff2e6a" : "#000000"}
+          emissiveIntensity={hasLed ? 0.85 : 0}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+          clippingPlanes={clippingPlanes}
+          clipShadows={clippingPlanes.length > 0}
+        />
+      </mesh>
+
+      {/* Surface foam ring where the jet breaks the waterline */}
+      <mesh
+        ref={foamRef}
+        position={[0, waterSurfaceLocalY + 0.006, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        frustumCulled={false}
+      >
+        <circleGeometry args={[0.09, 28]} />
+        <meshStandardMaterial
+          ref={foamMatRef}
+          color={hasLed ? "#ffd0e0" : "#f4fcff"}
+          transparent
+          opacity={hasLed ? 0.55 : 0.4}
+          roughness={0.55}
+          metalness={0}
+          emissive={hasLed ? "#ff2e6a" : "#000000"}
+          emissiveIntensity={hasLed ? 0.9 : 0}
+          depthWrite={false}
+          clippingPlanes={clippingPlanes}
+        />
+      </mesh>
+
+      {/* Frothy droplets riding the column up and falling back */}
+      <group ref={dropsRef}>
+        {droplets.map((d, i) => (
+          <mesh key={i} frustumCulled={false}>
+            <sphereGeometry args={[d.radius, 8, 8]} />
+            <meshStandardMaterial
+              color={selected ? "#c5f5ea" : hasLed ? "#ffe0ea" : "#e8f7fc"}
+              transparent
+              opacity={0.6}
+              roughness={0.25}
+              metalness={0}
+              emissive={hasLed ? "#ff2e6a" : "#000000"}
+              emissiveIntensity={hasLed ? 0.6 : 0}
+              depthWrite={false}
+              clippingPlanes={clippingPlanes}
+              clipShadows={clippingPlanes.length > 0}
+            />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+}
+
+/** Animated fire-pit glow — soft cones + point fill for night drama. */
+function FireGlow({
+  radius,
+  baseY,
+  height,
+  selected,
+}: {
+  radius: number;
+  baseY: number;
+  height: number;
+  selected: boolean;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const tod = useTimeOfDay();
+  const boost = ledBoostForTimeOfDay(tod);
+
+  useFrame((state) => {
+    const g = groupRef.current;
+    if (!g) return;
+    const t = state.clock.elapsedTime;
+    g.children.forEach((child, i) => {
+      if (!(child instanceof THREE.Mesh)) return;
+      const flicker = 0.85 + Math.sin(t * (9 + i * 2.3) + i) * 0.15;
+      const stretch = 0.9 + Math.sin(t * (7 + i * 1.7) + i * 0.6) * 0.18;
+      child.scale.set(flicker, stretch, flicker);
+      const mat = child.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = (0.55 + flicker * 0.55) * (0.7 + boost * 0.35);
+      mat.opacity = 0.45 + flicker * 0.35;
+    });
+  });
+
+  return (
+    <group ref={groupRef} position={[0, baseY, 0]}>
+      <mesh position={[0, height * 0.2, 0]}>
+        <coneGeometry args={[radius, height * 0.7, 10, 1, true]} />
+        <meshStandardMaterial
+          color="#ff9a3c"
+          emissive="#ff6b1a"
+          emissiveIntensity={0.9}
+          transparent
+          opacity={0.65}
+          depthWrite={false}
+          roughness={0.4}
+          metalness={0}
+        />
+      </mesh>
+      <mesh position={[radius * 0.15, height * 0.35, -radius * 0.1]}>
+        <coneGeometry args={[radius * 0.55, height * 0.55, 8, 1, true]} />
+        <meshStandardMaterial
+          color="#ffcc66"
+          emissive="#ffaa33"
+          emissiveIntensity={1.1}
+          transparent
+          opacity={0.55}
+          depthWrite={false}
+          roughness={0.35}
+          metalness={0}
+        />
+      </mesh>
+      <mesh position={[-radius * 0.12, height * 0.28, radius * 0.08]}>
+        <coneGeometry args={[radius * 0.4, height * 0.45, 8, 1, true]} />
+        <meshStandardMaterial
+          color="#ffe0a0"
+          emissive="#ffd080"
+          emissiveIntensity={1.2}
+          transparent
+          opacity={0.5}
+          depthWrite={false}
+          roughness={0.3}
+          metalness={0}
+        />
+      </mesh>
+      <pointLight
+        position={[0, height * 0.25, 0]}
+        color="#ff8a3a"
+        intensity={0.9 * boost}
+        distance={Math.max(3.5, radius * 14)}
+        decay={2}
+      />
+      {selected ? (
+        <mesh position={[0, height * 0.15, 0]}>
+          <sphereGeometry args={[radius * 0.9, 12, 10]} />
+          <meshBasicMaterial color="#1f8a70" transparent opacity={0.12} />
+        </mesh>
+      ) : null}
+    </group>
+  );
+}
+
+/** Wall niche pool/spa light — faces local +Z into the vessel. */
+function PoolNicheLight({
+  groupProps,
+  selected,
+  colorChanging,
+}: {
+  groupProps: {
+    position: [number, number, number];
+    rotation: [number, number, number];
+  } & Record<string, unknown>;
+  selected: boolean;
+  colorChanging: boolean;
+}) {
+  const clippingPlanes = useContext(ClipPlanesContext);
+  const timeOfDay = useTimeOfDay();
+  const ledBoost = ledBoostForTimeOfDay(timeOfDay);
+  const lensMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const glowMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const spotRef = useRef<THREE.SpotLight>(null);
+  const wideSpotRef = useRef<THREE.SpotLight>(null);
+  const spotTargetRef = useRef<THREE.Object3D>(null);
+  const wideTargetRef = useRef<THREE.Object3D>(null);
+  const ledColor = useMemo(() => new THREE.Color("#ffe9a8"), []);
+  const r = 0.07;
+  const night = timeOfDay === "night";
+  // Spots only — no point lights (those are omni and wash the house).
+  const beamDist = night ? 13 : 9;
+  const spotIntensity = (night ? 24 : 13) * ledBoost;
+  const wideSpotIntensity = (night ? 9 : 5) * ledBoost;
+
+  // Target must be a sibling (not a child of the SpotLight) or aiming breaks.
+  useLayoutEffect(() => {
+    if (spotRef.current && spotTargetRef.current) {
+      spotRef.current.target = spotTargetRef.current;
+    }
+    if (wideSpotRef.current && wideTargetRef.current) {
+      wideSpotRef.current.target = wideTargetRef.current;
+    }
+  }, []);
+
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    if (colorChanging) {
+      const hue = (t / 10) % 1;
+      ledColor.setHSL(hue, 1, 0.58);
+    } else {
+      ledColor.set("#ffe9a8");
+    }
+    if (lensMatRef.current) {
+      lensMatRef.current.color.copy(ledColor);
+      lensMatRef.current.emissive.copy(ledColor);
+      lensMatRef.current.emissiveIntensity =
+        (1.25 + Math.sin(t * 3.5) * 0.15 + (selected ? 0.2 : 0)) * ledBoost;
+    }
+    if (glowMatRef.current) {
+      glowMatRef.current.color.copy(ledColor);
+      glowMatRef.current.emissive.copy(ledColor);
+      glowMatRef.current.emissiveIntensity =
+        (0.85 + Math.sin(t * 2.8) * 0.1) * ledBoost;
+      glowMatRef.current.opacity = 0.28 + Math.sin(t * 2.8) * 0.04;
+    }
+    const pulse = 1 + Math.sin(t * 3) * 0.04;
+    if (spotRef.current) {
+      spotRef.current.color.copy(ledColor);
+      spotRef.current.intensity = spotIntensity * pulse;
+      spotRef.current.target.updateMatrixWorld();
+    }
+    if (wideSpotRef.current) {
+      wideSpotRef.current.color.copy(ledColor);
+      wideSpotRef.current.intensity = wideSpotIntensity * pulse;
+      wideSpotRef.current.target.updateMatrixWorld();
+    }
+  });
+
+  return (
+    <group {...groupProps}>
+      {/*
+        Aim targets are siblings in this group at +Z (into the pool).
+        Lights sit slightly into the water so the cone never opens toward the house.
+      */}
+      <object3D ref={spotTargetRef} position={[0, 0, 10]} />
+      <object3D ref={wideTargetRef} position={[0, 0, 9]} />
+      <spotLight
+        ref={spotRef}
+        color={colorChanging ? "#ff2e6a" : "#ffe9a8"}
+        intensity={spotIntensity}
+        distance={beamDist}
+        decay={1.55}
+        angle={Math.PI / 3.4}
+        penumbra={0.4}
+        position={[0, 0, 0.25]}
+      />
+      <spotLight
+        ref={wideSpotRef}
+        color={colorChanging ? "#ff2e6a" : "#ffe9a8"}
+        intensity={wideSpotIntensity}
+        distance={beamDist * 0.8}
+        decay={1.6}
+        angle={Math.PI / 2.6}
+        penumbra={0.6}
+        position={[0, 0, 0.32]}
+      />
+      {/* Niche ring flush to wall */}
+      <mesh rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <cylinderGeometry args={[r, r * 1.05, 0.03, 28]} />
+        <Mat color="#3d454c" metalness={0.55} roughness={0.35} selected={selected} />
+      </mesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.01]}>
+        <cylinderGeometry args={[r * 0.82, r * 0.82, 0.02, 28]} />
+        <Mat color="#6a727a" metalness={0.65} roughness={0.3} selected={selected} />
+      </mesh>
+      {/* Lit lens facing into the pool */}
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.022]}>
+        <circleGeometry args={[r * 0.68, 28]} />
+        <meshStandardMaterial
+          ref={lensMatRef}
+          color="#ffe9a8"
+          emissive="#ffd56a"
+          emissiveIntensity={1.25}
+          roughness={0.2}
+          metalness={0.05}
+          clippingPlanes={clippingPlanes}
+          clipShadows={clippingPlanes.length > 0}
+        />
+      </mesh>
+      {/* Soft glow volume just in front of the lens (emissive mesh, not a light) */}
+      <mesh position={[0, 0, 0.09]} frustumCulled={false}>
+        <sphereGeometry args={[0.12, 16, 12]} />
+        <meshStandardMaterial
+          ref={glowMatRef}
+          color="#ffe9a8"
+          emissive="#ffd56a"
+          emissiveIntensity={0.85}
+          transparent
+          opacity={0.26}
+          depthWrite={false}
+          clippingPlanes={clippingPlanes}
+        />
+      </mesh>
+    </group>
+  );
+}
+
 export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   const catalogId = desc.catalogItemId ?? "";
   const { x: sx, y: sy, z: sz } = desc.size;
@@ -120,122 +642,14 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   };
 
   if (catalogId === "person_scale") {
-    // Standing adult — proportions keyed to total height (default 5′8″).
-    // Group origin is body center; feet at y = -H/2, crown at +H/2.
-    const H = Math.max(sy, 1.5);
-    const shoulderW = Math.min(sx * 0.98, H * 0.26);
-    const chestD = Math.min(sz * 0.95, H * 0.15);
-    const headR = H * 0.065;
-    const neckH = H * 0.04;
-    const torsoH = H * 0.28;
-    const hipH = H * 0.08;
-    const upperLegH = H * 0.22;
-    const lowerLegH = H * 0.22;
-    const footH = H * 0.035;
-    const upperArmH = H * 0.16;
-    const lowerArmH = H * 0.14;
-    const armR = H * 0.028;
-    const legR = H * 0.038;
-    const skin = "#c4a484";
-    const shirt = "#3d6b8a";
-    const pants = "#3a4550";
-    const shoe = "#2a3036";
-
-    // Vertical layout from feet upward (local y, center = 0)
-    const footY = -H / 2 + footH / 2;
-    const lowerLegY = footY + footH / 2 + lowerLegH / 2;
-    const upperLegY = lowerLegY + lowerLegH / 2 + upperLegH / 2;
-    const hipY = upperLegY + upperLegH / 2 + hipH / 2;
-    const torsoY = hipY + hipH / 2 + torsoH / 2;
-    const neckY = torsoY + torsoH / 2 + neckH / 2;
-    const headY = neckY + neckH / 2 + headR * 0.95;
-    const shoulderY = torsoY + torsoH * 0.28;
-    const legSpread = shoulderW * 0.18;
-
     return (
-      <group {...groupProps}>
-        {/* Feet */}
-        {([-1, 1] as const).map((side) => (
-          <mesh
-            key={`foot-${side}`}
-            position={[side * legSpread, footY, chestD * 0.12]}
-            castShadow
-            receiveShadow
-          >
-            <boxGeometry args={[legR * 1.6, footH, chestD * 0.55]} />
-            <Mat color={shoe} roughness={0.85} selected={selected} />
-          </mesh>
-        ))}
-        {/* Lower legs */}
-        {([-1, 1] as const).map((side) => (
-          <mesh
-            key={`lleg-${side}`}
-            position={[side * legSpread, lowerLegY, 0]}
-            castShadow
-          >
-            <capsuleGeometry args={[legR * 0.85, lowerLegH - legR * 1.7, 6, 10]} />
-            <Mat color={pants} roughness={0.8} selected={selected} />
-          </mesh>
-        ))}
-        {/* Upper legs */}
-        {([-1, 1] as const).map((side) => (
-          <mesh
-            key={`uleg-${side}`}
-            position={[side * legSpread * 0.85, upperLegY, 0]}
-            castShadow
-          >
-            <capsuleGeometry args={[legR, upperLegH - legR * 1.7, 6, 10]} />
-            <Mat color={pants} roughness={0.8} selected={selected} />
-          </mesh>
-        ))}
-        {/* Hips */}
-        <mesh position={[0, hipY, 0]} castShadow>
-          <boxGeometry args={[shoulderW * 0.55, hipH, chestD * 0.85]} />
-          <Mat color={pants} roughness={0.8} selected={selected} />
-        </mesh>
-        {/* Torso */}
-        <mesh position={[0, torsoY, 0]} castShadow>
-          <boxGeometry args={[shoulderW * 0.72, torsoH, chestD]} />
-          <Mat color={shirt} roughness={0.75} selected={selected} />
-        </mesh>
-        {/* Shoulders */}
-        <mesh position={[0, shoulderY, 0]} castShadow>
-          <boxGeometry args={[shoulderW, H * 0.06, chestD * 0.9]} />
-          <Mat color={shirt} roughness={0.75} selected={selected} />
-        </mesh>
-        {/* Arms */}
-        {([-1, 1] as const).map((side) => {
-          const ax = side * (shoulderW * 0.52);
-          const upperArmY = shoulderY - upperArmH * 0.35;
-          const lowerArmY = upperArmY - upperArmH * 0.45 - lowerArmH * 0.4;
-          return (
-            <group key={`arm-${side}`}>
-              <mesh position={[ax, upperArmY, 0]} castShadow>
-                <capsuleGeometry
-                  args={[armR, upperArmH - armR * 1.6, 5, 8]}
-                />
-                <Mat color={shirt} roughness={0.75} selected={selected} />
-              </mesh>
-              <mesh position={[ax, lowerArmY, chestD * 0.05]} castShadow>
-                <capsuleGeometry
-                  args={[armR * 0.9, lowerArmH - armR * 1.5, 5, 8]}
-                />
-                <Mat color={skin} roughness={0.7} selected={selected} />
-              </mesh>
-            </group>
-          );
-        })}
-        {/* Neck */}
-        <mesh position={[0, neckY, 0]} castShadow>
-          <cylinderGeometry args={[headR * 0.45, headR * 0.5, neckH, 10]} />
-          <Mat color={skin} roughness={0.7} selected={selected} />
-        </mesh>
-        {/* Head */}
-        <mesh position={[0, headY, 0]} castShadow>
-          <sphereGeometry args={[headR, 16, 12]} />
-          <Mat color={skin} roughness={0.65} selected={selected} />
-        </mesh>
-      </group>
+      <PersonMesh
+        heightM={Math.max(sy, 1.45)}
+        sex={resolvePersonSex(desc.personSex)}
+        outfitId={resolvePersonOutfitId(desc.personOutfitId)}
+        selected={selected}
+        groupProps={groupProps}
+      />
     );
   }
 
@@ -559,19 +973,38 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
     const r = Math.min(sx, sz);
     return (
       <group {...groupProps}>
-        <mesh position={[0, -sy * 0.15, 0]} castShadow receiveShadow>
-          <cylinderGeometry args={[r * 0.45, r * 0.48, sy * 0.7, 20]} />
-          <Mat color="#e8e4dc" selected={selected} />
+        <mesh position={[0, -sy * 0.18, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[r * 0.48, r * 0.52, sy * 0.55, 24]} />
+          <Mat color="#d8d2c8" roughness={0.85} selected={selected} />
         </mesh>
-        <mesh position={[0, sy * 0.25, 0]}>
-          <cylinderGeometry args={[r * 0.28, r * 0.28, sy * 0.15, 16]} />
-          <Mat
-            color="#e85d04"
-            selected={selected}
-            emissive="#ff6b1a"
-            emissiveIntensity={0.45}
-          />
+        <mesh position={[0, sy * 0.08, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[r * 0.4, r * 0.42, sy * 0.22, 24]} />
+          <Mat color="#3a3834" roughness={0.7} selected={selected} />
         </mesh>
+        {/* Capstones */}
+        {Array.from({ length: 8 }, (_, i) => {
+          const a = (i / 8) * Math.PI * 2;
+          return (
+            <mesh
+              key={i}
+              position={[
+                Math.cos(a) * r * 0.38,
+                sy * 0.2,
+                Math.sin(a) * r * 0.38,
+              ]}
+              castShadow
+            >
+              <boxGeometry args={[r * 0.18, sy * 0.1, r * 0.14]} />
+              <Mat color="#cfc8bc" roughness={0.8} selected={selected} />
+            </mesh>
+          );
+        })}
+        <FireGlow
+          radius={r * 0.22}
+          baseY={sy * 0.22}
+          height={sy * 0.55}
+          selected={selected}
+        />
       </group>
     );
   }
@@ -581,47 +1014,44 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
     return (
       <group {...groupProps}>
         <mesh castShadow receiveShadow>
-          <cylinderGeometry args={[r * 0.42, r * 0.38, sy, 16]} />
-          <Mat color="#c4b8a8" selected={selected} />
+          <cylinderGeometry args={[r * 0.44, r * 0.36, sy * 0.72, 20]} />
+          <Mat color="#b8a990" roughness={0.88} selected={selected} />
         </mesh>
-        <mesh position={[0, sy * 0.35, 0]} castShadow>
-          <sphereGeometry
-            args={[r * 0.28, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55]}
-          />
+        <mesh position={[0, sy * 0.32, 0]} castShadow>
+          <cylinderGeometry args={[r * 0.4, r * 0.4, sy * 0.08, 20]} />
+          <Mat color="#5a4030" roughness={0.95} selected={selected} />
+        </mesh>
+        {/* Layered canopy — denser than a single hemisphere. */}
+        <mesh position={[0, sy * 0.42, 0]} castShadow>
+          <sphereGeometry args={[r * 0.32, 14, 12]} />
+          <Mat color="#2f5a38" roughness={0.92} selected={selected} />
+        </mesh>
+        <mesh position={[r * 0.12, sy * 0.55, -r * 0.08]} castShadow>
+          <sphereGeometry args={[r * 0.22, 12, 10]} />
           <Mat color="#3d6b45" roughness={0.9} selected={selected} />
+        </mesh>
+        <mesh position={[-r * 0.1, sy * 0.52, r * 0.1]} castShadow>
+          <sphereGeometry args={[r * 0.2, 12, 10]} />
+          <Mat color="#4a7a52" roughness={0.9} selected={selected} />
+        </mesh>
+        <mesh position={[0, sy * 0.68, 0]} castShadow>
+          <sphereGeometry args={[r * 0.14, 10, 8]} />
+          <Mat color="#356340" roughness={0.88} selected={selected} />
         </mesh>
       </group>
     );
   }
 
-  if (
-    catalogId.includes("pump") ||
-    catalogId.includes("filter") ||
-    catalogId.includes("heater") ||
-    catalogId.includes("salt") ||
-    catalogId.startsWith("equip_")
-  ) {
+  if (isPadEquipmentCatalogId(catalogId)) {
     return (
-      <group {...groupProps}>
-        <mesh position={[0, -sy * 0.1, 0]} castShadow receiveShadow>
-          <boxGeometry args={[sx * 0.95, sy * 0.55, sz * 0.95]} />
-          <Mat color="#4a5560" metalness={0.3} selected={selected} />
-        </mesh>
-        <mesh
-          position={[0, sy * 0.22, 0]}
-          rotation={[Math.PI / 2, 0, 0]}
-          castShadow
-        >
-          <cylinderGeometry
-            args={[Math.min(sx, sz) * 0.28, Math.min(sx, sz) * 0.28, sy * 0.5, 16]}
-          />
-          <Mat color="#5a6570" metalness={0.35} selected={selected} />
-        </mesh>
-        <mesh position={[sx * 0.2, sy * 0.05, sz * 0.15]} castShadow>
-          <boxGeometry args={[sx * 0.25, sy * 0.2, sz * 0.25]} />
-          <Mat color="#c45c2c" selected={selected} />
-        </mesh>
-      </group>
+      <PadEquipmentMesh
+        catalogId={catalogId}
+        sx={sx}
+        sy={sy}
+        sz={sz}
+        selected={selected}
+        groupProps={groupProps}
+      />
     );
   }
 
@@ -655,8 +1085,15 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   }
 
   if (catalogId === "spa_bubbler" || catalogId === "pool_bubbler") {
-    // Floor / sunshelf bubbler head with a short bubble column.
+    // Floor / sunshelf bubbler head + animated plume that breaks the waterline.
     const r = 0.048;
+    const sunshelf = catalogId === "pool_bubbler";
+    const waterLocalY =
+      desc.waterSurfaceY != null
+        ? desc.waterSurfaceY - desc.position.y
+        : sunshelf
+          ? 0.05
+          : 0.55;
     return (
       <group {...groupProps}>
         <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -671,24 +1108,12 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
           <cylinderGeometry args={[r * 0.2, r * 0.26, 0.02, 12]} />
           <Mat color="#3d454c" metalness={0.55} selected={selected} />
         </mesh>
-        {(
-          [
-            [0.006, 0.055, 0.004, 0.011],
-            [-0.008, 0.095, -0.005, 0.013],
-            [0.004, 0.135, 0.007, 0.01],
-            [-0.003, 0.175, -0.002, 0.012],
-          ] as const
-        ).map(([x, y, z, rad], i) => (
-          <mesh key={i} position={[x, y, z]}>
-            <sphereGeometry args={[rad, 10, 10]} />
-            <Mat
-              color="#c5eaf5"
-              opacity={0.4 - i * 0.05}
-              roughness={0.2}
-              selected={selected}
-            />
-          </mesh>
-        ))}
+        <BubblerPlume
+          waterSurfaceLocalY={waterLocalY}
+          sunshelf={sunshelf}
+          selected={selected}
+          hasLed={desc.hasLedLight === true}
+        />
       </group>
     );
   }
@@ -719,43 +1144,86 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   }
 
   if (catalogId.startsWith("light_")) {
-    const r = 0.05;
     return (
-      <group {...groupProps}>
-        <mesh rotation={[Math.PI / 2, 0, 0]} castShadow>
-          <cylinderGeometry args={[r, r, 0.022, 24]} />
-          <Mat color="#4a5560" metalness={0.4} selected={selected} />
-        </mesh>
-        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.012]}>
-          <circleGeometry args={[r * 0.72, 24]} />
-          <Mat
-            color="#ffe9a8"
-            selected={selected}
-            emissive="#ffd56a"
-            emissiveIntensity={0.7}
-          />
-        </mesh>
-      </group>
+      <PoolNicheLight
+        groupProps={groupProps}
+        selected={selected}
+        colorChanging={catalogId === "light_color"}
+      />
     );
   }
 
   if (catalogId === "outdoor_kitchen" || catalogId === "cabana") {
+    const isCabana = catalogId === "cabana";
     return (
       <group {...groupProps}>
-        <mesh position={[0, -sy * 0.15, 0]} castShadow receiveShadow>
-          <boxGeometry args={[sx, sy * 0.55, sz]} />
-          <Mat color="#c4b8a8" selected={selected} />
+        {/* Base cabinet run */}
+        <mesh position={[0, -sy * 0.18, 0]} castShadow receiveShadow>
+          <boxGeometry args={[sx, sy * 0.5, sz]} />
+          <Mat color="#c9c2b4" roughness={0.82} selected={selected} />
         </mesh>
-        {catalogId === "cabana" ? (
-          <mesh position={[0, sy * 0.35, 0]} castShadow>
-            <boxGeometry args={[sx * 1.05, sy * 0.12, sz * 1.05]} />
-            <Mat color="#6b6358" selected={selected} />
-          </mesh>
+        {/* Countertop */}
+        <mesh position={[0, sy * 0.1, 0]} castShadow receiveShadow>
+          <boxGeometry args={[sx * 1.02, sy * 0.08, sz * 1.04]} />
+          <Mat color="#e8e4dc" roughness={0.45} metalness={0.08} selected={selected} />
+        </mesh>
+        {isCabana ? (
+          <>
+            <mesh position={[0, sy * 0.42, 0]} castShadow>
+              <boxGeometry args={[sx * 1.08, sy * 0.1, sz * 1.08]} />
+              <Mat color="#6b6358" roughness={0.85} selected={selected} />
+            </mesh>
+            {/* Corner posts */}
+            {(
+              [
+                [-1, -1],
+                [-1, 1],
+                [1, -1],
+                [1, 1],
+              ] as const
+            ).map(([ix, iz]) => (
+              <mesh
+                key={`${ix}-${iz}`}
+                position={[ix * sx * 0.42, sy * 0.18, iz * sz * 0.42]}
+                castShadow
+              >
+                <boxGeometry args={[sx * 0.06, sy * 0.55, sz * 0.06]} />
+                <Mat color="#5a5044" roughness={0.8} selected={selected} />
+              </mesh>
+            ))}
+          </>
         ) : (
-          <mesh position={[0, sy * 0.28, -sz * 0.35]} castShadow>
-            <boxGeometry args={[sx * 0.9, sy * 0.35, sz * 0.15]} />
-            <Mat color="#4a5560" selected={selected} />
-          </mesh>
+          <>
+            {/* Grill insert */}
+            <mesh position={[sx * 0.12, sy * 0.18, -sz * 0.05]} castShadow>
+              <boxGeometry args={[sx * 0.42, sy * 0.12, sz * 0.55]} />
+              <Mat
+                color="#2a2e32"
+                metalness={0.55}
+                roughness={0.35}
+                selected={selected}
+              />
+            </mesh>
+            <mesh position={[sx * 0.12, sy * 0.26, -sz * 0.05]}>
+              <boxGeometry args={[sx * 0.36, sy * 0.02, sz * 0.48]} />
+              <Mat
+                color="#e85d04"
+                selected={selected}
+                emissive="#ff6b1a"
+                emissiveIntensity={0.35}
+              />
+            </mesh>
+            {/* Backsplash / upper shelf */}
+            <mesh position={[0, sy * 0.32, -sz * 0.42]} castShadow>
+              <boxGeometry args={[sx * 0.95, sy * 0.42, sz * 0.1]} />
+              <Mat color="#4a5560" metalness={0.25} roughness={0.45} selected={selected} />
+            </mesh>
+            {/* Side cabinet doors suggestion */}
+            <mesh position={[-sx * 0.28, -sy * 0.05, sz * 0.48]} castShadow>
+              <boxGeometry args={[sx * 0.35, sy * 0.28, 0.02]} />
+              <Mat color="#b0a898" roughness={0.75} selected={selected} />
+            </mesh>
+          </>
         )}
       </group>
     );

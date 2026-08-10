@@ -41,6 +41,10 @@ export function isWaterFixtureId(id: string): boolean {
   return (WATER_FIXTURE_IDS as readonly string[]).includes(id);
 }
 
+export function isBubblerId(id: string): boolean {
+  return id === "spa_bubbler" || id === "pool_bubbler";
+}
+
 export function isPoolFixtureId(id: string): boolean {
   return (
     id === "pool_bubbler" ||
@@ -85,9 +89,10 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     id: "pump_variable_speed",
     name: "Variable-speed pump",
     category: "equipment",
-    widthMm: 2.5 * FT,
-    depthMm: 2 * FT,
-    heightMm: 700,
+    /** ~IntelliFlo footprint: 30″ L × 17″ W × 20″ H */
+    widthMm: 762,
+    depthMm: 432,
+    heightMm: 508,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 185000,
@@ -96,9 +101,10 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     id: "filter_cartridge",
     name: "Cartridge filter",
     category: "equipment",
-    widthMm: 2 * FT,
-    depthMm: 2 * FT,
-    heightMm: 900,
+    /** ~Clean & Clear Plus: 22″ × 22″ × 45″ */
+    widthMm: 559,
+    depthMm: 559,
+    heightMm: 1143,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 95000,
@@ -107,9 +113,10 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     id: "heater_gas",
     name: "Gas heater",
     category: "equipment",
-    widthMm: 3 * FT,
-    depthMm: 2.5 * FT,
-    heightMm: 1200,
+    /** ~MasterTemp / ETi cabinet: 40″ × 30″ × 46″ */
+    widthMm: 1016,
+    depthMm: 762,
+    heightMm: 1168,
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 320000,
@@ -118,9 +125,10 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     id: "salt_chlorinator",
     name: "Salt chlorinator cell",
     category: "equipment",
-    widthMm: 1.5 * FT,
-    depthMm: 1 * FT,
-    heightMm: 600,
+    /** ~IntelliChlor cell + head */
+    widthMm: 508,
+    depthMm: 280,
+    heightMm: 380,
     layerId: "equipment",
     levels: ["residential", "commercial"],
     unitPriceCents: 140000,
@@ -146,6 +154,8 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 27500,
+    description:
+      "Floor bubbler fountain (~9–12″ plume). Optional niche LED is a separate line.",
   },
   {
     id: "pool_bubbler",
@@ -157,7 +167,8 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 32500,
-    description: "Deck-level bubbler for sunshelf / tanning ledge",
+    description:
+      "Deck-level bubbler for sunshelf / tanning ledge (~9–12″ plume). Optional niche LED is a separate line.",
   },
   {
     id: "spa_jet",
@@ -196,7 +207,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
   },
   {
     id: "person_scale",
-    name: "Person (5′8″ scale)",
+    name: "Person (scale figure)",
     category: "furniture",
     widthMm: SCALE_PERSON_WIDTH_MM,
     depthMm: SCALE_PERSON_DEPTH_MM,
@@ -205,7 +216,7 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 0,
     description:
-      "Standing adult for scale — 5′8″ tall, ~18″ shoulders, ~12″ deep. Not billed.",
+      "Standing adult for scale — set height, sex, and outfit in Properties. Not billed.",
   },
   {
     id: "lounge_chair",

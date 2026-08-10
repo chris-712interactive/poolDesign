@@ -16,9 +16,15 @@ import {
   type ToolRealm,
 } from "@/components/CadToolIcons";
 import {
+  fenceKindLabel,
   formatMoney,
+  gateKindLabel,
   openingKindLabel,
+  FENCE_KINDS,
+  GATE_KINDS,
   type BuildingOpeningKind,
+  type FenceKind,
+  type GateKind,
   type PatioCoverKind,
   type PlaceableItem,
   type WaterBodyKind,
@@ -29,8 +35,11 @@ type Props = {
   tool: ToolId;
   waterKind: WaterBodyKind;
   coverKind: PatioCoverKind;
+  fenceKind: FenceKind;
+  gateKind: GateKind;
   openingKind: BuildingOpeningKind;
   openingStory: number;
+  planStoryFilter: "all" | number;
   houseStories: number;
   placeItemId: string | null;
   placeLibrary: PlaceableItem[];
@@ -50,8 +59,11 @@ type Props = {
   onTool: (tool: ToolId) => void;
   onWaterKind: (kind: WaterBodyKind) => void;
   onCoverKind: (kind: PatioCoverKind) => void;
+  onFenceKind: (kind: FenceKind) => void;
+  onGateKind: (kind: GateKind) => void;
   onOpeningKind: (kind: BuildingOpeningKind) => void;
   onOpeningStory: (n: number) => void;
+  onPlanStoryFilter: (v: "all" | number) => void;
   onHouseStories: (n: number) => void;
   onPlaceItemId: (id: string) => void;
   onOrtho: () => void;
@@ -67,8 +79,11 @@ export function CadToolPalette({
   tool,
   waterKind,
   coverKind,
+  fenceKind,
+  gateKind,
   openingKind,
   openingStory,
+  planStoryFilter,
   houseStories,
   placeItemId,
   placeLibrary,
@@ -88,8 +103,11 @@ export function CadToolPalette({
   onTool,
   onWaterKind,
   onCoverKind,
+  onFenceKind,
+  onGateKind,
   onOpeningKind,
   onOpeningStory,
+  onPlanStoryFilter,
   onHouseStories,
   onPlaceItemId,
   onOrtho,
@@ -135,11 +153,15 @@ export function CadToolPalette({
   const helpText =
     tool === "opening"
       ? `Click a house wall to place a ${openingKindLabel(openingKind).toLowerCase()}.`
-      : tool === "cover_rect"
-        ? coverKind === "roof"
-          ? "Patio roof: side, then depth."
-          : "Pergola: side, then depth."
-        : toolHelp;
+      : tool === "gate"
+        ? `Click a fence run to place a ${gateKindLabel(gateKind).toLowerCase()} gate.`
+        : tool === "fence"
+          ? `Draw a ${fenceKindLabel(fenceKind).toLowerCase()} fence path. Finish when ready.`
+          : tool === "cover_rect"
+            ? coverKind === "roof"
+              ? "Patio roof: side, then depth."
+              : "Pergola: side, then depth."
+            : toolHelp;
 
   return (
     <div className="cad-tab-panel" role="tabpanel">
@@ -331,6 +353,73 @@ export function CadToolPalette({
                       <p className="muted cad-tool-group-note">
                         3-click rectangle: side, then depth. Links to nearest
                         patio when possible.
+                      </p>
+                    </>
+                  )}
+
+                  {group.id === "fence" && (
+                    <>
+                      <div className="field" style={{ margin: 0 }}>
+                        <label htmlFor="fence-kind-tool">Fence type</label>
+                        <select
+                          id="fence-kind-tool"
+                          value={fenceKind}
+                          onChange={(e) => {
+                            onFenceKind(e.target.value as FenceKind);
+                            activateDraw("fence");
+                          }}
+                        >
+                          {FENCE_KINDS.map((id) => (
+                            <option key={id} value={id}>
+                              {fenceKindLabel(id)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="cad-icon-toolbar cad-icon-toolbar-2">
+                        <button
+                          type="button"
+                          className={`tool-icon-btn ${tool === "fence" ? "active" : ""}`}
+                          title="Draw fence"
+                          aria-label="Draw fence"
+                          onClick={() => activateDraw("fence")}
+                        >
+                          {toolMeta("fence").icon}
+                          <ToolTooltip label="Draw fence" />
+                        </button>
+                        <button
+                          type="button"
+                          className={`tool-icon-btn ${tool === "gate" ? "active" : ""}`}
+                          title="Place gate"
+                          aria-label="Place gate"
+                          onClick={() => activateDraw("gate")}
+                        >
+                          {toolMeta("gate").icon}
+                          <ToolTooltip label="Place gate" />
+                        </button>
+                      </div>
+                      <div
+                        className="cad-kind-toggle cad-kind-toggle-3"
+                        role="group"
+                        aria-label="Gate type"
+                      >
+                        {GATE_KINDS.map((id) => (
+                          <button
+                            key={id}
+                            type="button"
+                            className={`cad-kind-btn ${tool === "gate" && gateKind === id ? "active" : ""}`}
+                            onClick={() => {
+                              onGateKind(id);
+                              activateDraw("gate");
+                            }}
+                          >
+                            {gateKindLabel(id)}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="muted cad-tool-group-note">
+                        Draw fence as a path, then place gates on fence
+                        segments. Color is set in Properties.
                       </p>
                     </>
                   )}
@@ -584,7 +673,7 @@ export function CadToolPalette({
                         ))}
                       </div>
                       <div className="field" style={{ margin: 0 }}>
-                        <label htmlFor="opening-story-tool">Story</label>
+                        <label htmlFor="opening-story-tool">Place on story</label>
                         <input
                           id="opening-story-tool"
                           type="number"
@@ -607,6 +696,47 @@ export function CadToolPalette({
                         >
                           1 = ground floor. Clamped to the house story count
                           when placed.
+                        </p>
+                      </div>
+                      <div className="field" style={{ margin: 0 }}>
+                        <label htmlFor="plan-story-filter-tool">
+                          Show on plan
+                        </label>
+                        <select
+                          id="plan-story-filter-tool"
+                          value={
+                            planStoryFilter === "all"
+                              ? "all"
+                              : String(planStoryFilter)
+                          }
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v === "all") onPlanStoryFilter("all");
+                            else {
+                              const n = Number(v);
+                              onPlanStoryFilter(n);
+                              onOpeningStory(n);
+                            }
+                          }}
+                        >
+                          <option value="all">All stories</option>
+                          {Array.from(
+                            { length: Math.max(1, houseStories) },
+                            (_, i) => i + 1,
+                          ).map((n) => (
+                            <option key={n} value={n}>
+                              {n === 1
+                                ? "Ground floor only"
+                                : `Story ${n} only`}
+                            </option>
+                          ))}
+                        </select>
+                        <p
+                          className="muted"
+                          style={{ margin: "0.25rem 0 0", fontSize: "0.75rem" }}
+                        >
+                          Hide other stories so overlapping windows are
+                          selectable.
                         </p>
                       </div>
                     </>

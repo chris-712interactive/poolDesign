@@ -17,8 +17,18 @@ import {
   spaWallThicknessMm,
 } from "./spa-defaults";
 
-/** ~9′ per building story */
-export const STORY_HEIGHT_MM = 2743.2;
+/** Standard residential clear ceiling height (8′). */
+export const DEFAULT_CEILING_HEIGHT_MM = 2438.4;
+/**
+ * Floor/ceiling structure between stories (~10″ joists + subfloor).
+ * Sits between clear ceiling heights so each story keeps its full clear height.
+ */
+export const FLOOR_STRUCTURE_THICKNESS_MM = 254;
+/**
+ * @deprecated Prefer `DEFAULT_CEILING_HEIGHT_MM` + `FLOOR_STRUCTURE_THICKNESS_MM`.
+ * Kept as the default clear ceiling height for older callers/tests.
+ */
+export const STORY_HEIGHT_MM = DEFAULT_CEILING_HEIGHT_MM;
 /** Thin patio / deck slab */
 export const PATIO_SLAB_THICKNESS_MM = 100;
 /** Pool shell lip thickness above grade */
@@ -89,6 +99,9 @@ export function designBoundsMm(design: DesignDocument): DesignBoundsMm {
   for (const g of design.gradeSamples ?? []) {
     include([g.position]);
   }
+  for (const f of design.fences ?? []) {
+    include(f.points);
+  }
 
   if (!Number.isFinite(minX)) {
     return {
@@ -115,8 +128,42 @@ export function designBoundsMm(design: DesignDocument): DesignBoundsMm {
   };
 }
 
-export function buildingHeightMm(stories: number): number {
-  return Math.max(1, stories || 1) * STORY_HEIGHT_MM;
+/**
+ * Clamp / default a building's clear ceiling height (mm).
+ * Allows ~7′–16′ (common residential range).
+ */
+export function resolveCeilingHeightMm(ceilingHeightMm?: number): number {
+  if (
+    ceilingHeightMm != null &&
+    Number.isFinite(ceilingHeightMm) &&
+    ceilingHeightMm >= 2133.6 &&
+    ceilingHeightMm <= 4876.8
+  ) {
+    return ceilingHeightMm;
+  }
+  return DEFAULT_CEILING_HEIGHT_MM;
+}
+
+/** Finished-floor elevation of a story above grade (mm). */
+export function storyFloorElevationMm(
+  story: number,
+  buildingStories = 1,
+  ceilingHeightMm?: number,
+): number {
+  const s = clampOpeningStory(story, buildingStories);
+  if (s <= 1) return 0;
+  const clear = resolveCeilingHeightMm(ceilingHeightMm);
+  return (s - 1) * (clear + FLOOR_STRUCTURE_THICKNESS_MM);
+}
+
+/** Total exterior wall height from grade to underside of roof (mm). */
+export function buildingHeightMm(
+  stories: number,
+  ceilingHeightMm?: number,
+): number {
+  const n = Math.max(1, stories || 1);
+  const clear = resolveCeilingHeightMm(ceilingHeightMm);
+  return n * clear + (n - 1) * FLOOR_STRUCTURE_THICKNESS_MM;
 }
 
 /** Typical window sill height above finished floor (~36″). */
@@ -132,19 +179,47 @@ export function clampOpeningStory(
   return Math.min(max, Math.max(1, n));
 }
 
+/** Default sill above finished floor for a given opening kind. */
+export function defaultSillAboveFloorMm(kind: BuildingOpeningKind): number {
+  return kind === "window" ? WINDOW_SILL_ABOVE_FLOOR_MM : 0;
+}
+
+/**
+ * Resolved sill above the story finished floor (mm).
+ * Uses authorable `sillAboveFloorMm` when set; otherwise kind default.
+ */
+export function openingSillAboveFloorMm(
+  kind: BuildingOpeningKind,
+  sillAboveFloorMm?: number,
+): number {
+  if (
+    sillAboveFloorMm != null &&
+    Number.isFinite(sillAboveFloorMm) &&
+    sillAboveFloorMm >= 0
+  ) {
+    return sillAboveFloorMm;
+  }
+  return defaultSillAboveFloorMm(kind);
+}
+
 /**
  * Bottom of the opening above grade (mm).
- * Doors sit on the story floor; windows sit on a sill above that floor.
+ * Doors sit on the story floor; windows sit on a sill above that floor
+ * (authorable via sillAboveFloorMm).
  */
 export function openingSillMm(
   kind: BuildingOpeningKind,
   story: number | undefined,
   buildingStories = 1,
+  sillAboveFloorMm?: number,
+  ceilingHeightMm?: number,
 ): number {
-  const s = clampOpeningStory(story, buildingStories);
-  const floorMm = (s - 1) * STORY_HEIGHT_MM;
-  if (kind === "window") return floorMm + WINDOW_SILL_ABOVE_FLOOR_MM;
-  return floorMm;
+  const floorMm = storyFloorElevationMm(
+    story ?? 1,
+    buildingStories,
+    ceilingHeightMm,
+  );
+  return floorMm + openingSillAboveFloorMm(kind, sillAboveFloorMm);
 }
 
 export function poolAverageDepthMm(body: PoolBody): number {

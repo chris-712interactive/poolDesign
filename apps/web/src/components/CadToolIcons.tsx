@@ -15,6 +15,8 @@ export type DrawToolId =
   | "patio"
   | "grade_point"
   | "cover_rect"
+  | "fence"
+  | "gate"
   | "plumbing"
   | "place"
   | "measure";
@@ -35,6 +37,7 @@ export type ToolGroupId =
   | "furniture"
   | "patio"
   | "cover"
+  | "fence"
   | "pool"
   | "spa"
   | "plumbing"
@@ -115,6 +118,18 @@ export const TOOL_GROUPS: {
         <path d="M6 10v10M18 10v10" />
         <path d="M6 14h12M6 17h12" />
         <path d="M4 7l8-3 8 3" />
+      </Svg>
+    ),
+  },
+  {
+    id: "fence",
+    realm: "land",
+    label: "Fence & gates",
+    hint: "Property fence runs and gates",
+    icon: (
+      <Svg>
+        <path d="M4 6v14M9 6v14M14 6v14M19 6v14" />
+        <path d="M4 8h15M4 18h15" />
       </Svg>
     ),
   },
@@ -310,6 +325,27 @@ export const TOOL_META: {
     ),
   },
   {
+    id: "fence",
+    label: "Fence",
+    icon: (
+      <Svg>
+        <path d="M4 6v14M9 6v14M14 6v14M19 6v14" />
+        <path d="M4 8h15M4 18h15" />
+      </Svg>
+    ),
+  },
+  {
+    id: "gate",
+    label: "Gate",
+    icon: (
+      <Svg>
+        <path d="M5 20V6h8v14" />
+        <path d="M9 12h1" />
+        <path d="M15 8l4 4-4 4" />
+      </Svg>
+    ),
+  },
+  {
     id: "plumbing",
     label: "Plumbing",
     icon: (
@@ -425,6 +461,7 @@ export function toolGroupForTool(
   if (isPadEquipTool(tool)) return "pad";
   if (tool === "patio" || tool === "grade_point") return "patio";
   if (tool === "cover_rect") return "cover";
+  if (tool === "fence" || tool === "gate") return "fence";
   if (tool === "plumbing") return "plumbing";
   if (tool === "house_rect" || tool === "house_poly") return "house";
   if (tool === "opening") return "openings";

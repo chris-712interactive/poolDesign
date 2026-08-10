@@ -6,17 +6,30 @@ import {
   DEFAULT_PERGOLA_HEIGHT_MM,
   DEFAULT_SPA_SHELL_HEIGHT_MM,
   DEFAULT_SPA_WALL_THICKNESS_MM,
+  defaultFenceHeightMm,
+  defaultGateSize,
   defaultOpeningSize,
   DEFAULT_RETAINING_TRIGGER_MM,
   emptyDesignDocument,
+  isFenceKind,
+  isGateKind,
   type DesignDocument,
   type DesignEstimate,
   type DesignGradeOptions,
   type EstimateCustomLine,
+  type FenceGate,
+  type FenceRun,
   type GradeSample,
   type PatioGradeStrategy,
+  type SpaSpillover,
+  isSpaSpilloverStyle,
 } from "./design-model";
+import {
+  isWallWaterFixtureId,
+  snapWaterWallFixture,
+} from "./water-fixtures";
 
+const IN = 25.4;
 const ESTIMATE_UNITS: CatalogUnit[] = [
   "ea",
   "lf",
@@ -61,10 +74,32 @@ import {
   isFurnitureFinishId,
 } from "./furniture-finishes";
 import {
+  isFenceFinishId,
+  resolveFenceFinish,
+} from "./fence-finishes";
+import {
+  HOUSE_EXTERIOR_CUSTOM_ID,
+  clampHouseExteriorColor,
+  resolveHouseExteriorFinishId,
+} from "./house-finishes";
+import {
   DINING_CHAIR_CLEARANCE_MM,
   diningSetCatalogId,
 } from "./object-library";
-import { clampOpeningStory, defaultObjectHeightMm } from "./scene3d";
+import {
+  clampOpeningStory,
+  defaultObjectHeightMm,
+  defaultSillAboveFloorMm,
+  openingSillAboveFloorMm,
+  resolveCeilingHeightMm,
+} from "./scene3d";
+import {
+  defaultPersonHeightMm,
+  personFootprintMm,
+  resolvePersonHeightMm,
+  resolvePersonOutfitId,
+  resolvePersonSex,
+} from "./person-options";
 
 const FT = 304.8;
 
@@ -98,6 +133,9 @@ export function normalizeDesignDocument(
   }
   if (!layers.some((l) => l.id === "covers")) {
     layers = [...layers, { id: "covers", name: "covers", visible: true }];
+  }
+  if (!layers.some((l) => l.id === "fence")) {
+    layers = [...layers, { id: "fence", name: "fence", visible: true }];
   }
 
   return {
@@ -163,18 +201,59 @@ export function normalizeDesignDocument(
         fabricFinishId = undefined;
       }
 
+      const isBubbler =
+        catalogItemId === "spa_bubbler" || catalogItemId === "pool_bubbler";
+      const isPerson = catalogItemId === "person_scale";
+
+      // Pull lights/jets onto the nearest pool/spa wall and face them inward.
+      let position = o.position;
+      let rotationDeg = o.rotationDeg;
+      let parentBodyId = o.parentBodyId;
+      if (isWallWaterFixtureId(catalogItemId) && Array.isArray(doc.poolBodies)) {
+        const snap = snapWaterWallFixture(doc.poolBodies, o.position, 2500);
+        if (snap) {
+          position = snap.position;
+          rotationDeg = snap.rotationDeg;
+          parentBodyId = snap.bodyId;
+        }
+      }
+
+      let personSex: "female" | "male" | undefined;
+      let personOutfitId: string | undefined;
+      let heightMm =
+        o.heightMm != null && o.heightMm > 0
+          ? o.heightMm
+          : defaultObjectHeightMm(catalogItemId);
+      let nextWidth = widthMm;
+      let nextDepth = depthMm;
+      if (isPerson) {
+        personSex = resolvePersonSex(o.personSex);
+        personOutfitId = resolvePersonOutfitId(o.personOutfitId);
+        heightMm = resolvePersonHeightMm(
+          o.heightMm != null && o.heightMm > 0
+            ? o.heightMm
+            : defaultPersonHeightMm(personSex),
+        );
+        const foot = personFootprintMm(heightMm, personSex);
+        nextWidth = foot.widthMm;
+        nextDepth = foot.depthMm;
+      }
+
       return {
         ...o,
         catalogItemId,
         name,
-        widthMm,
-        depthMm,
+        widthMm: nextWidth,
+        depthMm: nextDepth,
+        position,
+        rotationDeg,
+        parentBodyId,
         frameFinishId,
         fabricFinishId,
-        heightMm:
-          o.heightMm != null && o.heightMm > 0
-            ? o.heightMm
-            : defaultObjectHeightMm(catalogItemId),
+        heightMm,
+        hasLedLight: isBubbler ? o.hasLedLight === true : undefined,
+        personSex,
+        personOutfitId,
       };
     }),
     features: Array.isArray(doc.features) ? doc.features : [],
@@ -194,25 +273,43 @@ export function normalizeDesignDocument(
     gradeOptions: normalizeGradeOptions(doc.gradeOptions),
     buildings: (Array.isArray(doc.buildings) ? doc.buildings : []).map((b) => {
       const stories = Math.max(1, b.stories || 1);
+      const ceilingHeightMm = resolveCeilingHeightMm(
+        typeof b.ceilingHeightMm === "number" ? b.ceilingHeightMm : undefined,
+      );
+      const exteriorFinishId = resolveHouseExteriorFinishId(
+        b.exteriorFinishId,
+      );
+      const exteriorColor =
+        exteriorFinishId === HOUSE_EXTERIOR_CUSTOM_ID
+          ? clampHouseExteriorColor(b.exteriorColor)
+          : undefined;
       return {
         ...b,
         stories,
+        ceilingHeightMm,
         kind: b.kind ?? "house",
+        exteriorFinishId,
+        ...(exteriorColor ? { exteriorColor } : { exteriorColor: undefined }),
         openings: (b.openings ?? []).map((o) => {
-          const defaults = defaultOpeningSize(
-            o.kind === "sliding_door" || o.kind === "window" ? o.kind : "door",
-          );
+          const kind =
+            o.kind === "sliding_door" || o.kind === "window"
+              ? o.kind
+              : "door";
+          const defaults = defaultOpeningSize(kind);
           return {
             ...o,
-            kind:
-              o.kind === "sliding_door" || o.kind === "window"
-                ? o.kind
-                : "door",
+            kind,
             widthMm: o.widthMm > 0 ? o.widthMm : defaults.widthMm,
             heightMm: o.heightMm > 0 ? o.heightMm : defaults.heightMm,
             edgeIndex: Math.max(0, o.edgeIndex | 0),
             t: Math.min(1, Math.max(0, o.t ?? 0.5)),
             story: clampOpeningStory(o.story, stories),
+            sillAboveFloorMm: openingSillAboveFloorMm(
+              kind,
+              typeof o.sillAboveFloorMm === "number"
+                ? o.sillAboveFloorMm
+                : defaultSillAboveFloorMm(kind),
+            ),
           };
         }),
       };
@@ -256,6 +353,8 @@ export function normalizeDesignDocument(
             kind === "spa"
               ? (p.shellHeightMm ?? DEFAULT_SPA_SHELL_HEIGHT_MM)
               : p.shellHeightMm,
+          spillover:
+            kind === "spa" ? normalizeSpaSpillover(p.spillover) : undefined,
         };
         if (
           kind === "pool" &&
@@ -275,8 +374,120 @@ export function normalizeDesignDocument(
       },
     ),
     plumbingRuns: Array.isArray(doc.plumbingRuns) ? doc.plumbingRuns : [],
+    fences: normalizeFences(doc.fences),
     estimate: normalizeEstimate(doc.estimate),
   };
+}
+
+function clampFinite(n: unknown, fallback: number, min: number, max: number): number {
+  if (typeof n !== "number" || !Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+/** Clamp authorable spa spillover fields; undefined when absent. */
+function normalizeSpaSpillover(
+  raw: SpaSpillover | undefined,
+): SpaSpillover | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const style = isSpaSpilloverStyle(raw.style) ? raw.style : undefined;
+  const out: SpaSpillover = {
+    enabled: raw.enabled !== false,
+  };
+  if (typeof raw.targetPoolId === "string" && raw.targetPoolId.trim()) {
+    out.targetPoolId = raw.targetPoolId.trim();
+  }
+  if (typeof raw.edgeIndex === "number" && Number.isFinite(raw.edgeIndex)) {
+    out.edgeIndex = Math.max(0, Math.floor(raw.edgeIndex));
+  }
+  if (raw.widthMm != null) {
+    out.widthMm = clampFinite(raw.widthMm, 24 * IN, 50, 50_000);
+  }
+  if (raw.offsetMm != null) {
+    out.offsetMm = clampFinite(raw.offsetMm, 0, -20_000, 20_000);
+  }
+  if (raw.notchDepthMm != null) {
+    out.notchDepthMm = clampFinite(raw.notchDepthMm, 1.5 * IN, 5, 600);
+  }
+  if (style) out.style = style;
+  if (raw.scupperCount != null) {
+    out.scupperCount = Math.round(clampFinite(raw.scupperCount, 3, 2, 8));
+  }
+  if (raw.scupperGapMm != null) {
+    out.scupperGapMm = clampFinite(raw.scupperGapMm, 4 * IN, 10, 2000);
+  }
+  // Explicit disable
+  if (raw.enabled === false) out.enabled = false;
+  return out;
+}
+
+function normalizeFences(fences: FenceRun[] | undefined): FenceRun[] {
+  if (!Array.isArray(fences)) return [];
+  return fences
+    .filter(
+      (f) =>
+        f &&
+        typeof f.id === "string" &&
+        Array.isArray(f.points) &&
+        f.points.length >= 2,
+    )
+    .map((f) => {
+      const kind = isFenceKind(f.kind) ? f.kind : "aluminum";
+      const heightMm =
+        typeof f.heightMm === "number" &&
+        Number.isFinite(f.heightMm) &&
+        f.heightMm > 0
+          ? f.heightMm
+          : defaultFenceHeightMm(kind);
+      const finish = resolveFenceFinish(kind, f.finishId);
+      const gates = normalizeFenceGates(f.gates, f.points.length, heightMm);
+      return {
+        ...f,
+        kind,
+        name: typeof f.name === "string" && f.name.trim() ? f.name : "Fence",
+        heightMm,
+        finishId: finish.id,
+        gates,
+      };
+    });
+}
+
+function normalizeFenceGates(
+  gates: FenceGate[] | undefined,
+  pointCount: number,
+  fenceHeightMm: number,
+): FenceGate[] {
+  if (!Array.isArray(gates) || pointCount < 2) return [];
+  const maxEdge = pointCount - 2;
+  return gates
+    .filter((g) => g && typeof g.id === "string")
+    .map((g) => {
+      const kind = isGateKind(g.kind) ? g.kind : "swing";
+      const defaults = defaultGateSize(kind);
+      const widthMm =
+        typeof g.widthMm === "number" &&
+        Number.isFinite(g.widthMm) &&
+        g.widthMm > 0
+          ? g.widthMm
+          : defaults.widthMm;
+      const heightMm =
+        typeof g.heightMm === "number" &&
+        Number.isFinite(g.heightMm) &&
+        g.heightMm > 0
+          ? g.heightMm
+          : fenceHeightMm;
+      return {
+        ...g,
+        kind,
+        edgeIndex: Math.min(maxEdge, Math.max(0, g.edgeIndex | 0)),
+        t: Math.min(1, Math.max(0, g.t ?? 0.5)),
+        widthMm,
+        heightMm,
+        finishId:
+          g.finishId && isFenceFinishId(g.finishId)
+            ? g.finishId
+            : undefined,
+      };
+    });
 }
 
 function normalizeGradeSamples(

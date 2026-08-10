@@ -78,6 +78,10 @@ export const PIPE_RETURN_BRANCH_MM = 38.1; // 1.5"
 export const PIPE_FEATURE_MM = 25.4; // 1"
 /** Parallel suction/return separation in the trench */
 export const PARALLEL_OFFSET_MM = 12 * IN;
+/** Buried trench centerline depth (mm below grade) */
+export const TRENCH_ELEV_MM = -420;
+/** Offset from equipment port to ground stub where body trenches land */
+const STUB_OFFSET_MM = 14 * IN;
 
 export const PAD_EQUIPMENT_IDS = [
   "equip_pad",
@@ -375,48 +379,414 @@ export type EquipmentConnection = {
   label: string;
 };
 
+/** Hydraulic order on the pad (suction → … → returns). */
+const PAD_FLOW_ORDER = [
+  "pump_variable_speed",
+  "filter_cartridge",
+  "heater_gas",
+  "salt_chlorinator",
+] as const;
+
+type LocalXZ = { lx: number; lz: number };
+
+/**
+ * Mesh-local (lx along width / Three X, lz along depth / Three Z) → plan mm.
+ * Matches CatalogObjectMesh placement: Three Y-rot by rotationDeg + planToWorldXZ mirror.
+ */
+export function equipmentLocalToPlan(
+  obj: PlacedObject,
+  lxMm: number,
+  lzMm: number,
+): PointMm {
+  const rad = ((obj.rotationDeg ?? 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return {
+    x: obj.position.x - lxMm * cos - lzMm * sin,
+    y: obj.position.y + lxMm * sin - lzMm * cos,
+  };
+}
+
+/** Two union ports in mesh-local mm for a pad equipment piece. */
+export function equipmentLocalPorts(obj: PlacedObject): [LocalXZ, LocalXZ] {
+  const w = Math.max(100, obj.widthMm ?? 600);
+  const d = Math.max(100, obj.depthMm ?? 400);
+  const id = obj.catalogItemId;
+
+  if (id === "pump_variable_speed" || id.includes("pump")) {
+    return [
+      { lx: -0.48 * w, lz: 0.28 * d },
+      { lx: -0.48 * w, lz: -0.28 * d },
+    ];
+  }
+  if (id === "filter_cartridge" || id.includes("filter")) {
+    const r = Math.min(w, d) * 0.42;
+    return [
+      { lx: r * 0.95, lz: 0 },
+      { lx: -r * 0.95, lz: 0 },
+    ];
+  }
+  if (id === "heater_gas" || id.includes("heater")) {
+    return [
+      { lx: 0.25 * w, lz: -0.48 * d },
+      { lx: -0.25 * w, lz: -0.48 * d },
+    ];
+  }
+  if (id === "salt_chlorinator" || id.includes("salt")) {
+    const half = (w * 0.72) / 2 + 40;
+    return [
+      { lx: half, lz: 0 },
+      { lx: -half, lz: 0 },
+    ];
+  }
+  return [
+    { lx: -0.4 * w, lz: 0.3 * d },
+    { lx: -0.4 * w, lz: -0.3 * d },
+  ];
+}
+
+/** Port height above grade (mm) matching PadEquipmentMesh union elevations. */
+export function equipmentPortElevMm(obj: PlacedObject): number {
+  const h = Math.max(150, obj.heightMm ?? 500);
+  const d = Math.max(100, obj.depthMm ?? 400);
+  const id = obj.catalogItemId;
+  if (id === "pump_variable_speed" || id.includes("pump")) {
+    return Math.round(h * 0.55 * 0.35);
+  }
+  if (id === "filter_cartridge" || id.includes("filter")) {
+    return Math.round(80 + h * 0.78 * 0.22);
+  }
+  if (id === "heater_gas" || id.includes("heater")) {
+    return Math.round(h * 0.82 * 0.25);
+  }
+  if (id === "salt_chlorinator" || id.includes("salt")) {
+    const cellR = Math.min(d * 0.35, h * 0.28);
+    return Math.round(cellR + 80);
+  }
+  return Math.round(h * 0.25);
+}
+
+export type EquipmentPortPair = {
+  obj: PlacedObject;
+  ports: [PointMm, PointMm];
+  elevMm: number;
+};
+
+export function equipmentPortPair(obj: PlacedObject): EquipmentPortPair {
+  const [a, b] = equipmentLocalPorts(obj);
+  return {
+    obj,
+    ports: [
+      equipmentLocalToPlan(obj, a.lx, a.lz),
+      equipmentLocalToPlan(obj, b.lx, b.lz),
+    ],
+    elevMm: equipmentPortElevMm(obj),
+  };
+}
+
+/** Prefer the union closer to `toward` as the connection face. */
+export function pickFacingPort(
+  pair: EquipmentPortPair,
+  toward: PointMm,
+): { near: PointMm; far: PointMm } {
+  const [a, b] = pair.ports;
+  if (dist(a, toward) <= dist(b, toward)) return { near: a, far: b };
+  return { near: b, far: a };
+}
+
+function padFlowEquipment(design: DesignDocument): PlacedObject[] {
+  const equip = (design.objects ?? []).filter(isPadEquipment);
+  const out: PlacedObject[] = [];
+  for (const id of PAD_FLOW_ORDER) {
+    const o = equip.find((e) => e.catalogItemId === id);
+    if (o) out.push(o);
+  }
+  return out;
+}
+
+/** Ground stub outside a port, away from the equipment cluster. */
+function groundStubNear(
+  port: PointMm,
+  awayFrom: PointMm,
+  offsetMm = STUB_OFFSET_MM,
+): PointMm {
+  const dx = port.x - awayFrom.x;
+  const dy = port.y - awayFrom.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) {
+    return { x: port.x + offsetMm, y: port.y };
+  }
+  return {
+    x: port.x + (dx / len) * offsetMm,
+    y: port.y + (dy / len) * offsetMm,
+  };
+}
+
+function simpleOrtho(a: PointMm, b: PointMm): PointMm[] {
+  if (Math.abs(a.x - b.x) < 1 || Math.abs(a.y - b.y) < 1) {
+    return dedupePoints([a, b]);
+  }
+  return dedupePoints([a, { x: b.x, y: a.y }, b]);
+}
+
+function zipElevations(
+  points: PointMm[],
+  elevationsMm: number[],
+): { points: PointMm[]; elevationsMm: number[] } {
+  const pts: PointMm[] = [];
+  const elevs: number[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const e = elevationsMm[i] ?? TRENCH_ELEV_MM;
+    const last = pts[pts.length - 1];
+    if (
+      last &&
+      dist(last, p) < 1 &&
+      Math.abs((elevs[elevs.length - 1] ?? 0) - e) < 1
+    ) {
+      continue;
+    }
+    pts.push(p);
+    elevs.push(e);
+  }
+  return { points: pts, elevationsMm: elevs };
+}
+
+/**
+ * Vertical riser + buried ortho between two pad ports (or stub ↔ port).
+ * Elevations: port height → trench → trench → port height.
+ */
+function padPipePath(
+  from: PointMm,
+  fromElev: number,
+  to: PointMm,
+  toElev: number,
+): { points: PointMm[]; elevationsMm: number[] } {
+  const buried = simpleOrtho(from, to);
+  const points: PointMm[] = [];
+  const elevationsMm: number[] = [];
+  points.push(from);
+  elevationsMm.push(fromElev);
+  if (Math.abs(fromElev - TRENCH_ELEV_MM) > 1) {
+    points.push(from);
+    elevationsMm.push(TRENCH_ELEV_MM);
+  }
+  for (const p of buried.slice(1)) {
+    points.push(p);
+    elevationsMm.push(TRENCH_ELEV_MM);
+  }
+  const last = points[points.length - 1];
+  if (!last || dist(last, to) > 1) {
+    points.push(to);
+    elevationsMm.push(TRENCH_ELEV_MM);
+  }
+  if (Math.abs(toElev - TRENCH_ELEV_MM) > 1) {
+    points.push(to);
+    elevationsMm.push(toElev);
+  }
+  return zipElevations(points, elevationsMm);
+}
+
+function makePadRun(opts: {
+  name: string;
+  circuit: PlumbingRun["circuit"];
+  points: PointMm[];
+  elevationsMm: number[];
+  pipeDiameterMm: number;
+  equipmentObjectId: string;
+}): PlumbingRun {
+  return {
+    id: newId("run"),
+    name: opts.name,
+    circuit: opts.circuit,
+    points: opts.points,
+    elevationsMm: opts.elevationsMm,
+    pipeDiameterMm: opts.pipeDiameterMm,
+    equipmentObjectId: opts.equipmentObjectId,
+    padLocal: true,
+  };
+}
+
+/**
+ * Build pad-local manifold: ground stubs + risers into each piece in
+ * pump → filter → heater → salt order, independent of placement layout.
+ */
+export function buildPadManifoldRuns(design: DesignDocument): PlumbingRun[] {
+  const chain = padFlowEquipment(design);
+  if (!chain.length) return [];
+
+  const equipId =
+    chain[0].id ||
+    (design.objects ?? []).find((o) => o.catalogItemId === "equip_pad")?.id ||
+    chain[0].id;
+  const pairs = chain.map(equipmentPortPair);
+  const runs: PlumbingRun[] = [];
+
+  // Suction: ground stub → pump (or first unit) suction port
+  const first = pairs[0];
+  // Prefer the port facing away from the next unit for suction in
+  const suctionPort =
+    pairs.length === 1
+      ? first.ports[0]
+      : pickFacingPort(first, pairs[1].obj.position).far;
+  const suctionStub = groundStubNear(suctionPort, first.obj.position);
+  {
+    const path = padPipePath(
+      suctionStub,
+      TRENCH_ELEV_MM,
+      suctionPort,
+      first.elevMm,
+    );
+    runs.push(
+      makePadRun({
+        name: "Pad suction riser → pump",
+        circuit: "suction",
+        points: path.points,
+        elevationsMm: path.elevationsMm,
+        pipeDiameterMm: PIPE_SUCTION_MM,
+        equipmentObjectId: equipId,
+      }),
+    );
+  }
+
+  // Pressure chain: each unit discharge → next inlet
+  for (let i = 0; i < pairs.length - 1; i++) {
+    const a = pairs[i];
+    const b = pairs[i + 1];
+    const fromPort = pickFacingPort(a, b.obj.position).near;
+    const toPort = pickFacingPort(b, a.obj.position).near;
+    const path = padPipePath(fromPort, a.elevMm, toPort, b.elevMm);
+    const fromName = a.obj.name || a.obj.catalogItemId;
+    const toName = b.obj.name || b.obj.catalogItemId;
+    runs.push(
+      makePadRun({
+        name: `Pad ${fromName} → ${toName}`,
+        circuit: "return",
+        points: path.points,
+        elevationsMm: path.elevationsMm,
+        pipeDiameterMm: PIPE_RETURN_MM,
+        equipmentObjectId: equipId,
+      }),
+    );
+  }
+
+  // Return: last discharge → ground stub
+  const last = pairs[pairs.length - 1];
+  const returnPort =
+    pairs.length === 1
+      ? last.ports[1]
+      : pickFacingPort(last, pairs[pairs.length - 2].obj.position).far;
+  const returnStub = groundStubNear(returnPort, last.obj.position);
+  {
+    const path = padPipePath(
+      returnPort,
+      last.elevMm,
+      returnStub,
+      TRENCH_ELEV_MM,
+    );
+    runs.push(
+      makePadRun({
+        name: "Pad return riser → trench",
+        circuit: "return",
+        points: path.points,
+        elevationsMm: path.elevationsMm,
+        pipeDiameterMm: PIPE_RETURN_MM,
+        equipmentObjectId: equipId,
+      }),
+    );
+  }
+
+  return runs;
+}
+
+/** Ground stubs where body trenches meet the pad manifold. */
+export function padManifoldStubs(design: DesignDocument): {
+  suctionStub: PointMm;
+  returnStub: PointMm;
+  equipmentObjectId: string;
+  label: string;
+} | null {
+  const chain = padFlowEquipment(design);
+  const pad = (design.objects ?? []).find(
+    (o) => o.catalogItemId === "equip_pad",
+  );
+  if (!chain.length && !pad) return null;
+
+  if (!chain.length && pad) {
+    return {
+      suctionStub: pad.position,
+      returnStub: {
+        x: pad.position.x + 12 * IN,
+        y: pad.position.y,
+      },
+      equipmentObjectId: pad.id,
+      label: pad.name || "Equipment pad",
+    };
+  }
+
+  const pairs = chain.map(equipmentPortPair);
+  const first = pairs[0];
+  const last = pairs[pairs.length - 1];
+  const suctionPort =
+    pairs.length === 1
+      ? first.ports[0]
+      : pickFacingPort(first, pairs[1].obj.position).far;
+  const returnPort =
+    pairs.length === 1
+      ? last.ports[1]
+      : pickFacingPort(last, pairs[pairs.length - 2].obj.position).far;
+
+  const label =
+    chain.length > 1
+      ? "Equipment pad"
+      : chain[0].name || "Equipment";
+
+  return {
+    suctionStub: groundStubNear(suctionPort, first.obj.position),
+    returnStub: groundStubNear(returnPort, last.obj.position),
+    equipmentObjectId: (chain[0] ?? pad)!.id,
+    label,
+  };
+}
+
+/** Strip and rebuild pad-local manifold runs. */
+export function ensurePadManifoldPlumbing(
+  design: DesignDocument,
+): DesignDocument {
+  const kept = design.plumbingRuns.filter((r) => !r.padLocal);
+  const padRuns = buildPadManifoldRuns(design);
+  if (!padRuns.length && kept.length === design.plumbingRuns.length) {
+    return design;
+  }
+  return { ...design, plumbingRuns: [...kept, ...padRuns] };
+}
+
 /** Resolve pad equipment into suction/return connection points. */
 export function resolveEquipmentConnection(
   design: DesignDocument,
   near?: PointMm,
 ): EquipmentConnection | null {
+  const stubs = padManifoldStubs(design);
+  if (stubs) {
+    return {
+      suctionTarget: stubs.suctionStub,
+      returnOrigin: stubs.returnStub,
+      equipmentObjectId: stubs.equipmentObjectId,
+      label: stubs.label,
+    };
+  }
+
   const equip = (design.objects ?? []).filter(isPadEquipment);
   if (!equip.length) return null;
 
-  const pad = equip.find((o) => o.catalogItemId === "equip_pad");
-  const pump = equip.find((o) => o.catalogItemId === "pump_variable_speed");
-  const filter = equip.find((o) => o.catalogItemId === "filter_cartridge");
-  const heater = equip.find((o) => o.catalogItemId === "heater_gas");
-  const salt = equip.find((o) => o.catalogItemId === "salt_chlorinator");
-
-  const anchor =
-    pump ??
-    pad ??
-    filter ??
-    heater ??
-    salt ??
-    nearestObject(equip, near ?? { x: 0, y: 0 });
-
+  const anchor = nearestObject(equip, near ?? { x: 0, y: 0 });
   if (!anchor) return null;
 
-  const suctionTarget = pump?.position ?? pad?.position ?? anchor.position;
-  const returnOrigin =
-    salt?.position ??
-    heater?.position ??
-    filter?.position ??
-    pump?.position ??
-    pad?.position ??
-    anchor.position;
-
-  const parts = [pump, filter, heater, salt, pad].filter(Boolean) as PlacedObject[];
-  const label =
-    parts.length > 1 ? "Equipment pad" : anchor.name || "Equipment";
-
   return {
-    suctionTarget,
-    returnOrigin,
-    equipmentObjectId: (pump ?? pad ?? anchor).id,
-    label,
+    suctionTarget: anchor.position,
+    returnOrigin: anchor.position,
+    equipmentObjectId: anchor.id,
+    label: anchor.name || "Equipment",
   };
 }
 
@@ -676,11 +1046,11 @@ export function connectBodiesToEquipment(
     );
   }
 
-  if (!newRuns.length) return design;
-  return {
+  if (!newRuns.length) return ensurePadManifoldPlumbing(design);
+  return ensurePadManifoldPlumbing({
     ...design,
     plumbingRuns: [...design.plumbingRuns, ...newRuns],
-  };
+  });
 }
 
 /** Fallback stub pad point when no equipment has been placed yet. */
@@ -758,7 +1128,7 @@ export function rebuildBodyPlumbing(
 
   const hasPad = !!resolveEquipmentConnection(design);
   if (!hasPad && fixtures.length === 0) {
-    return { ...design, plumbingRuns };
+    return ensurePadManifoldPlumbing({ ...design, plumbingRuns });
   }
 
   const obstacles = obstaclesFromDesign(design);
@@ -787,10 +1157,10 @@ export function rebuildBodyPlumbing(
       : { ...r, equipmentObjectId: undefined },
   );
 
-  return {
+  return ensurePadManifoldPlumbing({
     ...design,
     plumbingRuns: [...plumbingRuns, ...newRuns],
-  };
+  });
 }
 
 /** Rebuild auto plumbing for every water body (e.g. after pad move/delete). */
@@ -798,6 +1168,10 @@ export function syncAllBodiesPlumbing(design: DesignDocument): DesignDocument {
   let next = design;
   for (const body of design.poolBodies) {
     next = rebuildBodyPlumbing(next, body.id);
+  }
+  // When no bodies remain, still refresh / clear pad manifold.
+  if (design.poolBodies.length === 0) {
+    next = ensurePadManifoldPlumbing(next);
   }
   return next;
 }

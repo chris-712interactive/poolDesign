@@ -20,8 +20,10 @@ const CadScene3DInner = dynamic(
 type Props = {
   design: DesignDocument;
   projectId: string;
+  projectName: string;
   selection: SceneSelection | null;
   onSelect: (sel: SceneSelection | null) => void;
+  onDelete?: () => void;
 };
 
 export function CadScene3DDynamic(props: Props) {

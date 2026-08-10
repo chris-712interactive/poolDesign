@@ -2,6 +2,7 @@
 
 import { useContext, useMemo } from "react";
 import type { ThreeEvent } from "@react-three/fiber";
+import * as THREE from "three";
 import type { CanvasTexture } from "three";
 import type { BuildingOpeningKind } from "@pool-design/shared";
 import type { BoxDescriptor, SceneSelection } from "@/lib/cad3d/buildScene";
@@ -68,27 +69,38 @@ function Mat({
 
 function GlassMat({
   selected,
-  color = "#6eb8d4",
-  opacity = 0.45,
+  color = "#d7eef6",
+  /** 0 = clear glass, 1 = frosted / tinted. */
+  tint = 0.08,
 }: {
   selected: boolean;
   color?: string;
-  opacity?: number;
+  tint?: number;
 }) {
   const clippingPlanes = useContext(ClipPlanesContext);
   return (
-    <meshStandardMaterial
+    <meshPhysicalMaterial
       color={color}
-      roughness={0.05}
-      metalness={0.55}
+      roughness={0.03}
+      metalness={0}
+      // High transmission + near-opaque alpha = clear glass that still refracts.
+      transmission={0.96}
+      thickness={0.02}
+      ior={1.5}
+      clearcoat={1}
+      clearcoatRoughness={0.04}
       transparent
-      opacity={opacity}
+      opacity={1 - tint * 0.35}
       depthWrite={false}
+      side={THREE.DoubleSide}
+      envMapIntensity={2.1}
+      specularIntensity={1}
+      specularColor="#ffffff"
       polygonOffset
       polygonOffsetFactor={-2}
       polygonOffsetUnits={-2}
-      emissive={selected ? "#1f8a70" : "#4a90a8"}
-      emissiveIntensity={selected ? 0.18 : 0.12}
+      emissive={selected ? "#1f8a70" : "#000000"}
+      emissiveIntensity={selected ? 0.2 : 0}
       clippingPlanes={clippingPlanes}
       clipShadows={clippingPlanes.length > 0}
     />
@@ -230,11 +242,6 @@ export function OpeningMesh({ desc, selected, onSelect }: Props) {
     ];
     return (
       <group {...groupProps}>
-        {/* Dark reveal so the opening reads as a punched hole */}
-        <mesh position={[0, 0, -0.03]}>
-          <boxGeometry args={[w - 0.01, h - 0.01, 0.04]} />
-          <Mat color="#2a3238" roughness={0.9} selected={selected} />
-        </mesh>
         <FrameShell
           w={w}
           h={h}
@@ -268,8 +275,14 @@ export function OpeningMesh({ desc, selected, onSelect }: Props) {
         </mesh>
         {xs.map((x, ix) =>
           ys.map((y, iy) => (
-            <mesh key={`${ix}-${iy}`} position={[x, y, glassZ]}>
-              <boxGeometry args={[paneW * 0.96, paneH * 0.96, 0.012]} />
+            <mesh
+              key={`${ix}-${iy}`}
+              position={[x, y, glassZ]}
+              // Glass must not cast opaque shadows into the room.
+              castShadow={false}
+              receiveShadow={false}
+            >
+              <boxGeometry args={[paneW * 0.96, paneH * 0.96, 0.008]} />
               <GlassMat selected={selected} />
             </mesh>
           )),
@@ -284,10 +297,6 @@ export function OpeningMesh({ desc, selected, onSelect }: Props) {
     const panelH = h - stile * 2;
     return (
       <group {...groupProps}>
-        <mesh position={[0, 0, -0.03]}>
-          <boxGeometry args={[w - 0.01, h - 0.01, 0.04]} />
-          <Mat color="#2a3238" roughness={0.9} selected={selected} />
-        </mesh>
         <FrameShell
           w={w}
           h={h}
@@ -310,9 +319,13 @@ export function OpeningMesh({ desc, selected, onSelect }: Props) {
         </mesh>
         {([-1, 1] as const).map((side) => (
           <group key={side} position={[(panelW / 2 + stile / 2) * side, 0, 0]}>
-            <mesh position={[0, 0, -0.01]}>
-              <boxGeometry args={[panelW * 0.92, panelH * 0.92, 0.014]} />
-              <GlassMat selected={selected} opacity={0.5} color="#7ec0d6" />
+            <mesh
+              position={[0, 0, 0]}
+              castShadow={false}
+              receiveShadow={false}
+            >
+              <boxGeometry args={[panelW * 0.92, panelH * 0.92, 0.01]} />
+              <GlassMat selected={selected} tint={0.06} color="#cfeaf4" />
             </mesh>
             {/* Panel frame */}
             <mesh position={[0, panelH / 2 - stile * 0.35, 0.025]} castShadow>

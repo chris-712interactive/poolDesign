@@ -1,0 +1,3 @@
+Scale-figure avatars are Ready Player Me / Wolf3D-style GLBs
+(realistic-male.glb, realistic-female.glb) used for architectural
+scale reference. Outfit colors are applied at runtime.

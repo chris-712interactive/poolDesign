@@ -3,13 +3,16 @@ import type { DesignDocument, PointMm, PoolBody } from "./design-model";
 import {
   approximateIntersectionAreaMm2,
   exposedWaterPerimeterMm,
+  fenceBillableLengthMm,
   polygonAreaMm2,
   polygonPerimeterMm,
   polylineLengthMm,
   segmentLengthMm,
   sharedBoundaryLengthMm,
+  type FenceKind,
+  type GateKind,
 } from "./design-model";
-import { getPlaceableItem } from "./object-library";
+import { getPlaceableItem, isBubblerId } from "./object-library";
 import { isPadEquipmentId } from "./plumbing-route";
 import {
   analyzeDesignGrade,
@@ -318,6 +321,28 @@ export function buildTakeoff(
   push("pergola_structure", mm2ToSf(pergolaAreaMm2), "sf", "Pergola footprint");
   push("patio_cover_roof", mm2ToSf(roofAreaMm2), "sf", "Patio roof footprint");
 
+  const fences = design.fences ?? [];
+  const fenceLfByKind = new Map<FenceKind, number>();
+  const gateCountByKind = new Map<GateKind, number>();
+  let fenceLfTotal = 0;
+  for (const fence of fences) {
+    const lf = mmToLf(fenceBillableLengthMm(fence));
+    fenceLfTotal += lf;
+    fenceLfByKind.set(fence.kind, (fenceLfByKind.get(fence.kind) ?? 0) + lf);
+    for (const gate of fence.gates ?? []) {
+      gateCountByKind.set(
+        gate.kind,
+        (gateCountByKind.get(gate.kind) ?? 0) + 1,
+      );
+    }
+  }
+  for (const [kind, lf] of fenceLfByKind) {
+    push(`fence_${kind}`, lf, "lf", "Fence length (gate openings deducted)");
+  }
+  for (const [kind, count] of gateCountByKind) {
+    push(`gate_${kind}`, count, "ea", "Fence gate");
+  }
+
   push(
     "pipe_pvc_schedule40",
     mmToLf(pipeMm),
@@ -384,6 +409,10 @@ export function buildTakeoff(
     return true;
   }).length;
 
+  const bubblerLedCount = (design.objects ?? []).filter(
+    (o) => isBubblerId(o.catalogItemId) && o.hasLedLight,
+  ).length;
+
   const laborHrs =
     shellSf * 0.12 +
     mm2ToSf(poolAreaMm2) * 0.08 +
@@ -393,10 +422,13 @@ export function buildTakeoff(
     mmToLf(waterPerimeterMm) * 0.2 +
     mmToLf(spaFootingMm) * 0.15 +
     coverCount * POST_FOOTINGS_PER_COVER * 1.5 +
+    fenceLfTotal * 0.35 +
+    [...gateCountByKind.values()].reduce((s, n) => s + n, 0) * 1.5 +
     poolCount * 24 +
     spaCount * 16 +
     avgDepthIn * 0.5 +
     billableObjectCount * 0.5 +
+    bubblerLedCount * 0.35 +
     stepsCount * 4 +
     benchLf * 0.4 +
     mm2ToSf(sunshelfAreaMm2) * 0.15;
@@ -430,6 +462,16 @@ export function buildTakeoff(
       note,
       lineKey: takeoffLineKey(catalogItemId, note),
     });
+  }
+
+  // Optional niche LEDs under bubbler fountains.
+  if (bubblerLedCount > 0) {
+    push(
+      "bubbler_led",
+      bubblerLedCount,
+      "ea",
+      "Optional LED under bubbler fountain",
+    );
   }
 
   const removedKeys = new Set(design.estimate?.removedLineKeys ?? []);

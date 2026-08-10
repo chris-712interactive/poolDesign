@@ -21,10 +21,20 @@ import {
   isRectangularOutline,
   maxDepthMmFromProfile,
   clampOpeningStory,
+  clampOpeningT,
   coverSupportFootingSizeMm,
   coverSupportPostSizeMm,
+  defaultFenceHeightMm,
+  fenceFinishHex,
+  FENCE_THICKNESS_MM,
+  gateEndpoints,
+  houseExteriorHex,
   mmToMeters,
   openingSillMm,
+  resolveCeilingHeightMm,
+  resolveFenceFinish,
+  resolveHouseExteriorColor,
+  FLOOR_STRUCTURE_THICKNESS_MM,
   STANDARD_STEP_RISER_MM,
   stepsRiserCount,
   stepsTreadOutline,
@@ -40,14 +50,22 @@ import {
   spaShellParams,
   spaTotalDepthMm,
   subtractAabbHoles,
+  resolveSpaSpillover,
+  spilloverOmitIntervals,
+  wallSegmentsMinusIntervals,
   waterBodiesConnected,
   waterBodyKind,
   type BuildingOpeningKind,
   type DepthTransition,
   type DesignDocument,
   type PointMm,
+  type ResolvedSpaSpillover,
 } from "@pool-design/shared";
-import { openingEndpoints } from "@/lib/cad/draw";
+import {
+  openOutlineRing,
+  openingEndpoints,
+  resolveOpeningEdge,
+} from "@/lib/cad/draw";
 
 /** Mirrors CadWorkspace selection (non-null). */
 export type SceneSelection =
@@ -58,6 +76,8 @@ export type SceneSelection =
   | { kind: "cover"; id: string }
   | { kind: "coverSupport"; coverId: string; id: string }
   | { kind: "run"; id: string }
+  | { kind: "fence"; id: string }
+  | { kind: "gate"; fenceId: string; id: string }
   | { kind: "object"; id: string }
   | { kind: "feature"; id: string };
 
@@ -86,7 +106,9 @@ export type SceneMaterialKey =
   | "sectionCap"
   | "sectionWater"
   | "fill"
-  | "retaining";
+  | "retaining"
+  | "fence"
+  | "gate";
 
 /** Optional presentation toggles for the 3D preview. */
 export type SceneBuildOptions = {
@@ -138,6 +160,69 @@ export type BoxDescriptor = {
   frameFinishId?: string;
   /** Furniture cushion / canopy finish id. */
   fabricFinishId?: string;
+  /** Optional solid color override (e.g. fence powder coat). */
+  colorHex?: string;
+  /**
+   * Pitch around local Z after yaw (radians). Positive raises +local X.
+   * Used for fence rails that follow grade (pickets stay plumb separately).
+   */
+  pitchRad?: number;
+  /** World-space water freeboard Y — bubbler plumes break this surface. */
+  waterSurfaceY?: number;
+  /** Bubbler niche LED under the fountain. */
+  hasLedLight?: boolean;
+  /** Scale figure sex / outfit (person_scale only). */
+  personSex?: "female" | "male";
+  personOutfitId?: string;
+} & Selectable;
+
+/**
+ * Racked fence / glass panel: top & bottom follow grade, vertical edges stay plumb.
+ * World-space bottom-rail endpoints + vertical height.
+ */
+export type FencePanelDescriptor = {
+  kind: "fencePanel";
+  id: string;
+  material: SceneMaterialKey;
+  /** World-space bottom-rail start */
+  a: { x: number; y: number; z: number };
+  /** World-space bottom-rail end */
+  b: { x: number; y: number; z: number };
+  heightM: number;
+  thicknessM: number;
+  colorHex?: string;
+  opacity?: number;
+  /**
+   * Picket width (m). When set with picketGapM, draw racked rails + plumb pickets
+   * instead of a solid parallelogram slab (glass).
+   */
+  picketWidthM?: number;
+  picketGapM?: number;
+  /** Square post size at panel ends (m). Omit for glass / no posts. */
+  postSizeM?: number;
+} & Selectable;
+
+/**
+ * Vertical wall panel with rectangular punched openings (doors / windows).
+ * Local X = along wall, Y = up, extruded along local +Z (inward).
+ */
+export type WallPanelDescriptor = {
+  kind: "wallPanel";
+  id: string;
+  material: SceneMaterialKey;
+  /** Bottom-center of the exterior face in world space. */
+  position: { x: number; y: number; z: number };
+  /** Unit along the wall in world XZ. */
+  axisX: { x: number; z: number };
+  /** Unit outward in world XZ (panel extrudes inward = −axisZ). */
+  axisZ: { x: number; z: number };
+  lengthM: number;
+  heightM: number;
+  thicknessM: number;
+  /** Holes in local coords: x along length from panel center, y up from floor. */
+  holes: { x: number; y: number; w: number; h: number }[];
+  /** Exterior wall tint (multiplies stucco albedo). */
+  colorHex?: string;
 } & Selectable;
 
 /** Shared depth-profile fields for floor / water meshes. */
@@ -224,8 +309,13 @@ export type TubeDescriptor = {
   material: SceneMaterialKey;
   pointsMm: PointMm[];
   radiusM: number;
-  /** World Y for the trench centerline */
+  /** World Y for the trench centerline when elevationsMm is omitted */
   y: number;
+  /**
+   * Optional per-point elevation above grade (mm), parallel to pointsMm.
+   * Used for pad risers into equipment.
+   */
+  elevationsMm?: number[];
 } & Selectable;
 
 /**
@@ -253,7 +343,9 @@ export type MeshDescriptor =
   | FloorDescriptor
   | WaterBodyDescriptor
   | TubeDescriptor
-  | TerrainDescriptor;
+  | TerrainDescriptor
+  | FencePanelDescriptor
+  | WallPanelDescriptor;
 
 export type SceneModel = {
   center: { x: number; z: number };
@@ -264,7 +356,16 @@ export type SceneModel = {
 };
 
 function layerVisible(design: DesignDocument, id: string): boolean {
-  return design.layers.find((l) => l.id === id)?.visible !== false;
+  const layer = design.layers.find((l) => l.id === id);
+  if (!layer) return false;
+  return layer.visible !== false;
+}
+
+/** True if any existing named layer is visible (ignores missing aliases). */
+function anyLayerVisible(design: DesignDocument, ...ids: string[]): boolean {
+  const present = ids.filter((id) => design.layers.some((l) => l.id === id));
+  if (present.length === 0) return true;
+  return present.some((id) => layerVisible(design, id));
 }
 
 function closeOutline(outline: PointMm[]): PointMm[] {
@@ -275,6 +376,26 @@ function closeOutline(outline: PointMm[]): PointMm[] {
   return [...outline, first];
 }
 
+/** Expand a plan outline away from its centroid (eaves / roof overhang). */
+function expandOutlineFromCentroid(outline: PointMm[], mm: number): PointMm[] {
+  const open =
+    outline.length > 1 &&
+    Math.hypot(
+      outline[0].x - outline[outline.length - 1].x,
+      outline[0].y - outline[outline.length - 1].y,
+    ) < 1
+      ? outline.slice(0, -1)
+      : outline;
+  if (open.length < 3) return outline;
+  const bb = outlineBounds(open);
+  return open.map((p) => {
+    const dx = p.x - bb.cx;
+    const dy = p.y - bb.cy;
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: p.x + (dx / len) * mm, y: p.y + (dy / len) * mm };
+  });
+}
+
 function selectionEquals(
   a: SceneSelection | null | undefined,
   b: SceneSelection | null | undefined,
@@ -283,6 +404,9 @@ function selectionEquals(
   if (a.kind !== b.kind) return false;
   if (a.kind === "opening" && b.kind === "opening") {
     return a.id === b.id && a.buildingId === b.buildingId;
+  }
+  if (a.kind === "gate" && b.kind === "gate") {
+    return a.id === b.id && a.fenceId === b.fenceId;
   }
   if (a.kind === "coverSupport" && b.kind === "coverSupport") {
     return a.id === b.id && a.coverId === b.coverId;
@@ -329,6 +453,11 @@ function pushWallRing(
     inward: boolean;
     /** Open wall segments that join these footprints (shared waterline). */
     openAgainst?: PointMm[][];
+    /**
+     * Omit intervals along specific outline edges (edge index → mm ranges
+     * from edge start). Used for spa spillover weir notches.
+     */
+    edgeOmits?: { edgeIndex: number; intervals: [number, number][] }[];
   },
 ) {
   const pts = ringPoints(opts.outlineMm);
@@ -338,12 +467,34 @@ function pushWallRing(
   for (let i = 0; i < pts.length; i++) {
     const a = pts[i];
     const b = pts[(i + 1) % pts.length];
-    const segments =
+    let segments =
       opts.openAgainst && opts.openAgainst.length > 0
         ? openWallSegments(a, b, opts.openAgainst)
         : Math.hypot(b.x - a.x, b.y - a.y) >= 40
           ? [{ a, b }]
           : [];
+    const omit = opts.edgeOmits?.find((o) => o.edgeIndex === i);
+    if (omit && omit.intervals.length > 0) {
+      // Notch against the full edge, then keep only pieces that remain in
+      // the openAgainst result (usually the full edge for spa shells).
+      const notched = wallSegmentsMinusIntervals(a, b, omit.intervals);
+      if (!opts.openAgainst?.length) {
+        segments = notched;
+      } else {
+        segments = notched.filter((n) =>
+          segments.some((s) => {
+            const mid = {
+              x: (n.a.x + n.b.x) / 2,
+              y: (n.a.y + n.b.y) / 2,
+            };
+            const d0 = Math.hypot(mid.x - s.a.x, mid.y - s.a.y);
+            const d1 = Math.hypot(mid.x - s.b.x, mid.y - s.b.y);
+            const span = Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y);
+            return d0 + d1 <= span + 2;
+          }),
+        );
+      }
+    }
     for (const seg of segments) {
       const edgeLen = Math.hypot(seg.b.x - seg.a.x, seg.b.y - seg.a.y);
       if (edgeLen < 40) continue;
@@ -388,6 +539,98 @@ function pushWallRing(
 }
 
 const BASIN_FLOOR_THICKNESS_M = 0.14;
+
+/** Thin cascading water sheets / scuppers from spa weir down to pool water. */
+function pushSpilloverCascades(
+  meshes: MeshDescriptor[],
+  opts: {
+    spill: ResolvedSpaSpillover;
+    spaOutline: PointMm[];
+    crestY: number;
+    poolWaterTopY: number;
+    wallThicknessMm: number;
+    select: SceneSelection;
+    idPrefix: string;
+  },
+) {
+  const drop = Math.max(0.04, opts.crestY - opts.poolWaterTopY);
+  const sheetThickMm =
+    opts.spill.style === "sheer"
+      ? 18
+      : opts.spill.style === "scuppers"
+        ? 55
+        : 40;
+  const outwardMm = opts.wallThicknessMm * 0.55 + sheetThickMm * 0.5;
+
+  let i = 0;
+  for (const opening of opts.spill.openings) {
+    const len = Math.hypot(
+      opening.b.x - opening.a.x,
+      opening.b.y - opening.a.y,
+    );
+    if (len < 40) continue;
+    const tx = (opening.b.x - opening.a.x) / len;
+    const ty = (opening.b.y - opening.a.y) / len;
+    const { nx, ny } = cascadeOutwardNormal(
+      opening.a,
+      opening.b,
+      opts.spaOutline,
+    );
+    const mid = {
+      x: (opening.a.x + opening.b.x) / 2,
+      y: (opening.a.y + opening.b.y) / 2,
+    };
+    const centerPlan = {
+      x: mid.x + nx * outwardMm,
+      y: mid.y + ny * outwardMm,
+    };
+    const xz = planToWorldXZ(centerPlan);
+    const ribbonH =
+      opts.spill.style === "sheer" ? drop * 1.05 : drop;
+    meshes.push({
+      kind: "box",
+      id: `${opts.idPrefix}_cascade_${i++}`,
+      material: "poolWater",
+      position: {
+        x: xz.x,
+        y: opts.poolWaterTopY + ribbonH / 2,
+        z: xz.z,
+      },
+      size: {
+        x: mmToMeters(len),
+        y: ribbonH,
+        z: mmToMeters(sheetThickMm),
+      },
+      rotationY: 0,
+      axisX: planDirToWorldXZ(tx, ty),
+      axisZ: planDirToWorldXZ(nx, ny),
+      select: opts.select,
+    });
+  }
+}
+
+/** Prefer cascade normal pointing toward the pool (outside the spa). */
+function cascadeOutwardNormal(
+  openingA: PointMm,
+  openingB: PointMm,
+  spaOutline: PointMm[],
+): { nx: number; ny: number } {
+  const len = Math.hypot(openingB.x - openingA.x, openingB.y - openingA.y) || 1;
+  const tx = (openingB.x - openingA.x) / len;
+  const ty = (openingB.y - openingA.y) / len;
+  let nx = -ty;
+  let ny = tx;
+  const mid = {
+    x: (openingA.x + openingB.x) / 2,
+    y: (openingA.y + openingB.y) / 2,
+  };
+  const probe = { x: mid.x + nx * 80, y: mid.y + ny * 80 };
+  if (pointInPolygon(probe, spaOutline)) {
+    nx = -nx;
+    ny = -ny;
+  }
+  return { nx, ny };
+}
 
 /** Spa floor / water / rim elevations — shared by shell meshes and fixtures. */
 function spaElevations(
@@ -434,6 +677,37 @@ function spaElevations(
 }
 
 /**
+ * Niche light depth below freeboard (meters).
+ * Jandy / industry guides: 9–12″ uniform on main walls; ~4″ on sunshelves;
+ * ~18–24″ only in very deep basins. Spa lights sit below the bench / footwell.
+ */
+const LIGHT_BELOW_WATER_MAIN_M = 0.279; // 11″
+const LIGHT_BELOW_WATER_SHELF_M = 0.102; // 4″
+const LIGHT_BELOW_WATER_DEEP_M = 0.508; // 20″ when local water > ~10′
+
+/** World Y for a wall niche light given freeboard + local floor. */
+function nicheLightCenterY(
+  waterTopY: number,
+  floorY: number,
+  opts?: { onShelf?: boolean },
+): number {
+  const waterDepth = Math.max(0.05, waterTopY - floorY);
+  let below = LIGHT_BELOW_WATER_MAIN_M;
+  if (opts?.onShelf || waterDepth < 0.5) {
+    // Sunshelf / very shallow water: 4″ under waterline (Jandy).
+    below = LIGHT_BELOW_WATER_SHELF_M;
+  } else if (waterDepth > 3.05) {
+    // Very deep end (>~10′): drop a bit further for coverage.
+    below = LIGHT_BELOW_WATER_DEEP_M;
+  }
+  const target = waterTopY - below;
+  // Keep the fixture in the water column with a little floor / surface clearance.
+  const minY = floorY + 0.06;
+  const maxY = waterTopY - 0.06;
+  return Math.min(maxY, Math.max(minY, target));
+}
+
+/**
  * Vertical center for in-water fixtures so jets / bubblers stay underwater.
  * Returns null when the object should use the default deck/ground placement.
  */
@@ -477,8 +751,16 @@ function waterFixtureCenterY(
       // Floor fixtures sit just above the basin floor.
       return elev.floorY + (isDrain ? 0.02 : 0.028);
     }
-    // Wall jet / light: mid-water, always below the surface.
-    const y = elev.floorY + waterDepth * (isLight ? 0.4 : 0.55);
+    if (isLight) {
+      // Spa niche lights: below the bench / in the footwell (~lower third).
+      const y = elev.floorY + waterDepth * 0.32;
+      return Math.min(
+        elev.waterTopY - 0.15,
+        Math.max(elev.floorY + 0.1, y),
+      );
+    }
+    // Wall jet: mid-water, always below the surface.
+    const y = elev.floorY + waterDepth * 0.55;
     return Math.min(
       elev.waterTopY - 0.09,
       Math.max(elev.floorY + 0.12, y),
@@ -486,16 +768,24 @@ function waterFixtureCenterY(
   }
 
   if (isPoolBubbler || isJet || isLight) {
-    const shelf = opts.features.find(
+    const onShelf = opts.features.some(
       (f) =>
         f.kind === "sunshelf" &&
         f.outline.length >= 3 &&
         pointInPolygon(obj.position, f.outline),
     );
-    if (shelf) {
+
+    // Floor bubblers on a sunshelf sit on the ledge — not wall lights/jets.
+    if (isPoolBubbler && onShelf) {
+      const shelf = opts.features.find(
+        (f) =>
+          f.kind === "sunshelf" &&
+          f.outline.length >= 3 &&
+          pointInPolygon(obj.position, f.outline),
+      )!;
       const shelfTop =
-        opts.poolWaterTopY - mmToMeters(featureDepthMm("sunshelf", shelf.depthMm));
-      // Bubbler head on the ledge, still under the freeboard waterline.
+        opts.poolWaterTopY -
+        mmToMeters(featureDepthMm("sunshelf", shelf.depthMm));
       return Math.min(opts.poolWaterTopY - 0.05, shelfTop + 0.022);
     }
 
@@ -503,7 +793,11 @@ function waterFixtureCenterY(
       (parentId
         ? opts.pools.find((p) => p.id === parentId)
         : undefined) ??
-      opts.pools.find((p) => pointInPolygon(obj.position, p.outline));
+      opts.pools.find((p) => pointInPolygon(obj.position, p.outline)) ??
+      // Wall fixtures sit just inside the shell — still associate with nearest pool.
+      (isJet || isLight
+        ? opts.pools.find((p) => waterBodyKind(p) !== "spa")
+        : undefined);
     if (pool && waterBodyKind(pool) !== "spa") {
       const profile = depthProfileForBody(pool);
       const t = depthTAtPlanPoint(
@@ -516,16 +810,36 @@ function waterFixtureCenterY(
       if (isPoolBubbler || isDrain) {
         return Math.min(opts.poolWaterTopY - 0.05, floorY + 0.028);
       }
+      if (isLight) {
+        // Also treat walls beside a sunshelf as shelf lighting (~4″).
+        const nearShelf = opts.features.some(
+          (f) =>
+            f.kind === "sunshelf" &&
+            f.outline.length >= 3 &&
+            // Within ~2′ of the shelf footprint in plan.
+            (() => {
+              const b = outlineBounds(f.outline);
+              const dx = Math.max(b.minX - obj.position.x, 0, obj.position.x - b.maxX);
+              const dy = Math.max(b.minY - obj.position.y, 0, obj.position.y - b.maxY);
+              return Math.hypot(dx, dy) < 600;
+            })(),
+        );
+        return nicheLightCenterY(opts.poolWaterTopY, floorY, {
+          onShelf: onShelf || nearShelf,
+        });
+      }
+      // Wall jet: mid-water for the local depth.
       const waterDepth = opts.poolWaterTopY - floorY;
       const y = floorY + waterDepth * 0.45;
       return Math.min(
-        opts.poolWaterTopY - 0.09,
-        Math.max(floorY + 0.12, y),
+        opts.poolWaterTopY - 0.12,
+        Math.max(floorY + 0.15, y),
       );
     }
 
-    // Last resort: keep under the pool waterline.
-    return opts.poolWaterTopY - 0.12;
+    // Last resort: main-wall niche depth under the freeboard.
+    if (isLight) return opts.poolWaterTopY - LIGHT_BELOW_WATER_MAIN_M;
+    return opts.poolWaterTopY - 0.18;
   }
 
   return null;
@@ -1033,23 +1347,301 @@ export function buildSceneModel(
       hasGradeSamples || groundRegions.length > 0 ? 0 : 0.04,
   };
 
-  if (layerVisible(design, "house") || layerVisible(design, "building")) {
+  if (anyLayerVisible(design, "house", "building")) {
     for (const b of design.buildings ?? []) {
       if (b.outline.length < 3) continue;
-      const hMm = buildingHeightMm(b.stories);
+      const stories = Math.max(1, b.stories || 1);
+      const ceilingMm = resolveCeilingHeightMm(b.ceilingHeightMm);
+      const hMm = buildingHeightMm(stories, ceilingMm);
       const h = mmToMeters(hMm);
       const select: SceneSelection = { kind: "building", id: b.id };
+      const colorHex = houseExteriorHex(
+        resolveHouseExteriorColor(b.exteriorFinishId, b.exteriorColor),
+      );
+      const wallTmm = 180;
+      // Exact same ring as resolveOpeningEdge / openingEndpoints.
+      const pts = openOutlineRing(b.outline);
+      const bb = outlineBounds(b.outline);
+
+      // Yard-facing edge — used for walk spawn views when no openings exist.
+      const lookBody =
+        (design.poolBodies ?? []).find(
+          (p) => p.outline.length >= 3 && waterBodyKind(p) !== "spa",
+        ) ?? (design.poolBodies ?? []).find((p) => p.outline.length >= 3);
+      const lookPlan = lookBody
+        ? outlineBounds(lookBody.outline)
+        : { cx: bb.cx, cy: bb.cy + Math.max(bb.height, 1000) };
+      let yardEdgeIndex = -1;
+      let yardToward = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i];
+        const bPt = pts[(i + 1) % pts.length];
+        const edgeLen = Math.hypot(bPt.x - a.x, bPt.y - a.y);
+        if (edgeLen < 800) continue;
+        const mid = { x: (a.x + bPt.x) / 2, y: (a.y + bPt.y) / 2 };
+        let nx = -(bPt.y - a.y) / edgeLen;
+        let ny = (bPt.x - a.x) / edgeLen;
+        if (nx * (bb.cx - mid.x) + ny * (bb.cy - mid.y) > 0) {
+          nx = -nx;
+          ny = -ny;
+        }
+        const toward = nx * (lookPlan.cx - mid.x) + ny * (lookPlan.cy - mid.y);
+        if (toward > yardToward) {
+          yardToward = toward;
+          yardEdgeIndex = i;
+        }
+      }
+
+      // Interior ground floor — hollow shell so walkthrough can stand inside.
       meshes.push({
         kind: "extrude",
-        id: `building_${b.id}`,
-        material: "building",
+        id: `building_floor_${b.id}`,
+        material: "feature",
         outlineMm: closeOutline(b.outline),
         bottomY: 0,
-        height: h,
+        height: 0.06,
         select,
       });
 
-      const bb = outlineBounds(b.outline);
+      // Intermediate floor / ceiling slabs for multi-story houses.
+      if (stories > 1) {
+        const floorOutline = closeOutline(
+          expandOutlineFromCentroid(b.outline, -Math.min(wallTmm * 0.75, 140)),
+        );
+        for (let s = 1; s < stories; s++) {
+          const undersideMm =
+            s * ceilingMm + (s - 1) * FLOOR_STRUCTURE_THICKNESS_MM;
+          meshes.push({
+            kind: "extrude",
+            id: `building_floor_${b.id}_s${s + 1}`,
+            material: "feature",
+            outlineMm: floorOutline,
+            bottomY: mmToMeters(undersideMm),
+            height: mmToMeters(FLOOR_STRUCTURE_THICKNESS_MM),
+            select,
+          });
+        }
+        // Ceiling under the roof so the top story isn't open to the attic.
+        const topCeilingT = 0.1;
+        meshes.push({
+          kind: "extrude",
+          id: `building_ceiling_${b.id}_top`,
+          material: "feature",
+          outlineMm: floorOutline,
+          bottomY: h - topCeilingT - 0.02,
+          height: topCeilingT,
+          select,
+        });
+      }
+
+      // One extruded panel per edge with true punched holes (no stacked box gaps).
+      type WallHole = { x: number; y: number; w: number; h: number };
+      const holesByEdge = new Map<number, WallHole[]>();
+      for (const opening of b.openings ?? []) {
+        const resolved = resolveOpeningEdge(b.outline, opening.edgeIndex);
+        if (!resolved) continue;
+        const { edgeIndex: ei, edgeLen: openEdgeLen } = resolved;
+        const t = clampOpeningT(openEdgeLen, opening.widthMm, opening.t);
+        const story = clampOpeningStory(opening.story, stories);
+        const sillMm = openingSillMm(
+          opening.kind,
+          story,
+          stories,
+          opening.sillAboveFloorMm,
+          ceilingMm,
+        );
+        const openH = Math.min(opening.heightMm, hMm - sillMm - 50);
+        if (openH < 100) continue;
+        // Match the opening unit closely — only a hairline so the frame
+        // isn't z-fighting the wall (large pads read as see-through gaps).
+        const padMm = 4;
+        const holeW = Math.min(opening.widthMm + padMm * 2, openEdgeLen - 8);
+        const holeH = openH + padMm * 2;
+        const hole: WallHole = {
+          x: (t - 0.5) * mmToMeters(openEdgeLen),
+          y: mmToMeters(Math.max(0, sillMm - padMm)),
+          w: mmToMeters(holeW),
+          h: mmToMeters(holeH),
+        };
+        const list = holesByEdge.get(ei) ?? [];
+        list.push(hole);
+        holesByEdge.set(ei, list);
+      }
+
+      // Track which corners still need a solid post (no opening reaches them).
+      const cornerNeedsPost = new Array(pts.length).fill(true);
+
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i];
+        const bPt = pts[(i + 1) % pts.length];
+        const edgeLen = Math.hypot(bPt.x - a.x, bPt.y - a.y);
+        if (edgeLen < 40) continue;
+        const tx = (bPt.x - a.x) / edgeLen;
+        const ty = (bPt.y - a.y) / edgeLen;
+        let nx = -ty;
+        let ny = tx;
+        const mid = { x: (a.x + bPt.x) / 2, y: (a.y + bPt.y) / 2 };
+        const toCenterX = bb.cx - mid.x;
+        const toCenterY = bb.cy - mid.y;
+        if (nx * toCenterX + ny * toCenterY > 0) {
+          nx = -nx;
+          ny = -ny;
+        }
+
+        const holes = [...(holesByEdge.get(i) ?? [])];
+
+        // Synthetic yard window when this edge has no openings.
+        const syntheticView =
+          holes.length === 0 && i === yardEdgeIndex && edgeLen >= 1600;
+        if (syntheticView) {
+          const winW = Math.min(2800, edgeLen * 0.45);
+          const sillY = 0.85;
+          const headY = Math.min(h - 0.25, sillY + 2.1);
+          holes.push({
+            x: 0,
+            y: sillY,
+            w: mmToMeters(winW),
+            h: headY - sillY,
+          });
+          const xz = planToWorldXZ(mid);
+          const outward = planDirToWorldXZ(nx, ny);
+          meshes.push({
+            kind: "box",
+            id: `building_viewglass_${b.id}`,
+            material: "window",
+            openingKind: "window",
+            position: {
+              x: xz.x - outward.x * mmToMeters(wallTmm) * 0.5,
+              y: (sillY + headY) / 2,
+              z: xz.z - outward.z * mmToMeters(wallTmm) * 0.5,
+            },
+            size: {
+              x: mmToMeters(winW),
+              y: headY - sillY,
+              z: mmToMeters(wallTmm * 0.7),
+            },
+            rotationY: 0,
+            axisX: planDirToWorldXZ(tx, ty),
+            axisZ: outward,
+            select,
+          });
+        }
+
+        // Shorten panels at corners so adjacent walls don't fill each
+        // other's punched openings (half-punched kitchen windows, etc.).
+        // Expand back out when an opening reaches near a corner.
+        const insetM = mmToMeters(wallTmm);
+        const halfEdgeM = mmToMeters(edgeLen) / 2;
+        let halfPanelM = Math.max(0.05, halfEdgeM - insetM);
+        for (const hole of holes) {
+          halfPanelM = Math.max(
+            halfPanelM,
+            Math.abs(hole.x) + hole.w / 2 + 0.01,
+          );
+        }
+        halfPanelM = Math.min(halfPanelM, halfEdgeM);
+        const panelLenM = halfPanelM * 2;
+
+        // Opening reaches this edge's start / end → skip that corner post.
+        for (const hole of holes) {
+          const left = hole.x - hole.w / 2;
+          const right = hole.x + hole.w / 2;
+          if (left <= -halfEdgeM + insetM + 0.02) cornerNeedsPost[i] = false;
+          if (right >= halfEdgeM - insetM - 0.02) {
+            cornerNeedsPost[(i + 1) % pts.length] = false;
+          }
+        }
+
+        const xz = planToWorldXZ(mid);
+        const outward = planDirToWorldXZ(nx, ny);
+        // Sit the exterior face on the footprint edge; extrude inward.
+        meshes.push({
+          kind: "wallPanel",
+          id: `building_wall_${b.id}_${i}`,
+          material: "building",
+          position: { x: xz.x, y: 0, z: xz.z },
+          axisX: planDirToWorldXZ(tx, ty),
+          axisZ: outward,
+          lengthM: panelLenM,
+          heightM: h,
+          thicknessM: mmToMeters(wallTmm),
+          holes,
+          colorHex,
+          select,
+        });
+      }
+
+      // Solid corner posts where shortened walls meet (no opening there).
+      for (let i = 0; i < pts.length; i++) {
+        if (!cornerNeedsPost[i]) continue;
+        const prev = pts[(i - 1 + pts.length) % pts.length];
+        const cur = pts[i];
+        const next = pts[(i + 1) % pts.length];
+        const lenIn = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+        const lenOut = Math.hypot(next.x - cur.x, next.y - cur.y);
+        if (lenIn < 40 || lenOut < 40) continue;
+        let nx0 = -(cur.y - prev.y) / lenIn;
+        let ny0 = (cur.x - prev.x) / lenIn;
+        let nx1 = -(next.y - cur.y) / lenOut;
+        let ny1 = (next.x - cur.x) / lenOut;
+        const mid0 = { x: (prev.x + cur.x) / 2, y: (prev.y + cur.y) / 2 };
+        const mid1 = { x: (cur.x + next.x) / 2, y: (cur.y + next.y) / 2 };
+        if (nx0 * (bb.cx - mid0.x) + ny0 * (bb.cy - mid0.y) > 0) {
+          nx0 = -nx0;
+          ny0 = -ny0;
+        }
+        if (nx1 * (bb.cx - mid1.x) + ny1 * (bb.cy - mid1.y) > 0) {
+          nx1 = -nx1;
+          ny1 = -ny1;
+        }
+        // Place post on the interior side of the exterior corner.
+        const inset = wallTmm * 0.5;
+        const plan = {
+          x: cur.x - ((nx0 + nx1) / 2) * inset,
+          y: cur.y - ((ny0 + ny1) / 2) * inset,
+        };
+        const xz = planToWorldXZ(plan);
+        const tM = mmToMeters(wallTmm);
+        meshes.push({
+          kind: "box",
+          id: `building_corner_${b.id}_${i}`,
+          material: "building",
+          position: { x: xz.x, y: h / 2, z: xz.z },
+          size: { x: tM, y: h, z: tM },
+          rotationY: 0,
+          colorHex,
+          select,
+        });
+      }
+
+      // Flat roof deck + eaves overhang so the volume reads as a house, not a foam block.
+      const eavesMm = 280;
+      const roofSlab = 0.12;
+      const fascia = 0.08;
+      const roofOutline = closeOutline(
+        expandOutlineFromCentroid(b.outline, eavesMm),
+      );
+      meshes.push({
+        kind: "extrude",
+        id: `building_roof_${b.id}`,
+        material: "cover",
+        outlineMm: roofOutline,
+        bottomY: h,
+        height: roofSlab,
+        select,
+      });
+      meshes.push({
+        kind: "extrude",
+        id: `building_fascia_${b.id}`,
+        material: "cover",
+        outlineMm: roofOutline,
+        holeOutlinesMm: [closeOutline(b.outline)],
+        bottomY: h - fascia,
+        height: fascia,
+        opacity: 1,
+        select,
+      });
+
       for (const opening of b.openings ?? []) {
         const geom = openingEndpoints(b.outline, opening);
         if (!geom) continue;
@@ -1067,30 +1659,36 @@ export function buildSceneModel(
           nx = -nx;
           ny = -ny;
         }
-        // Sit on the exterior face so frames / glass aren't buried in the solid shell.
-        const thicknessMm = 110;
+        // Center glass / door in the hollow wall so you can see out from inside.
         const xz = planToWorldXZ(geom.center);
         const outward = planDirToWorldXZ(nx, ny);
-        const faceOffsetM = mmToMeters(thicknessMm) * 0.35 + 0.04;
-        const stories = Math.max(1, b.stories || 1);
+        const inward = { x: -outward.x, z: -outward.z };
+        const faceOffsetM = mmToMeters(wallTmm) * 0.5;
         const story = clampOpeningStory(opening.story, stories);
-        const sillMm = openingSillMm(opening.kind, story, stories);
+        const sillMm = openingSillMm(
+          opening.kind,
+          story,
+          stories,
+          opening.sillAboveFloorMm,
+          ceilingMm,
+        );
         const openH = Math.min(opening.heightMm, hMm - sillMm - 50);
         if (openH < 100) continue;
         meshes.push({
           kind: "box",
           id: `opening_${b.id}_${opening.id}`,
-          material: opening.kind === "window" ? "window" : "door",
+          material:
+            opening.kind === "door" ? "door" : "window",
           openingKind: opening.kind,
           position: {
-            x: xz.x + outward.x * faceOffsetM,
+            x: xz.x + inward.x * faceOffsetM,
             y: mmToMeters(sillMm + openH / 2),
-            z: xz.z + outward.z * faceOffsetM,
+            z: xz.z + inward.z * faceOffsetM,
           },
           size: {
             x: mmToMeters(opening.widthMm),
             y: mmToMeters(openH),
-            z: mmToMeters(thicknessMm),
+            z: mmToMeters(wallTmm * 0.85),
           },
           rotationY: 0,
           axisX: planDirToWorldXZ(tx, ty),
@@ -1108,7 +1706,7 @@ export function buildSceneModel(
 
   if (
     !options.hideDeck &&
-    (layerVisible(design, "patio") || layerVisible(design, "deck"))
+    anyLayerVisible(design, "patio", "deck")
   ) {
     for (const p of design.patios ?? []) {
       if (p.outline.length < 3) continue;
@@ -1283,6 +1881,60 @@ export function buildSceneModel(
         select: { kind: "cover", id: c.id },
       });
 
+      // Pergola: a few rafters under the translucent slab so it reads as lattice, not a tinted box.
+      if (!isRoof) {
+        const bb = outlineBounds(c.outline);
+        const spanX = Math.max(400, bb.maxX - bb.minX);
+        const spanY = Math.max(400, bb.maxY - bb.minY);
+        const rafterCount = Math.min(7, Math.max(3, Math.round(spanX / 900)));
+        const beamCount = Math.min(5, Math.max(2, Math.round(spanY / 1200)));
+        const rafterW = mmToMeters(90);
+        const rafterH = mmToMeters(140);
+        const coverSelect: SceneSelection = { kind: "cover", id: c.id };
+        for (let i = 0; i < rafterCount; i++) {
+          const t = (i + 0.5) / rafterCount;
+          const px = bb.minX + spanX * t;
+          const a = planToWorldXZ({ x: px, y: bb.minY });
+          const b = planToWorldXZ({ x: px, y: bb.maxY });
+          const midX = (a.x + b.x) / 2;
+          const midZ = (a.z + b.z) / 2;
+          const len = Math.hypot(b.x - a.x, b.z - a.z) || 0.5;
+          const yaw = Math.atan2(-(b.z - a.z), b.x - a.x);
+          meshes.push({
+            kind: "box",
+            id: `cover_rafter_${c.id}_${i}`,
+            material: "pergola",
+            position: { x: midX, y: top - slab - rafterH / 2, z: midZ },
+            size: { x: len, y: rafterH, z: rafterW },
+            rotationY: yaw,
+            select: coverSelect,
+          });
+        }
+        for (let i = 0; i < beamCount; i++) {
+          const t = (i + 0.5) / beamCount;
+          const py = bb.minY + spanY * t;
+          const a = planToWorldXZ({ x: bb.minX, y: py });
+          const b = planToWorldXZ({ x: bb.maxX, y: py });
+          const midX = (a.x + b.x) / 2;
+          const midZ = (a.z + b.z) / 2;
+          const len = Math.hypot(b.x - a.x, b.z - a.z) || 0.5;
+          const yaw = Math.atan2(-(b.z - a.z), b.x - a.x);
+          meshes.push({
+            kind: "box",
+            id: `cover_beam_${c.id}_${i}`,
+            material: "pergola",
+            position: {
+              x: midX,
+              y: top - slab - rafterH - mmToMeters(40),
+              z: midZ,
+            },
+            size: { x: len, y: rafterW, z: rafterH * 0.85 },
+            rotationY: yaw,
+            select: coverSelect,
+          });
+        }
+      }
+
       for (const support of c.supports ?? []) {
         const postMm = coverSupportPostSizeMm(support);
         const footMm = coverSupportFootingSizeMm(support);
@@ -1328,7 +1980,7 @@ export function buildSceneModel(
     }
   }
 
-  if (layerVisible(design, "pool") || layerVisible(design, "pools")) {
+  if (anyLayerVisible(design, "pool", "pools")) {
     for (const body of bodies) {
       if (body.outline.length < 3) continue;
       const kind = waterBodyKind(body);
@@ -1346,22 +1998,88 @@ export function buildSceneModel(
         const needsPit = spaNeedsDeckPit(body) || joinsPool;
         const elev = spaElevations(body, waterTopY, joinsPool);
         const { floorY, waterTopY: spaWaterTop, wallTopY, deckTopY } = elev;
+        const spill = joinsPool
+          ? resolveSpaSpillover(body, pools)
+          : null;
+        const pts = ringPoints(outer);
+        const spillEdge =
+          spill && pts.length > spill.edgeIndex
+            ? {
+                a: pts[spill.edgeIndex],
+                b: pts[(spill.edgeIndex + 1) % pts.length],
+              }
+            : null;
+        const edgeOmits =
+          spill && spillEdge
+            ? [
+                {
+                  edgeIndex: spill.edgeIndex,
+                  intervals: spilloverOmitIntervals(
+                    spill,
+                    spillEdge.a,
+                    spillEdge.b,
+                  ),
+                },
+              ]
+            : undefined;
+        // Crest of the weir notch (below rim, at/above spa water).
+        const crestY = spill
+          ? Math.min(
+              wallTopY - 0.01,
+              Math.max(
+                spaWaterTop - 0.005,
+                wallTopY - mmToMeters(spill.notchDepthMm),
+              ),
+            )
+          : wallTopY;
 
-        if (needsPit) {
-          const wallBottom = Math.min(floorY, -0.02);
-          const wallH = Math.max(0.02, wallTopY - wallBottom);
-          // Full spa shell, including pool-side spillover walls. The pool omits
-          // those shared edges so only the spa draws that border.
+        const pushSpaShell = (bottomY: number, topY: number) => {
+          const h = Math.max(0.02, topY - bottomY);
+          if (!spill || !edgeOmits || crestY >= topY - 0.005) {
+            pushWallRing(meshes, {
+              outlineMm: outer,
+              bottomY,
+              height: h,
+              thicknessMm: wallT,
+              material: "spaShell",
+              select,
+              idPrefix: `spa_wall_${body.id}`,
+              inward: true,
+            });
+            return;
+          }
+          // Lower course up to weir crest (solid, including shared wall sill).
+          const lowerH = Math.max(0.02, crestY - bottomY);
           pushWallRing(meshes, {
             outlineMm: outer,
-            bottomY: wallBottom,
-            height: wallH,
+            bottomY,
+            height: lowerH,
             thicknessMm: wallT,
             material: "spaShell",
             select,
-            idPrefix: `spa_wall_${body.id}`,
+            idPrefix: `spa_wall_${body.id}_sill`,
             inward: true,
           });
+          // Upper course notched at spillover openings.
+          const upperH = Math.max(0.015, topY - crestY);
+          pushWallRing(meshes, {
+            outlineMm: outer,
+            bottomY: crestY,
+            height: upperH,
+            thicknessMm: wallT,
+            material: "spaShell",
+            select,
+            idPrefix: `spa_wall_${body.id}_rim`,
+            inward: true,
+            edgeOmits,
+          });
+        };
+
+        if (needsPit) {
+          const wallBottom = Math.min(floorY, -0.02);
+          // Full spa shell, including pool-side spillover walls. The pool omits
+          // those shared edges so only the spa draws that border.
+          pushSpaShell(wallBottom, wallTopY);
           pushWaterFill(meshes, {
             idPrefix: `spa_${body.id}`,
             outlineMm: inner,
@@ -1372,17 +2090,7 @@ export function buildSceneModel(
           });
         } else {
           // Fully raised spa — vessel sits on the deck; shell rises above patio.
-          const raisedH = Math.max(0.02, wallTopY - deckTopY);
-          pushWallRing(meshes, {
-            outlineMm: outer,
-            bottomY: deckTopY,
-            height: raisedH,
-            thicknessMm: wallT,
-            material: "spaShell",
-            select,
-            idPrefix: `spa_wall_${body.id}`,
-            inward: true,
-          });
+          pushSpaShell(deckTopY, wallTopY);
           pushWaterFill(meshes, {
             idPrefix: `spa_${body.id}`,
             outlineMm: inner,
@@ -1390,6 +2098,18 @@ export function buildSceneModel(
             waterTopY: spaWaterTop,
             select,
             waterMaterial: "spaWater",
+          });
+        }
+
+        if (spill) {
+          pushSpilloverCascades(meshes, {
+            spill,
+            spaOutline: outer,
+            crestY: Math.max(crestY, spaWaterTop),
+            poolWaterTopY: waterTopY,
+            wallThicknessMm: wallT,
+            select,
+            idPrefix: `spa_${body.id}`,
           });
         }
       } else {
@@ -1626,8 +2346,185 @@ export function buildSceneModel(
         pointsMm: run.points,
         radiusM: mmToMeters(dia / 2),
         y: -0.42,
+        ...(run.elevationsMm?.length === run.points.length
+          ? { elevationsMm: run.elevationsMm }
+          : {}),
         select: { kind: "run", id: run.id },
       });
+    }
+  }
+
+  if (layerVisible(design, "fence")) {
+    const deckTopY = mmToMeters(PATIO_SLAB_THICKNESS_MM);
+    const patios = design.patios ?? [];
+    /** Surface the fence sits on: patio top on deck, else existing grade. */
+    const fenceBaseY = (plan: PointMm): number => {
+      for (const patio of patios) {
+        if (
+          patio.outline.length >= 3 &&
+          pointInPolygon(plan, patio.outline)
+        ) {
+          return deckTopY;
+        }
+      }
+      return -mmToMeters(existingGradeDropMm(plan, gradeSamples));
+    };
+
+    const pushRackedPanel = (
+      id: string,
+      p0: PointMm,
+      p1: PointMm,
+      heightM: number,
+      material: SceneMaterialKey,
+      select: SceneSelection,
+      opts: {
+        colorHex: string;
+        opacity?: number;
+        thicknessM: number;
+        kind: string;
+      },
+    ) => {
+      const xz0 = planToWorldXZ(p0);
+      const xz1 = planToWorldXZ(p1);
+      const y0 = fenceBaseY(p0);
+      const y1 = fenceBaseY(p1);
+      const a = { x: xz0.x, y: y0, z: xz0.z };
+      const b = { x: xz1.x, y: y1, z: xz1.z };
+      let picketWidthM: number | undefined;
+      let picketGapM: number | undefined;
+      let postSizeM: number | undefined;
+      if (opts.kind === "wood" || opts.kind === "vinyl") {
+        // Privacy: solid bay between posts (no board gaps).
+        postSizeM = 0.115; // ~4.5″ post
+      } else if (opts.kind === "chain_link") {
+        picketWidthM = 0.012;
+        picketGapM = 0.045;
+        postSizeM = 0.06;
+      } else if (opts.kind === "glass") {
+        postSizeM = 0.05; // glass spigot / post
+      } else {
+        // aluminum / wrought iron — open pickets
+        picketWidthM = 0.045;
+        picketGapM = 0.085;
+        postSizeM = 0.065;
+      }
+      const privacy = opts.kind === "wood" || opts.kind === "vinyl";
+      meshes.push({
+        kind: "fencePanel",
+        id,
+        material,
+        a,
+        b,
+        heightM,
+        // Privacy slabs match post depth so you can't see past thin panels.
+        thicknessM: privacy
+          ? Math.max(opts.thicknessM, (postSizeM ?? 0.1) * 0.85)
+          : opts.thicknessM,
+        colorHex: opts.colorHex,
+        opacity: opts.opacity,
+        picketWidthM,
+        picketGapM,
+        postSizeM,
+        select,
+      });
+    };
+
+    for (const fence of design.fences ?? []) {
+      if (fence.points.length < 2) continue;
+      const finish = resolveFenceFinish(fence.kind, fence.finishId);
+      const colorHex = fenceFinishHex(finish);
+      const hMm = fence.heightMm ?? defaultFenceHeightMm(fence.kind);
+      const hM = Math.max(0.6, mmToMeters(hMm));
+      const thickM = Math.max(0.03, mmToMeters(FENCE_THICKNESS_MM));
+      const select: SceneSelection = { kind: "fence", id: fence.id };
+      const isGlass = fence.kind === "glass";
+      const opacity = isGlass
+        ? finish.id.includes("frosted")
+          ? 0.55
+          : 0.35
+        : fence.kind === "chain_link"
+          ? 0.8
+          : undefined;
+      // Short spans so IDW grade curvature is followed along the run.
+      const PANEL_STEP_MM = 1200;
+
+      for (let i = 0; i < fence.points.length - 1; i++) {
+        const a = fence.points[i];
+        const b = fence.points[i + 1];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 40) continue;
+
+        const gatesOnEdge = (fence.gates ?? []).filter((g) => g.edgeIndex === i);
+        const cuts: { t0: number; t1: number }[] = [{ t0: 0, t1: 1 }];
+        for (const gate of gatesOnEdge) {
+          const half = Math.min(gate.widthMm / 2, len / 2) / len;
+          const t = Math.min(1 - half, Math.max(half, gate.t));
+          const next: { t0: number; t1: number }[] = [];
+          for (const span of cuts) {
+            const g0 = t - half;
+            const g1 = t + half;
+            if (g1 <= span.t0 || g0 >= span.t1) {
+              next.push(span);
+              continue;
+            }
+            if (g0 > span.t0) next.push({ t0: span.t0, t1: g0 });
+            if (g1 < span.t1) next.push({ t0: g1, t1: span.t1 });
+          }
+          cuts.length = 0;
+          cuts.push(...next);
+        }
+
+        let panel = 0;
+        for (const span of cuts) {
+          const spanLenMm = (span.t1 - span.t0) * len;
+          if (spanLenMm < 40) continue;
+          const steps = Math.max(1, Math.ceil(spanLenMm / PANEL_STEP_MM));
+          for (let s = 0; s < steps; s++) {
+            const u0 = span.t0 + ((span.t1 - span.t0) * s) / steps;
+            const u1 = span.t0 + ((span.t1 - span.t0) * (s + 1)) / steps;
+            const p0 = { x: a.x + dx * u0, y: a.y + dy * u0 };
+            const p1 = { x: a.x + dx * u1, y: a.y + dy * u1 };
+            pushRackedPanel(
+              `fence_${fence.id}_${i}_${panel++}`,
+              p0,
+              p1,
+              hM,
+              "fence",
+              select,
+              {
+                colorHex,
+                opacity,
+                thicknessM: thickM,
+                kind: fence.kind,
+              },
+            );
+          }
+        }
+      }
+
+      for (const gate of fence.gates ?? []) {
+        const geom = gateEndpoints(fence.points, gate);
+        if (!geom) continue;
+        const gateHMm =
+          gate.heightMm ?? fence.heightMm ?? defaultFenceHeightMm(fence.kind);
+        const gateHM = Math.max(0.6, mmToMeters(gateHMm));
+        pushRackedPanel(
+          `gate_${fence.id}_${gate.id}`,
+          geom.a,
+          geom.b,
+          gateHM,
+          "gate",
+          { kind: "gate", fenceId: fence.id, id: gate.id },
+          {
+            colorHex,
+            opacity: isGlass ? 0.45 : opacity,
+            thicknessM: thickM * 0.85,
+            kind: fence.kind,
+          },
+        );
+      }
     }
   }
 
@@ -1680,6 +2577,30 @@ export function buildSceneModel(
       personY ??
       (isEquip ? h / 2 : deckTopY + h / 2);
 
+    const isBubbler =
+      obj.catalogItemId === "spa_bubbler" ||
+      obj.catalogItemId === "pool_bubbler";
+    let bubblerWaterY: number | undefined;
+    if (isBubbler) {
+      const spaParent =
+        (obj.parentBodyId
+          ? spas.find((s) => s.id === obj.parentBodyId)
+          : undefined) ??
+        spas.find((s) => pointInPolygon(obj.position, s.outline));
+      if (spaParent && obj.catalogItemId === "spa_bubbler") {
+        const joinsPool = pools.some((p) =>
+          waterBodiesConnected(p.outline, spaParent.outline),
+        );
+        bubblerWaterY = spaElevations(
+          spaParent,
+          waterTopY,
+          joinsPool,
+        ).waterTopY;
+      } else {
+        bubblerWaterY = waterTopY;
+      }
+    }
+
     meshes.push({
       kind: "box",
       id: `object_${obj.id}`,
@@ -1690,6 +2611,14 @@ export function buildSceneModel(
       catalogItemId: obj.catalogItemId,
       frameFinishId: obj.frameFinishId,
       fabricFinishId: obj.fabricFinishId,
+      ...(bubblerWaterY != null ? { waterSurfaceY: bubblerWaterY } : {}),
+      ...(isBubbler ? { hasLedLight: obj.hasLedLight === true } : {}),
+      ...(obj.catalogItemId === "person_scale"
+        ? {
+            personSex: obj.personSex,
+            personOutfitId: obj.personOutfitId,
+          }
+        : {}),
       select: { kind: "object", id: obj.id },
     });
   }

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { emptyDesignDocument } from "./design-model";
 import {
+  DEFAULT_CEILING_HEIGHT_MM,
+  FLOOR_STRUCTURE_THICKNESS_MM,
   STORY_HEIGHT_MM,
   WINDOW_SILL_ABOVE_FLOOR_MM,
   buildingHeightMm,
@@ -12,6 +14,8 @@ import {
   openingSillMm,
   planToWorldXZ,
   poolAverageDepthMm,
+  resolveCeilingHeightMm,
+  storyFloorElevationMm,
 } from "./scene3d";
 
 describe("scene3d helpers", () => {
@@ -26,9 +30,19 @@ describe("scene3d helpers", () => {
     assert.equal(p.z, -1);
   });
 
-  it("computes building height from stories", () => {
-    assert.equal(buildingHeightMm(2), 2 * STORY_HEIGHT_MM);
-    assert.equal(buildingHeightMm(0), STORY_HEIGHT_MM);
+  it("computes building height from stories and ceiling height", () => {
+    assert.equal(resolveCeilingHeightMm(undefined), DEFAULT_CEILING_HEIGHT_MM);
+    assert.equal(STORY_HEIGHT_MM, DEFAULT_CEILING_HEIGHT_MM);
+    assert.equal(buildingHeightMm(1), DEFAULT_CEILING_HEIGHT_MM);
+    assert.equal(
+      buildingHeightMm(2),
+      2 * DEFAULT_CEILING_HEIGHT_MM + FLOOR_STRUCTURE_THICKNESS_MM,
+    );
+    assert.equal(buildingHeightMm(0), DEFAULT_CEILING_HEIGHT_MM);
+    assert.equal(
+      buildingHeightMm(2, 3048),
+      2 * 3048 + FLOOR_STRUCTURE_THICKNESS_MM,
+    );
   });
 
   it("places openings on the chosen story sill", () => {
@@ -36,8 +50,25 @@ describe("scene3d helpers", () => {
     assert.equal(clampOpeningStory(undefined, 3), 1);
     assert.equal(openingSillMm("door", 1, 2), 0);
     assert.equal(openingSillMm("window", 1, 2), WINDOW_SILL_ABOVE_FLOOR_MM);
-    assert.equal(openingSillMm("window", 2, 2), STORY_HEIGHT_MM + WINDOW_SILL_ABOVE_FLOOR_MM);
-    assert.equal(openingSillMm("door", 2, 2), STORY_HEIGHT_MM);
+    assert.equal(
+      storyFloorElevationMm(2, 2),
+      DEFAULT_CEILING_HEIGHT_MM + FLOOR_STRUCTURE_THICKNESS_MM,
+    );
+    assert.equal(
+      openingSillMm("window", 2, 2),
+      DEFAULT_CEILING_HEIGHT_MM +
+        FLOOR_STRUCTURE_THICKNESS_MM +
+        WINDOW_SILL_ABOVE_FLOOR_MM,
+    );
+    assert.equal(
+      openingSillMm("door", 2, 2),
+      DEFAULT_CEILING_HEIGHT_MM + FLOOR_STRUCTURE_THICKNESS_MM,
+    );
+    assert.equal(openingSillMm("window", 1, 2, 600), 600);
+    assert.equal(
+      openingSillMm("window", 2, 2, 600),
+      DEFAULT_CEILING_HEIGHT_MM + FLOOR_STRUCTURE_THICKNESS_MM + 600,
+    );
   });
 
   it("averages pool depths", () => {

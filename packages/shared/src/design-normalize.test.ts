@@ -28,6 +28,8 @@ describe("normalizeDesignDocument", () => {
     assert.ok(next.layers.some((l) => l.id === "equipment"));
     assert.ok(next.layers.some((l) => l.id === "house"));
     assert.ok(next.layers.some((l) => l.id === "covers"));
+    assert.ok(next.layers.some((l) => l.id === "fence"));
+    assert.deepEqual(next.fences, []);
   });
 
   it("defaults spa wall/shell and opening sizes", () => {
@@ -86,6 +88,49 @@ describe("normalizeDesignDocument", () => {
     assert.ok(opening.widthMm > 0);
     assert.ok(opening.heightMm > 0);
     assert.equal(next.buildings[0].stories, 1);
+    assert.equal(next.buildings[0].ceilingHeightMm, 2438.4);
+  });
+
+  it("clamps spa spillover fields", () => {
+    const raw = {
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [],
+      poolBodies: [
+        {
+          id: "spa_1",
+          name: "Spa",
+          kind: "spa",
+          outline: [
+            { x: 0, y: 0 },
+            { x: 1000, y: 0 },
+            { x: 1000, y: 1000 },
+            { x: 0, y: 1000 },
+          ],
+          depthShallowMm: 900,
+          depthDeepMm: 900,
+          spillover: {
+            enabled: true,
+            style: "scuppers",
+            scupperCount: 99,
+            widthMm: -10,
+            notchDepthMm: 1,
+            scupperGapMm: 1,
+          },
+        },
+      ],
+      plumbingRuns: [],
+    } as unknown as DesignDocument;
+
+    const next = normalizeDesignDocument(raw);
+    const s = next.poolBodies[0].spillover!;
+    assert.equal(s.enabled, true);
+    assert.equal(s.style, "scuppers");
+    assert.equal(s.scupperCount, 8);
+    assert.ok((s.widthMm ?? 0) >= 50);
+    assert.ok((s.notchDepthMm ?? 0) >= 5);
+    assert.ok((s.scupperGapMm ?? 0) >= 10);
   });
 
   it("migrates legacy dining_table_set to round tabletop sizing", () => {

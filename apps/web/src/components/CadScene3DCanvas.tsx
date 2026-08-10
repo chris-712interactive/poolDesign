@@ -28,6 +28,7 @@ import {
   type BasinSectionFrame,
   type BoxDescriptor,
   type ExtrudeDescriptor,
+  type FencePanelDescriptor,
   type FloorDescriptor,
   type LabelDescriptor,
   type MeshDescriptor,
@@ -35,6 +36,7 @@ import {
   type SceneSelection,
   type TerrainDescriptor,
   type TubeDescriptor,
+  type WallPanelDescriptor,
   type WaterBodyDescriptor,
 } from "@/lib/cad3d/buildScene";
 import {
@@ -52,11 +54,33 @@ import {
   makePlasterTexture,
   makeStoneCopingTexture,
   makeStuccoTexture,
+  makeWaterNormalTexture,
   makeWaterSurfaceTexture,
   makeWaterlineTileTexture,
 } from "@/lib/cad3d/proceduralTextures";
 import { getPatioFinishTexture } from "@/lib/cad3d/patioFinishTextures";
 import { OpeningMesh } from "@/lib/cad3d/OpeningMesh";
+import {
+  BasinCausticOverlay,
+  WaterCausticOverlay,
+  WaterEnvironment,
+  WaterMaterial,
+  WaterTextureContext,
+  type WaterTextures,
+} from "@/lib/cad3d/WaterMaterial";
+import { WalkControls } from "@/lib/cad3d/WalkControls";
+import { walkSpawnPose } from "@/lib/cad3d/walkMode";
+import {
+  PresentationBloom,
+  SoftShadowSetup,
+  SunLight,
+} from "@/lib/cad3d/presentationEffects";
+import {
+  TIME_OF_DAY_ORDER,
+  TIME_OF_DAY_PRESETS,
+  TimeOfDayContext,
+  type TimeOfDay,
+} from "@/lib/cad3d/timeOfDay";
 
 type MatDef = {
   color: string;
@@ -64,6 +88,13 @@ type MatDef = {
   metalness: number;
   map?: "plaster" | "pebble" | "tile" | "stone" | "deck" | "ground" | "stucco";
   mapRepeat?: [number, number];
+  /** Wet / reflective physical extras (coping, tile, glass). */
+  clearcoat?: number;
+  clearcoatRoughness?: number;
+  envMapIntensity?: number;
+  transmission?: number;
+  thickness?: number;
+  ior?: number;
 };
 
 const MATERIALS: Record<SceneMaterialKey, MatDef> = {
@@ -86,7 +117,7 @@ const MATERIALS: Record<SceneMaterialKey, MatDef> = {
     metalness: 0,
     map: "deck",
   },
-  poolWater: { color: "#1a7fa3", roughness: 0.08, metalness: 0.12 },
+  poolWater: { color: "#0d7a9a", roughness: 0.06, metalness: 0 },
   poolShell: {
     color: "#ffffff",
     roughness: 0.55,
@@ -103,17 +134,23 @@ const MATERIALS: Record<SceneMaterialKey, MatDef> = {
   },
   coping: {
     color: "#ffffff",
-    roughness: 0.62,
+    roughness: 0.38,
     metalness: 0.04,
     map: "stone",
     mapRepeat: [3, 1.2],
+    clearcoat: 0.85,
+    clearcoatRoughness: 0.18,
+    envMapIntensity: 1.35,
   },
   waterline: {
     color: "#ffffff",
-    roughness: 0.28,
-    metalness: 0.12,
+    roughness: 0.18,
+    metalness: 0.18,
     map: "tile",
     mapRepeat: [10, 1.4],
+    clearcoat: 0.7,
+    clearcoatRoughness: 0.12,
+    envMapIntensity: 1.5,
   },
   spaShell: {
     color: "#ffffff",
@@ -122,22 +159,37 @@ const MATERIALS: Record<SceneMaterialKey, MatDef> = {
     map: "plaster",
     mapRepeat: [3, 3],
   },
-  spaWater: { color: "#1a7fa3", roughness: 0.08, metalness: 0.12 },
+  spaWater: { color: "#1488a8", roughness: 0.06, metalness: 0 },
   cover: { color: "#4a433c", roughness: 0.92, metalness: 0 },
   pergola: { color: "#8b7355", roughness: 0.75, metalness: 0 },
   object: { color: "#5c7a6e", roughness: 0.7, metalness: 0.1 },
   equipment: { color: "#4a5560", roughness: 0.55, metalness: 0.25 },
   feature: { color: "#c9c2b4", roughness: 0.85, metalness: 0 },
   door: { color: "#5a4030", roughness: 0.65, metalness: 0.05 },
-  window: { color: "#8ec8e0", roughness: 0.1, metalness: 0.35 },
+  window: {
+    color: "#d7eef6",
+    roughness: 0.04,
+    metalness: 0,
+    transmission: 0.95,
+    thickness: 0.025,
+    ior: 1.5,
+    envMapIntensity: 2,
+  },
   pipeSuction: { color: "#2f6f9f", roughness: 0.45, metalness: 0.2 },
   pipeReturn: { color: "#c45c2c", roughness: 0.45, metalness: 0.2 },
   pipeOther: { color: "#6a8f4e", roughness: 0.5, metalness: 0.15 },
   pipeGas: { color: "#b89b2c", roughness: 0.5, metalness: 0.2 },
   sectionCap: { color: "#e8eeec", roughness: 0.55, metalness: 0.02 },
-  sectionWater: { color: "#1a7fa3", roughness: 0.1, metalness: 0.1 },
+  sectionWater: { color: "#0d7a9a", roughness: 0.1, metalness: 0 },
   fill: { color: "#a89070", roughness: 0.95, metalness: 0 },
   retaining: { color: "#8a8074", roughness: 0.85, metalness: 0.05 },
+  fence: {
+    color: "#2a2a2c",
+    roughness: 0.55,
+    metalness: 0.35,
+    envMapIntensity: 1.1,
+  },
+  gate: { color: "#2a2a2c", roughness: 0.5, metalness: 0.4, envMapIntensity: 1.1 },
 };
 
 type SceneTextures = {
@@ -148,7 +200,7 @@ type SceneTextures = {
   deck: { color: THREE.CanvasTexture; roughness: THREE.CanvasTexture };
   ground: { color: THREE.CanvasTexture; roughness: THREE.CanvasTexture };
   stucco: { color: THREE.CanvasTexture; roughness: THREE.CanvasTexture };
-  water: THREE.CanvasTexture;
+  water: WaterTextures;
 };
 
 const TextureContext = createContext<SceneTextures | null>(null);
@@ -173,7 +225,11 @@ function useSceneTextures(): SceneTextures | null {
       deck: makeDeckTexture(),
       ground: makeGroundTexture(),
       stucco: applyRepeat(makeStuccoTexture(), [4, 3]),
-      water: makeWaterSurfaceTexture(),
+      water: {
+        albedo: makeWaterSurfaceTexture(),
+        normalA: makeWaterNormalTexture(3),
+        normalB: makeWaterNormalTexture(29),
+      },
     };
   }, []);
 }
@@ -270,12 +326,14 @@ function SelectableMaterial({
   /** Water volume fill vs top surface — different depth/side settings. */
   waterLayer,
   patioFinishId,
+  colorHex,
 }: {
   material: SceneMaterialKey;
   opacity?: number;
   selected: boolean;
   waterLayer?: "volume" | "surface";
   patioFinishId?: string;
+  colorHex?: string;
 }) {
   const clippingPlanes = useContext(ClipPlanesContext);
   const textures = useContext(TextureContext);
@@ -295,28 +353,49 @@ function SelectableMaterial({
     material === "cover"
       ? false
       : (opacity ?? 1) < 0.99 || material === "window" || isWater;
+  const color = colorHex ?? mat.color;
   if (isWater) {
-    const surface = waterLayer === "surface";
     return (
-      <meshStandardMaterial
-        color={mat.color}
-        map={surface ? (textures?.water ?? undefined) : undefined}
-        roughness={surface ? 0.06 : 0.22}
-        metalness={surface ? 0.28 : 0.05}
-        transparent
-        opacity={
-          surface
-            ? Math.min(0.72, Math.max(0.48, opacity ?? 0.58))
-            : Math.min(0.32, Math.max(0.18, opacity ?? 0.24))
+      <WaterMaterial
+        layer={waterLayer === "volume" ? "volume" : "surface"}
+        selected={selected}
+        opacity={opacity}
+        spa={material === "spaWater"}
+      />
+    );
+  }
+
+  const isGlassFence =
+    (material === "fence" || material === "gate") && transparent;
+  const usePhysical =
+    mat.clearcoat != null ||
+    mat.transmission != null ||
+    isGlassFence ||
+    material === "window";
+
+  if (usePhysical) {
+    const glassLike = isGlassFence || material === "window";
+    return (
+      <meshPhysicalMaterial
+        color={color}
+        map={pair?.color}
+        roughnessMap={glassLike ? undefined : pair?.roughness}
+        roughness={glassLike ? 0.05 : mat.roughness}
+        metalness={glassLike ? 0 : mat.metalness}
+        clearcoat={mat.clearcoat ?? (glassLike ? 1 : 0)}
+        clearcoatRoughness={mat.clearcoatRoughness ?? (glassLike ? 0.05 : 0.2)}
+        transmission={
+          glassLike ? (mat.transmission ?? 0.92) : 0
         }
-        side={THREE.FrontSide}
-        // Surface writes depth so the basin doesn't flicker; volume does not.
-        depthWrite={surface}
-        polygonOffset
-        polygonOffsetFactor={surface ? -2 : 1}
-        polygonOffsetUnits={surface ? -2 : 1}
+        thickness={mat.thickness ?? (glassLike ? 0.025 : 0)}
+        ior={mat.ior ?? 1.5}
+        transparent={transparent || glassLike}
+        opacity={glassLike ? 1 : (opacity ?? 1)}
+        side={THREE.DoubleSide}
+        depthWrite={!transparent && !glassLike}
+        envMapIntensity={mat.envMapIntensity ?? (glassLike ? 2 : 1)}
         emissive={selected ? "#1f8a70" : "#000000"}
-        emissiveIntensity={selected ? 0.22 : 0}
+        emissiveIntensity={selected ? 0.28 : 0}
         clippingPlanes={clippingPlanes}
         clipShadows={clippingPlanes.length > 0}
       />
@@ -325,7 +404,7 @@ function SelectableMaterial({
 
   return (
     <meshStandardMaterial
-      color={mat.color}
+      color={color}
       map={pair?.color}
       roughnessMap={pair?.roughness}
       roughness={mat.roughness}
@@ -335,6 +414,7 @@ function SelectableMaterial({
       // Opaque shells keep DoubleSide for cutaways; water uses FrontSide above.
       side={THREE.DoubleSide}
       depthWrite={!transparent}
+      envMapIntensity={mat.envMapIntensity ?? 0.85}
       emissive={selected ? "#1f8a70" : "#000000"}
       emissiveIntensity={selected ? 0.28 : 0}
       clippingPlanes={clippingPlanes}
@@ -432,21 +512,30 @@ function ExtrudeMesh({
     isWater && desc.height <= 0.04 ? "surface" : isWater ? "volume" : undefined;
 
   return (
-    <mesh
-      geometry={geometry}
-      castShadow={!isWater}
-      receiveShadow={!isWater}
-      renderOrder={isWater ? (waterLayer === "surface" ? 3 : 2) : 0}
-      {...handlers}
-    >
-      <SelectableMaterial
-        material={desc.material}
-        opacity={desc.opacity}
-        selected={selected}
-        waterLayer={waterLayer}
-        patioFinishId={desc.patioFinishId}
-      />
-    </mesh>
+    <group>
+      <mesh
+        geometry={geometry}
+        castShadow={!isWater}
+        receiveShadow={!isWater}
+        renderOrder={isWater ? (waterLayer === "surface" ? 3 : 2) : 0}
+        {...handlers}
+      >
+        <SelectableMaterial
+          material={desc.material}
+          opacity={desc.opacity}
+          selected={selected}
+          waterLayer={waterLayer}
+          patioFinishId={desc.patioFinishId}
+        />
+      </mesh>
+      {desc.material === "poolFloor" ? (
+        <BasinCausticOverlay
+          geometry={geometry}
+          yOffset={Math.max(0.008, desc.height * 0.92)}
+          opacity={0.3}
+        />
+      ) : null}
+    </group>
   );
 }
 
@@ -466,22 +555,310 @@ function PlainBoxMesh({
     }
     return desc.rotationY;
   }, [desc.axisX, desc.rotationY]);
+  const pitchRad = desc.pitchRad ?? 0;
 
   return (
-    <mesh
+    <group
       position={[desc.position.x, desc.position.y, desc.position.z]}
       rotation={[0, rotationY, 0]}
-      castShadow
-      receiveShadow
-      {...handlers}
     >
-      <boxGeometry args={[desc.size.x, desc.size.y, desc.size.z]} />
-      <SelectableMaterial
-        material={desc.material}
-        opacity={desc.opacity}
-        selected={selected}
-      />
-    </mesh>
+      <mesh
+        rotation={[0, 0, pitchRad]}
+        castShadow
+        receiveShadow
+        {...handlers}
+      >
+        <boxGeometry args={[desc.size.x, desc.size.y, desc.size.z]} />
+        <SelectableMaterial
+          material={desc.material}
+          opacity={desc.opacity}
+          selected={selected}
+          colorHex={desc.colorHex}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+/** Racked fence: sloping rails + plumb pickets (or solid glass parallelogram). */
+function FencePanelMesh({
+  desc,
+  selected,
+  onSelect,
+}: {
+  desc: FencePanelDescriptor;
+  selected: boolean;
+  onSelect?: (sel: SceneSelection | null) => void;
+}) {
+  const handlers = useSelectHandlers(desc.select, onSelect);
+  const { geometry, yaw, rails, pickets, posts } = useMemo(() => {
+    const ax = desc.a.x;
+    const ay = desc.a.y;
+    const az = desc.a.z;
+    const bx = desc.b.x;
+    const by = desc.b.y;
+    const bz = desc.b.z;
+    const h = desc.heightM;
+    const halfT = desc.thicknessM / 2;
+    const dx = bx - ax;
+    const dz = bz - az;
+    const len = Math.hypot(dx, dz) || 1;
+    const ux = dx / len;
+    const uz = dz / len;
+    const nx = -uz;
+    const nz = ux;
+    const yaw = Math.atan2(-uz, ux);
+    const postSize = desc.postSizeM ?? 0;
+
+    type Post = { x: number; y: number; z: number; h: number; size: number };
+    const postList: Post[] = [];
+    if (postSize > 0) {
+      postList.push(
+        { x: ax, y: ay + h / 2, z: az, h, size: postSize },
+        { x: bx, y: by + h / 2, z: bz, h, size: postSize },
+      );
+    }
+
+    const parallelogram = () => {
+      // Inset solid panel between posts so posts read as solid ends.
+      const inset = postSize > 0 ? postSize * 0.5 : 0;
+      const t0 = inset / len;
+      const t1 = 1 - inset / len;
+      if (t1 <= t0) {
+        return null;
+      }
+      const sax = ax + dx * t0;
+      const say = ay + (by - ay) * t0;
+      const saz = az + dz * t0;
+      const sbx = ax + dx * t1;
+      const sby = ay + (by - ay) * t1;
+      const sbz = az + dz * t1;
+      const positions = new Float32Array(8 * 3);
+      const write = (
+        i: number,
+        x: number,
+        y: number,
+        z: number,
+      ) => {
+        positions[i * 3] = x;
+        positions[i * 3 + 1] = y;
+        positions[i * 3 + 2] = z;
+      };
+      write(0, sax - nx * halfT, say, saz - nz * halfT);
+      write(1, sbx - nx * halfT, sby, sbz - nz * halfT);
+      write(2, sbx - nx * halfT, sby + h, sbz - nz * halfT);
+      write(3, sax - nx * halfT, say + h, saz - nz * halfT);
+      write(4, sax + nx * halfT, say, saz + nz * halfT);
+      write(5, sbx + nx * halfT, sby, sbz + nz * halfT);
+      write(6, sbx + nx * halfT, sby + h, sbz + nz * halfT);
+      write(7, sax + nx * halfT, say + h, saz + nz * halfT);
+      const indices = [
+        0, 1, 2, 0, 2, 3,
+        5, 4, 7, 5, 7, 6,
+        4, 0, 3, 4, 3, 7,
+        1, 5, 6, 1, 6, 2,
+        3, 2, 6, 3, 6, 7,
+        4, 5, 1, 4, 1, 0,
+      ];
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geo.setIndex(indices);
+      geo.computeVertexNormals();
+      return geo;
+    };
+
+    const picketW = desc.picketWidthM;
+    const picketGap = desc.picketGapM ?? 0.08;
+    if (picketW == null || picketW <= 0) {
+      return {
+        geometry: parallelogram(),
+        yaw,
+        rails: null as null | {
+          mid: [number, number, number];
+          pitch: number;
+          len: number;
+        }[],
+        pickets: null as null | {
+          x: number;
+          y: number;
+          z: number;
+          h: number;
+        }[],
+        posts: postList,
+      };
+    }
+
+    const railH = Math.min(0.05, h * 0.08);
+    const pitch = Math.atan2(by - ay, len);
+    // Rails run between post faces (not through post centers).
+    const railInset = postSize > 0 ? postSize * 0.5 : 0;
+    const railLen = Math.max(0.05, len - railInset * 2);
+    const railT0 = railInset / len;
+    const railT1 = 1 - railInset / len;
+    const r0x = ax + dx * railT0;
+    const r0z = az + dz * railT0;
+    const r0y = ay + (by - ay) * railT0;
+    const r1x = ax + dx * railT1;
+    const r1z = az + dz * railT1;
+    const r1y = ay + (by - ay) * railT1;
+    const midX = (r0x + r1x) / 2;
+    const midZ = (r0z + r1z) / 2;
+    const midY0 = (r0y + r1y) / 2;
+    const rails = [
+      {
+        mid: [midX, midY0 + (railH / 2) * Math.cos(pitch), midZ] as [
+          number,
+          number,
+          number,
+        ],
+        pitch,
+        len: railLen,
+      },
+      {
+        mid: [
+          midX,
+          midY0 + h - (railH / 2) * Math.cos(pitch),
+          midZ,
+        ] as [number, number, number],
+        pitch,
+        len: railLen,
+      },
+    ];
+
+    // Pack pickets edge-to-edge across the clear bay (adjust gap to fill).
+    const spanStart = railInset;
+    const spanEnd = len - railInset;
+    const spanLen = spanEnd - spanStart;
+    let count =
+      spanLen > 0
+        ? Math.max(1, Math.round((spanLen + picketGap) / (picketW + picketGap)))
+        : 0;
+    while (count > 1 && count * picketW > spanLen + 1e-6) count -= 1;
+    const gap =
+      count > 1 ? Math.max(0, (spanLen - count * picketW) / (count - 1)) : 0;
+    const picketList: { x: number; y: number; z: number; h: number }[] = [];
+    const picketH = Math.max(0.05, h - railH * 1.6);
+    for (let i = 0; i < count; i++) {
+      const d = spanStart + picketW / 2 + i * (picketW + gap);
+      const t = d / len;
+      const x = ax + dx * t;
+      const z = az + dz * t;
+      const yBase = ay + (by - ay) * t + railH * 0.85;
+      picketList.push({
+        x,
+        y: yBase + picketH / 2,
+        z,
+        h: picketH,
+      });
+    }
+
+    return {
+      geometry: null as THREE.BufferGeometry | null,
+      yaw,
+      rails,
+      pickets: picketList,
+      posts: postList,
+    };
+  }, [desc]);
+
+  useEffect(() => {
+    return () => {
+      geometry?.dispose();
+    };
+  }, [geometry]);
+
+  if (geometry) {
+    return (
+      <group {...handlers}>
+        <mesh geometry={geometry} castShadow receiveShadow>
+          <SelectableMaterial
+            material={desc.material}
+            opacity={desc.opacity}
+            selected={selected}
+            colorHex={desc.colorHex}
+          />
+        </mesh>
+        {posts.map((p, i) => (
+          <mesh
+            key={`post-${i}`}
+            position={[p.x, p.y, p.z]}
+            rotation={[0, yaw, 0]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry args={[p.size, p.h, p.size]} />
+            <SelectableMaterial
+              material={desc.material}
+              opacity={desc.opacity}
+              selected={selected}
+              colorHex={desc.colorHex}
+            />
+          </mesh>
+        ))}
+      </group>
+    );
+  }
+
+  const picketW = desc.picketWidthM ?? 0.045;
+
+  return (
+    <group {...handlers}>
+      {posts.map((p, i) => (
+        <mesh
+          key={`post-${i}`}
+          position={[p.x, p.y, p.z]}
+          rotation={[0, yaw, 0]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[p.size, p.h, p.size]} />
+          <SelectableMaterial
+            material={desc.material}
+            opacity={desc.opacity}
+            selected={selected}
+            colorHex={desc.colorHex}
+          />
+        </mesh>
+      ))}
+      {rails?.map((rail, i) => (
+        <group
+          key={`rail-${i}`}
+          position={rail.mid}
+          rotation={[0, yaw, 0]}
+        >
+          <mesh rotation={[0, 0, rail.pitch]} castShadow receiveShadow>
+            <boxGeometry
+              args={[rail.len, Math.min(0.05, desc.heightM * 0.08), Math.max(0.02, desc.thicknessM)]}
+            />
+            <SelectableMaterial
+              material={desc.material}
+              opacity={desc.opacity}
+              selected={selected}
+              colorHex={desc.colorHex}
+            />
+          </mesh>
+        </group>
+      ))}
+      {pickets?.map((p, i) => (
+        <mesh
+          key={`picket-${i}`}
+          position={[p.x, p.y, p.z]}
+          rotation={[0, yaw, 0]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry
+            args={[picketW, p.h, Math.max(0.02, desc.thicknessM * 0.75)]}
+          />
+          <SelectableMaterial
+            material={desc.material}
+            opacity={desc.opacity}
+            selected={selected}
+            colorHex={desc.colorHex}
+          />
+        </mesh>
+      ))}
+    </group>
   );
 }
 
@@ -642,13 +1019,18 @@ function FloorMesh({
   const handlers = useSelectHandlers(desc.select, onSelect);
 
   return (
-    <mesh geometry={geometry} receiveShadow castShadow {...handlers}>
-      <SelectableMaterial
-        material={desc.material}
-        opacity={desc.opacity}
-        selected={selected}
-      />
-    </mesh>
+    <group>
+      <mesh geometry={geometry} receiveShadow castShadow {...handlers}>
+        <SelectableMaterial
+          material={desc.material}
+          opacity={desc.opacity}
+          selected={selected}
+        />
+      </mesh>
+      {desc.material === "poolFloor" ? (
+        <BasinCausticOverlay geometry={geometry} yOffset={0.01} opacity={0.34} />
+      ) : null}
+    </group>
   );
 }
 
@@ -787,10 +1169,10 @@ function WaterBodyMesh({
     );
     surface.setIndex(surfIdx);
     surface.computeVertexNormals();
-    // Simple planar UVs for caustic map
+    // Planar UVs — meters → texture space for caustics / ripple normals
     const uvs: number[] = [];
     for (let i = 0; i < n; i++) {
-      uvs.push(src.getX(i) * 0.35, src.getY(i) * 0.35);
+      uvs.push(src.getX(i) * 0.55, src.getY(i) * 0.55);
     }
     surface.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
 
@@ -823,11 +1205,12 @@ function WaterBodyMesh({
       >
         <SelectableMaterial
           material={desc.material}
-          opacity={desc.opacity ?? 0.24}
+          opacity={desc.opacity ?? 0.34}
           selected={selected}
           waterLayer="volume"
         />
       </mesh>
+      <WaterCausticOverlay geometry={geos.surface} />
       <mesh
         geometry={geos.surface}
         renderOrder={3}
@@ -835,7 +1218,7 @@ function WaterBodyMesh({
       >
         <SelectableMaterial
           material={desc.material}
-          opacity={desc.surfaceOpacity ?? 0.58}
+          opacity={desc.surfaceOpacity ?? 0.82}
           selected={selected}
           waterLayer="surface"
         />
@@ -854,19 +1237,22 @@ function TubeMesh({
   onSelect?: (sel: SceneSelection | null) => void;
 }) {
   const geometry = useMemo(() => {
-    const pts = desc.pointsMm.map((p) => {
+    const pts = desc.pointsMm.map((p, i) => {
       const xz = planToWorldXZ(p);
-      return new THREE.Vector3(xz.x, desc.y, xz.z);
+      const elevMm = desc.elevationsMm?.[i];
+      const y =
+        elevMm != null ? mmToMeters(elevMm) : desc.y;
+      return new THREE.Vector3(xz.x, y, xz.z);
     });
     if (pts.length < 2) return new THREE.BufferGeometry();
-    const curve = new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.1);
-    return new THREE.TubeGeometry(
-      curve,
-      Math.max(8, pts.length * 6),
-      desc.radiusM,
-      8,
-      false,
-    );
+
+    // Piecewise-linear path keeps ortho trenches and vertical risers sharp.
+    const path = new THREE.CurvePath<THREE.Vector3>();
+    for (let i = 0; i < pts.length - 1; i++) {
+      path.add(new THREE.LineCurve3(pts[i], pts[i + 1]));
+    }
+    const segs = Math.max(8, pts.length * 8);
+    return new THREE.TubeGeometry(path, segs, desc.radiusM, 8, false);
   }, [desc]);
 
   useEffect(() => () => geometry.dispose(), [geometry]);
@@ -929,6 +1315,26 @@ function SceneMeshes({
             />
           );
         }
+        if (m.kind === "fencePanel") {
+          return (
+            <FencePanelMesh
+              key={m.id}
+              desc={m}
+              selected={selected}
+              onSelect={onSelect}
+            />
+          );
+        }
+        if (m.kind === "wallPanel") {
+          return (
+            <WallPanelMesh
+              key={m.id}
+              desc={m}
+              selected={selected}
+              onSelect={onSelect}
+            />
+          );
+        }
         if (m.kind === "floor") {
           return (
             <FloorMesh
@@ -959,6 +1365,93 @@ function SceneMeshes({
         );
       })}
     </>
+  );
+}
+
+/** Vertical building wall with punched door/window holes. */
+function WallPanelMesh({
+  desc,
+  selected,
+  onSelect,
+}: {
+  desc: WallPanelDescriptor;
+  selected: boolean;
+  onSelect?: (sel: SceneSelection | null) => void;
+}) {
+  const handlers = useSelectHandlers(desc.select, onSelect);
+  const { geometry, rotationY } = useMemo(() => {
+    const L = Math.max(0.05, desc.lengthM);
+    const H = Math.max(0.05, desc.heightM);
+    const T = Math.max(0.02, desc.thicknessM);
+    const shape = new THREE.Shape();
+    shape.moveTo(-L / 2, 0);
+    shape.lineTo(L / 2, 0);
+    shape.lineTo(L / 2, H);
+    shape.lineTo(-L / 2, H);
+    shape.closePath();
+
+    for (const hole of desc.holes) {
+      const hw = Math.max(0.05, hole.w);
+      const hh = Math.max(0.05, hole.h);
+      // Keep the full opening width — do not shrink toward mid-panel
+      // (that caused half-punched windows near corners).
+      const x0 = hole.x - hw / 2;
+      const x1 = hole.x + hw / 2;
+      const y0 = Math.max(0.005, Math.min(H - 0.06, hole.y));
+      const y1 = Math.max(y0 + 0.05, Math.min(H - 0.005, hole.y + hh));
+      if (x1 <= -L / 2 + 0.01 || x0 >= L / 2 - 0.01) continue;
+      if (y1 - y0 < 0.05 || x1 - x0 < 0.05) continue;
+      // Clip only to the panel extents; never shrink more than the panel edge.
+      const cx0 = Math.max(-L / 2 + 0.001, x0);
+      const cx1 = Math.min(L / 2 - 0.001, x1);
+      if (cx1 - cx0 < 0.05) continue;
+      // Holes must wind opposite the outer shape (CCW outer → CW hole).
+      const path = new THREE.Path();
+      path.moveTo(cx0, y0);
+      path.lineTo(cx0, y1);
+      path.lineTo(cx1, y1);
+      path.lineTo(cx1, y0);
+      path.closePath();
+      shape.holes.push(path);
+    }
+
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth: T,
+      bevelEnabled: false,
+    });
+
+    // Align local +X to axisX. After yaw, local +Z is one of the two horizontals.
+    const rotationY = Math.atan2(-desc.axisX.z, desc.axisX.x);
+    const localZx = Math.sin(rotationY);
+    const localZz = Math.cos(rotationY);
+    const outwardDot =
+      localZx * desc.axisZ.x + localZz * desc.axisZ.z;
+    if (outwardDot > 0) {
+      // +Z faces outward — shift so the solid fills inward from the exterior face.
+      geo.translate(0, 0, -T);
+    }
+    // else +Z already faces inward; exterior face stays at z=0.
+
+    return { geometry: geo, rotationY };
+  }, [desc]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  return (
+    <mesh
+      geometry={geometry}
+      position={[desc.position.x, desc.position.y, desc.position.z]}
+      rotation={[0, rotationY, 0]}
+      castShadow
+      receiveShadow
+      {...handlers}
+    >
+      <SelectableMaterial
+        material={desc.material}
+        selected={selected}
+        colorHex={desc.colorHex}
+      />
+    </mesh>
   );
 }
 
@@ -1061,6 +1554,18 @@ function ClippingEnable({ enabled }: { enabled: boolean }) {
   return null;
 }
 
+function ToneMappingExposure({ exposure }: { exposure: number }) {
+  const { gl } = useThree();
+  useEffect(() => {
+    const prev = gl.toneMappingExposure;
+    gl.toneMappingExposure = exposure;
+    return () => {
+      gl.toneMappingExposure = prev;
+    };
+  }, [exposure, gl]);
+  return null;
+}
+
 function CameraRig({
   projectId,
   center,
@@ -1068,6 +1573,7 @@ function CameraRig({
   viewPreset,
   presetToken,
   section,
+  enabled = true,
 }: {
   projectId: string;
   center: { x: number; z: number };
@@ -1076,6 +1582,8 @@ function CameraRig({
   /** Bumps when the user clicks a preset so we re-apply even if same id. */
   presetToken: number;
   section: BasinSectionFrame | null;
+  /** When false (walk mode), orbit is disabled and pose is not applied. */
+  enabled?: boolean;
 }) {
   const { camera, controls } = useThree();
   const dist = Math.max(12, groundSize * 0.45);
@@ -1087,6 +1595,7 @@ function CameraRig({
   const lastToken = useRef(0);
 
   useEffect(() => {
+    if (!enabled) return;
     if (appliedProject.current === projectId && presetToken === lastToken.current) {
       return;
     }
@@ -1125,12 +1634,15 @@ function CameraRig({
     center,
     controls,
     dist,
+    enabled,
     presetToken,
     projectId,
     section,
     target,
     viewPreset,
   ]);
+
+  if (!enabled) return null;
 
   return (
     <>
@@ -1153,10 +1665,22 @@ type ExportApi = {
   recordOrbit: () => Promise<void>;
 };
 
+/** "Kendig Residence Pool" → "kendig_residence_pool" */
+function projectExportSlug(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return slug || "pool_design";
+}
+
 function ExportBridge({
   apiRef,
+  projectName,
 }: {
   apiRef: MutableRefObject<ExportApi | null>;
+  projectName: string;
 }) {
   const { gl, camera, scene, controls } = useThree();
 
@@ -1167,7 +1691,7 @@ function ExportBridge({
         const url = gl.domElement.toDataURL("image/png");
         const a = document.createElement("a");
         a.href = url;
-        a.download = `pool-design-${Date.now()}.png`;
+        a.download = `${projectExportSlug(projectName)}.png`;
         a.click();
       },
       recordOrbit: async () => {
@@ -1229,7 +1753,7 @@ function ExportBridge({
     return () => {
       apiRef.current = null;
     };
-  }, [apiRef, camera, controls, gl, scene]);
+  }, [apiRef, camera, controls, gl, projectName, scene]);
 
   return null;
 }
@@ -1237,28 +1761,38 @@ function ExportBridge({
 type Props = {
   design: DesignDocument;
   projectId: string;
+  projectName: string;
   selection: SceneSelection | null;
   onSelect: (sel: SceneSelection | null) => void;
+  onDelete?: () => void;
 };
 
 export function CadScene3DCanvas({
   design,
   projectId,
+  projectName,
   selection,
   onSelect,
+  onDelete,
 }: Props) {
   const [showPlumbing, setShowPlumbing] = useState(false);
   const [hideDeck, setHideDeck] = useState(false);
   const [viewPreset, setViewPreset] = useState<ViewPresetId>("default");
+  const [walkMode, setWalkMode] = useState(false);
+  const [walkLocked, setWalkLocked] = useState(false);
+  const [walkSpawnToken, setWalkSpawnToken] = useState(0);
+  const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>("day");
   const [presetToken, setPresetToken] = useState(0);
   const [cutOffset, setCutOffset] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
   const exportApi = useRef<ExportApi | null>(null);
   const textures = useSceneTextures();
+  const tod = TIME_OF_DAY_PRESETS[timeOfDay];
 
   const section = useMemo(() => basinSectionFrame(design), [design]);
-  const cutaway = viewPreset === "basin";
+  const cutaway = !walkMode && viewPreset === "basin";
   const effectiveHideDeck = hideDeck || cutaway;
+  const walkSpawn = useMemo(() => walkSpawnPose(design), [design]);
 
   const clipPlanes = useMemo(() => {
     if (!cutaway || !section) return [] as THREE.Plane[];
@@ -1284,9 +1818,18 @@ export function CadScene3DCanvas({
   );
 
   const applyPreset = (id: ViewPresetId) => {
+    setWalkMode(false);
+    setWalkLocked(false);
     setViewPreset(id);
     setPresetToken((t) => t + 1);
     if (id === "basin") setCutOffset(0);
+  };
+
+  const enterWalk = () => {
+    setWalkMode(true);
+    setWalkLocked(false);
+    setWalkSpawnToken((t) => t + 1);
+    if (viewPreset === "basin") setViewPreset("default");
   };
 
   const onCapture = () => exportApi.current?.capturePng();
@@ -1306,32 +1849,54 @@ export function CadScene3DCanvas({
         <div className="cad-scene3d-toolbar-group">
           <button
             type="button"
-            className={`btn secondary cad-scene3d-tool-btn ${viewPreset === "default" ? "active" : ""}`}
+            className={`btn secondary cad-scene3d-tool-btn ${!walkMode && viewPreset === "default" ? "active" : ""}`}
             onClick={() => applyPreset("default")}
           >
             Orbit
           </button>
           <button
             type="button"
-            className={`btn secondary cad-scene3d-tool-btn ${viewPreset === "basin" ? "active" : ""}`}
+            className={`btn secondary cad-scene3d-tool-btn ${walkMode ? "active" : ""}`}
+            onClick={enterWalk}
+            title="Walk the property in first person — starts inside the house looking out"
+          >
+            Walk
+          </button>
+          <button
+            type="button"
+            className={`btn secondary cad-scene3d-tool-btn ${!walkMode && viewPreset === "basin" ? "active" : ""}`}
             onClick={() => applyPreset("basin")}
           >
             Into basin
           </button>
           <button
             type="button"
-            className={`btn secondary cad-scene3d-tool-btn ${viewPreset === "spa" ? "active" : ""}`}
+            className={`btn secondary cad-scene3d-tool-btn ${!walkMode && viewPreset === "spa" ? "active" : ""}`}
             onClick={() => applyPreset("spa")}
           >
             Spa
           </button>
           <button
             type="button"
-            className={`btn secondary cad-scene3d-tool-btn ${viewPreset === "top" ? "active" : ""}`}
+            className={`btn secondary cad-scene3d-tool-btn ${!walkMode && viewPreset === "top" ? "active" : ""}`}
             onClick={() => applyPreset("top")}
           >
             Top
           </button>
+        </div>
+        <div className="cad-scene3d-toolbar-group" role="group" aria-label="Time of day">
+          {TIME_OF_DAY_ORDER.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={`btn secondary cad-scene3d-tool-btn ${timeOfDay === id ? "active" : ""}`}
+              onClick={() => setTimeOfDay(id)}
+              aria-pressed={timeOfDay === id}
+              title={`${TIME_OF_DAY_PRESETS[id].label} lighting`}
+            >
+              {TIME_OF_DAY_PRESETS[id].label}
+            </button>
+          ))}
         </div>
         <div className="cad-scene3d-toolbar-group">
           <button
@@ -1371,6 +1936,19 @@ export function CadScene3DCanvas({
           >
             {exportBusy ? "Recording…" : "Orbit clip"}
           </button>
+          <button
+            type="button"
+            className="btn danger cad-scene3d-tool-btn"
+            onClick={() => onDelete?.()}
+            disabled={!selection || !onDelete}
+            title={
+              selection
+                ? "Remove selected item from the plan (Delete)"
+                : "Select an item to delete"
+            }
+          >
+            Delete
+          </button>
         </div>
       </div>
       {cutaway ? (
@@ -1402,68 +1980,129 @@ export function CadScene3DCanvas({
         onPointerMissed={() => onSelect(null)}
       >
         <TextureContext.Provider value={textures}>
-          <ClipPlanesContext.Provider value={clipPlanes}>
-            <ClippingEnable enabled={clipPlanes.length > 0} />
-            <ExportBridge apiRef={exportApi} />
-            <color attach="background" args={["#b9c9d4"]} />
-            <fog attach="fog" args={["#b9c9d4", 65, 160]} />
-            <Sky
-              sunPosition={[60, 30, 40]}
-              turbidity={8}
-              rayleigh={0.8}
-              mieCoefficient={0.005}
-              mieDirectionalG={0.7}
-            />
-            <ambientLight intensity={0.55} />
-            <directionalLight
-              position={[40, 50, 20]}
-              intensity={1.15}
-              castShadow
-              shadow-mapSize-width={1024}
-              shadow-mapSize-height={1024}
-              shadow-camera-far={100}
-              shadow-camera-left={-35}
-              shadow-camera-right={35}
-              shadow-camera-top={35}
-              shadow-camera-bottom={-35}
-            />
-            <directionalLight position={[-25, 18, -30]} intensity={0.3} />
-            <hemisphereLight args={["#dceaf2", "#6b7a6e", 0.5]} />
+          <TimeOfDayContext.Provider value={timeOfDay}>
+            <WaterTextureContext.Provider value={textures?.water ?? null}>
+              <ClipPlanesContext.Provider value={clipPlanes}>
+                <ClippingEnable enabled={clipPlanes.length > 0} />
+                <ToneMappingExposure exposure={tod.exposure} />
+                <ExportBridge apiRef={exportApi} projectName={projectName} />
+                <SoftShadowSetup />
+                <PresentationBloom timeOfDay={timeOfDay} />
+                <WaterEnvironment timeOfDay={timeOfDay} />
+                <color attach="background" args={[tod.background]} />
+                <fog attach="fog" args={[tod.fog, tod.fogNear, tod.fogFar]} />
+                {tod.showSky ? (
+                  <Sky
+                    sunPosition={tod.sunPosition}
+                    turbidity={tod.sky.turbidity}
+                    rayleigh={tod.sky.rayleigh}
+                    mieCoefficient={tod.sky.mieCoefficient}
+                    mieDirectionalG={tod.sky.mieDirectionalG}
+                  />
+                ) : null}
+                <ambientLight intensity={tod.ambient} />
+                <SunLight
+                  position={tod.sun.position}
+                  intensity={tod.sun.intensity}
+                  color={tod.sun.color}
+                  castShadow
+                  center={model.center}
+                  groundSize={model.groundSize}
+                />
+                <directionalLight
+                  position={tod.fill.position}
+                  intensity={tod.fill.intensity}
+                  color={tod.fill.color}
+                />
+                <hemisphereLight
+                  args={[tod.hemi.sky, tod.hemi.ground, tod.hemi.intensity]}
+                />
 
-            {model.ground.height > 0.001 ? (
-              <ExtrudeMesh
-                desc={model.ground}
-                selected={false}
-                onSelect={() => onSelect(null)}
-              />
-            ) : null}
+                {model.ground.height > 0.001 ? (
+                  <ExtrudeMesh
+                    desc={model.ground}
+                    selected={false}
+                    onSelect={() => onSelect(null)}
+                  />
+                ) : null}
 
-            <SceneMeshes
-              meshes={model.meshes}
-              selection={selection}
-              onSelect={onSelect}
-            />
-            {cutaway && section ? (
-              <SectionCapMesh section={section} cutOffset={cutOffset} />
-            ) : null}
-            {labels.map((lbl) => (
-              <SceneLabel key={lbl.id} desc={lbl} />
-            ))}
-            <CameraRig
-              projectId={projectId}
-              center={model.center}
-              groundSize={model.groundSize}
-              viewPreset={viewPreset}
-              presetToken={presetToken}
-              section={section}
-            />
-          </ClipPlanesContext.Provider>
+                <SceneMeshes
+                  meshes={model.meshes}
+                  selection={selection}
+                  onSelect={onSelect}
+                />
+                {cutaway && section ? (
+                  <SectionCapMesh section={section} cutOffset={cutOffset} />
+                ) : null}
+                {labels.map((lbl) => (
+                  <SceneLabel key={lbl.id} desc={lbl} />
+                ))}
+                {walkMode ? (
+                  <WalkControls
+                    spawn={walkSpawn}
+                    spawnToken={walkSpawnToken}
+                    center={model.center}
+                    groundSize={model.groundSize}
+                    onLockChange={setWalkLocked}
+                  />
+                ) : (
+                  <CameraRig
+                    projectId={projectId}
+                    center={model.center}
+                    groundSize={model.groundSize}
+                    viewPreset={viewPreset}
+                    presetToken={presetToken}
+                    section={section}
+                    enabled
+                  />
+                )}
+              </ClipPlanesContext.Provider>
+            </WaterTextureContext.Provider>
+          </TimeOfDayContext.Provider>
         </TextureContext.Provider>
       </Canvas>
+      {walkMode ? (
+        <>
+          <div
+            className={`cad-scene3d-walk-veil ${walkLocked ? "is-locked" : ""}`}
+            aria-hidden={walkLocked}
+          >
+            {walkLocked ? null : (
+              <div className="cad-scene3d-walk-card">
+                <p className="cad-scene3d-walk-title">
+                  {walkSpawn.fromBuilding
+                    ? "Inside the house — looking out to the yard"
+                    : "Walk the property"}
+                </p>
+                <p className="cad-scene3d-walk-body">
+                  Click the scene to look around.{" "}
+                  <kbd>W</kbd>
+                  <kbd>A</kbd>
+                  <kbd>S</kbd>
+                  <kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Esc</kbd>{" "}
+                  release mouse
+                </p>
+                <button
+                  type="button"
+                  className="btn secondary cad-scene3d-tool-btn"
+                  onClick={enterWalk}
+                >
+                  Respawn
+                </button>
+              </div>
+            )}
+          </div>
+          {walkLocked ? <div className="cad-scene3d-crosshair" aria-hidden /> : null}
+        </>
+      ) : null}
       <div className="cad-scene3d-hint muted">
-        {cutaway
-          ? "Basin cutaway — slide Cut position · drag to orbit · PNG / Orbit clip to share"
-          : "Click to select · drag to orbit · PNG / Orbit clip to export · edit in 2D"}
+        {walkMode
+          ? walkLocked
+            ? "WASD move · Shift sprint · Esc release mouse · Walk again to respawn inside"
+            : "Click the scene to start walking · Esc anytime to release the mouse"
+          : cutaway
+            ? "Basin cutaway — slide Cut position · drag to orbit · PNG / Orbit clip to share"
+            : "Click to select · drag to orbit · PNG / Orbit clip to export · edit in 2D"}
       </div>
     </div>
   );

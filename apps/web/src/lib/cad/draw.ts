@@ -1,15 +1,22 @@
 import {
+  clampOpeningStory,
   clampOpeningT,
   depthProfileForBody,
   depthStationPlanPoint,
   diningTableShape,
   formatLength,
+  gateEndpoints,
+  houseExteriorPlanFill,
+  houseExteriorPlanStroke,
   isDiningSetId,
   objectFootprint,
   objectPlanSizeMm,
+  resolveHouseExteriorColor,
   segmentLengthMm,
   type Building,
   type BuildingOpening,
+  type FenceGate,
+  type FenceRun,
   type GradeSample,
   type PatioCover,
   type PlacedObject,
@@ -19,6 +26,7 @@ import {
   type PoolFeature,
   type RetainingSegment,
   type UnitSystem,
+  resolveSpaSpillover,
 } from "@pool-design/shared";
 import { type Viewport, worldToScreen } from "@/lib/cad/math";
 
@@ -99,6 +107,57 @@ export function drawPolygon(
   }
 }
 
+/** Plan cue for spa→pool spillover weir (double tick + openings). */
+export function drawSpaSpillover(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  spa: PoolBody,
+  pools: PoolBody[],
+) {
+  const spill = resolveSpaSpillover(spa, pools);
+  if (!spill) return;
+
+  const drawSeg = (a: PointMm, b: PointMm, width: number, color: string) => {
+    const sa = worldToScreen(a, vp);
+    const sb = worldToScreen(b, vp);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(sa.x, sa.y);
+    ctx.lineTo(sb.x, sb.y);
+    ctx.stroke();
+  };
+
+  // Outer weir span
+  drawSeg(spill.a, spill.b, 5, "#7ec8e3");
+  drawSeg(spill.a, spill.b, 2, "#0d4f66");
+
+  // Perpendicular ticks at ends
+  const len =
+    Math.hypot(spill.b.x - spill.a.x, spill.b.y - spill.a.y) || 1;
+  const tx = (spill.b.x - spill.a.x) / len;
+  const ty = (spill.b.y - spill.a.y) / len;
+  const nx = -ty;
+  const ny = tx;
+  const tickMm = 180;
+  for (const p of [spill.a, spill.b]) {
+    drawSeg(
+      { x: p.x - nx * tickMm, y: p.y - ny * tickMm },
+      { x: p.x + nx * tickMm, y: p.y + ny * tickMm },
+      2,
+      "#0d4f66",
+    );
+  }
+
+  // Scupper openings as short bright marks
+  if (spill.style === "scuppers") {
+    for (const o of spill.openings) {
+      drawSeg(o.a, o.b, 3.5, "#b8e6f5");
+    }
+  }
+}
+
 /** Depth axis + station handles for a selected pool. */
 export function drawDepthProfile(
   ctx: CanvasRenderingContext2D,
@@ -156,6 +215,198 @@ export function drawDepthProfile(
     }
   }
   ctx.restore();
+}
+
+export function drawFence(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  fence: FenceRun,
+  selected: boolean,
+  unitSystem: UnitSystem,
+  showVertices: boolean,
+  selectedGateId?: string | null,
+) {
+  if (fence.points.length < 2) return;
+  // Plan stroke stays high-contrast; finish color is 3D-only.
+  const stroke = selected ? "#0f5c4a" : "#3a4550";
+  const isGlass = fence.kind === "glass";
+  const isChain = fence.kind === "chain_link";
+
+  ctx.save();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = selected ? 3.5 : isGlass ? 2.25 : 2.75;
+  ctx.lineCap = "butt";
+  ctx.lineJoin = "miter";
+  if (isChain) ctx.setLineDash([5, 4]);
+  if (isGlass) ctx.globalAlpha = 0.85;
+
+  ctx.beginPath();
+  fence.points.forEach((p, i) => {
+    const c = worldToScreen(p, vp);
+    if (i === 0) ctx.moveTo(c.x, c.y);
+    else ctx.lineTo(c.x, c.y);
+  });
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+
+  // Post ticks at vertices (skip glass — posts are sparse frames).
+  if (!isGlass) {
+    for (const p of fence.points) {
+      const c = worldToScreen(p, vp);
+      ctx.fillStyle = stroke;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, selected ? 3.5 : 2.75, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  for (let i = 1; i < fence.points.length; i++) {
+    drawEdgeLabel(ctx, vp, fence.points[i - 1], fence.points[i], unitSystem);
+  }
+
+  for (const gate of fence.gates ?? []) {
+    drawFenceGate(
+      ctx,
+      vp,
+      fence.points,
+      gate,
+      selectedGateId === gate.id || selected,
+      stroke,
+    );
+  }
+
+  if (showVertices) {
+    for (const p of fence.points) {
+      const c = worldToScreen(p, vp);
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#0f5c4a";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+export function drawFenceGate(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  points: PointMm[],
+  gate: FenceGate,
+  selected: boolean,
+  fenceStroke: string,
+) {
+  const geom = gateEndpoints(points, gate);
+  if (!geom) return;
+  const { a, b, center, edgeA, edgeB } = geom;
+  const edgeLen = segmentLengthMm(edgeA, edgeB);
+  if (edgeLen < 1e-6) return;
+  const ux = (edgeB.x - edgeA.x) / edgeLen;
+  const uy = (edgeB.y - edgeA.y) / edgeLen;
+  const nx = -uy;
+  const ny = ux;
+  const tickMm = gate.kind === "sliding" ? 220 : 320;
+  const sa = worldToScreen(a, vp);
+  const sb = worldToScreen(b, vp);
+  const sc = worldToScreen(center, vp);
+
+  // Gap in fence stroke
+  ctx.strokeStyle = "#eef3f1";
+  ctx.lineWidth = selected ? 6 : 5;
+  ctx.lineCap = "butt";
+  ctx.beginPath();
+  ctx.moveTo(sa.x, sa.y);
+  ctx.lineTo(sb.x, sb.y);
+  ctx.stroke();
+
+  const stroke = selected ? "#1f5f8a" : fenceStroke;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = selected ? 2.5 : 1.75;
+  ctx.lineCap = "square";
+
+  const tickA = worldToScreen(
+    { x: a.x + nx * tickMm, y: a.y + ny * tickMm },
+    vp,
+  );
+  const tickB = worldToScreen(
+    { x: b.x + nx * tickMm, y: b.y + ny * tickMm },
+    vp,
+  );
+
+  // Jambs
+  ctx.beginPath();
+  ctx.moveTo(sa.x, sa.y);
+  ctx.lineTo(tickA.x, tickA.y);
+  ctx.moveTo(sb.x, sb.y);
+  ctx.lineTo(tickB.x, tickB.y);
+  ctx.stroke();
+
+  if (gate.kind === "sliding") {
+    const offset = {
+      x: ux * (segmentLengthMm(a, b) * 0.15),
+      y: uy * (segmentLengthMm(a, b) * 0.15),
+    };
+    const p1 = worldToScreen(
+      {
+        x: a.x + nx * tickMm * 0.35 + offset.x,
+        y: a.y + ny * tickMm * 0.35 + offset.y,
+      },
+      vp,
+    );
+    const p2 = worldToScreen(
+      {
+        x: b.x + nx * tickMm * 0.35 - offset.x,
+        y: b.y + ny * tickMm * 0.35 - offset.y,
+      },
+      vp,
+    );
+    ctx.beginPath();
+    ctx.moveTo(sa.x, sa.y);
+    ctx.lineTo(sb.x, sb.y);
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+  } else if (gate.kind === "double_swing") {
+    const mid = worldToScreen(
+      { x: center.x + nx * tickMm * 0.55, y: center.y + ny * tickMm * 0.55 },
+      vp,
+    );
+    ctx.beginPath();
+    ctx.moveTo(sa.x, sa.y);
+    ctx.lineTo(mid.x, mid.y);
+    ctx.moveTo(sb.x, sb.y);
+    ctx.lineTo(mid.x, mid.y);
+    ctx.stroke();
+  } else {
+    // Swing arc hint
+    ctx.beginPath();
+    ctx.moveTo(sa.x, sa.y);
+    ctx.lineTo(sb.x, sb.y);
+    ctx.stroke();
+    const swing = worldToScreen(
+      { x: a.x + nx * tickMm, y: a.y + ny * tickMm },
+      vp,
+    );
+    ctx.beginPath();
+    ctx.arc(
+      sa.x,
+      sa.y,
+      Math.hypot(sb.x - sa.x, sb.y - sa.y),
+      Math.atan2(swing.y - sa.y, swing.x - sa.x),
+      Math.atan2(sb.y - sa.y, sb.x - sa.x),
+    );
+    ctx.stroke();
+  }
+
+  if (selected) {
+    ctx.fillStyle = stroke;
+    ctx.beginPath();
+    ctx.arc(sc.x, sc.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 export function drawRun(
@@ -236,13 +487,29 @@ export function drawPlacedObject(
     const w = obj.widthMm * vp.scale;
     const d = obj.depthMm * vp.scale;
     const headR = Math.max(3, w * 0.22);
+    const sex = obj.personSex === "male" ? "male" : "female";
+    const outfit =
+      obj.personOutfitId === "casual" ||
+      obj.personOutfitId === "athletic" ||
+      obj.personOutfitId === "coverup" ||
+      obj.personOutfitId === "swimsuit"
+        ? obj.personOutfitId
+        : "swimsuit";
+    const colors =
+      sex === "female"
+        ? outfit === "swimsuit"
+          ? { fill: "rgba(196,91,106,0.45)", stroke: "#a04555" }
+          : { fill: "rgba(122,158,181,0.45)", stroke: "#4a6f85" }
+        : outfit === "swimsuit"
+          ? { fill: "rgba(31,79,109,0.45)", stroke: "#1f4f6d" }
+          : { fill: "rgba(61,107,138,0.45)", stroke: "#3d6b8a" };
     ctx.save();
     ctx.translate(center.x, center.y);
     ctx.rotate(rad);
     ctx.fillStyle = selected || preview
-      ? "rgba(61,107,138,0.55)"
-      : "rgba(61,107,138,0.4)";
-    ctx.strokeStyle = selected || preview ? "#1f5f8a" : "#3d6b8a";
+      ? colors.fill.replace("0.45", "0.6")
+      : colors.fill;
+    ctx.strokeStyle = selected || preview ? "#1f5f8a" : colors.stroke;
     ctx.lineWidth = selected ? 2.2 : 1.4;
     if (preview) ctx.setLineDash([5, 4]);
     // Shoulders / torso
@@ -263,9 +530,14 @@ export function drawPlacedObject(
     ctx.setLineDash([]);
     ctx.restore();
     if (selected || preview) {
+      const hMm = obj.heightMm && obj.heightMm > 0 ? obj.heightMm : 1625.6;
       ctx.fillStyle = "rgba(20,32,41,0.8)";
       ctx.font = "10px Source Sans 3, sans-serif";
-      ctx.fillText("5′8″", center.x + w * 0.35, center.y + 3);
+      ctx.fillText(
+        formatLength(hMm, "imperial"),
+        center.x + w * 0.35,
+        center.y + 3,
+      );
     }
     return;
   }
@@ -343,6 +615,15 @@ export function drawPlacedObject(
         ctx.arc(center.x, center.y, r * 0.55, 0, Math.PI * 2);
         ctx.stroke();
       }
+      // Beam direction into the vessel (matches spa jet convention).
+      const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y);
+      ctx.lineTo(
+        center.x + Math.cos(rad) * r * 1.35,
+        center.y + Math.sin(rad) * r * 1.35,
+      );
+      ctx.stroke();
     }
     ctx.setLineDash([]);
     if (selected || preview) {
@@ -382,6 +663,67 @@ export function drawPlacedObject(
   if (preview) ctx.setLineDash([5, 4]);
   ctx.stroke();
   ctx.setLineDash([]);
+
+  // Pad equipment: simple plan icons so pieces read as pump / filter / heater / cell.
+  if (pad && !preview) {
+    const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
+    const w = obj.widthMm * vp.scale;
+    const d = obj.depthMm * vp.scale;
+    ctx.save();
+    ctx.translate(center.x, center.y);
+    ctx.rotate(rad);
+    ctx.strokeStyle = selected ? "#1a2838" : "#3a5068";
+    ctx.fillStyle = selected ? "rgba(30,50,70,0.55)" : "rgba(50,70,90,0.45)";
+    ctx.lineWidth = 1.4;
+    const id = obj.catalogItemId;
+    if (id === "equip_pad") {
+      ctx.beginPath();
+      ctx.rect(-w * 0.42, -d * 0.42, w * 0.84, d * 0.84);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -d * 0.4);
+      ctx.lineTo(0, d * 0.4);
+      ctx.stroke();
+    } else if (id === "pump_variable_speed") {
+      ctx.beginPath();
+      ctx.ellipse(-w * 0.18, 0, w * 0.22, d * 0.28, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.rect(w * 0.02, -d * 0.22, w * 0.32, d * 0.44);
+      ctx.fill();
+      ctx.stroke();
+    } else if (id === "filter_cartridge") {
+      const r = Math.min(w, d) * 0.32;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.55, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (id === "heater_gas") {
+      ctx.beginPath();
+      ctx.rect(-w * 0.35, -d * 0.35, w * 0.7, d * 0.7);
+      ctx.fill();
+      ctx.stroke();
+      for (const x of [-0.18, 0, 0.18]) {
+        ctx.beginPath();
+        ctx.moveTo(w * x, -d * 0.28);
+        ctx.lineTo(w * x, d * 0.28);
+        ctx.stroke();
+      }
+    } else if (id === "salt_chlorinator") {
+      ctx.beginPath();
+      ctx.ellipse(0, 0, w * 0.38, d * 0.28, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.rect(-w * 0.12, -d * 0.12, w * 0.24, d * 0.24);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 
   // Dining: draw tabletop inside the larger chair-clearance footprint.
   if (dining) {
@@ -616,17 +958,72 @@ export function drawPatioCover(
   }
 }
 
+/** Drop duplicate closing vertex so edge indices match open-ring wall loops. */
+/** Open footprint ring (duplicate closing vertex stripped). */
+export function openOutlineRing(outline: PointMm[]): PointMm[] {
+  if (outline.length < 2) return outline;
+  const first = outline[0];
+  const last = outline[outline.length - 1];
+  if (Math.hypot(first.x - last.x, first.y - last.y) < 1) {
+    return outline.slice(0, -1);
+  }
+  return outline;
+}
+
+/**
+ * Map a stored opening.edgeIndex onto the open footprint ring.
+ * Closed outlines (duplicate end point) otherwise shift wall cuts vs glass.
+ */
+export function resolveOpeningEdge(
+  outline: PointMm[],
+  edgeIndex: number,
+): { ring: PointMm[]; edgeIndex: number; edgeA: PointMm; edgeB: PointMm; edgeLen: number } | null {
+  const ring = openOutlineRing(outline);
+  const n = ring.length;
+  if (n < 2) return null;
+
+  const rawN = outline.length;
+  const rawA = outline[((edgeIndex % rawN) + rawN) % rawN];
+  const rawB = outline[(((edgeIndex + 1) % rawN) + rawN) % rawN];
+  const rawLen = segmentLengthMm(rawA, rawB);
+
+  let bestI = ((edgeIndex % n) + n) % n;
+  if (rawLen >= 1) {
+    let bestScore = Infinity;
+    for (let i = 0; i < n; i++) {
+      const a = ring[i];
+      const b = ring[(i + 1) % n];
+      const d =
+        Math.hypot(a.x - rawA.x, a.y - rawA.y) +
+        Math.hypot(b.x - rawB.x, b.y - rawB.y);
+      const dRev =
+        Math.hypot(a.x - rawB.x, a.y - rawB.y) +
+        Math.hypot(b.x - rawA.x, b.y - rawA.y);
+      const score = Math.min(d, dRev);
+      if (score < bestScore) {
+        bestScore = score;
+        bestI = i;
+      }
+    }
+  } else {
+    // Degenerate closing edge — treat as the last real wall.
+    bestI = n - 1;
+  }
+
+  const edgeA = ring[bestI];
+  const edgeB = ring[(bestI + 1) % n];
+  const edgeLen = segmentLengthMm(edgeA, edgeB);
+  if (edgeLen < 1e-6) return null;
+  return { ring, edgeIndex: bestI, edgeA, edgeB, edgeLen };
+}
+
 export function openingEndpoints(
   outline: PointMm[],
   opening: BuildingOpening,
 ): { a: PointMm; b: PointMm; center: PointMm; edgeA: PointMm; edgeB: PointMm } | null {
-  if (outline.length < 2) return null;
-  const n = outline.length;
-  const edgeIndex = ((opening.edgeIndex % n) + n) % n;
-  const edgeA = outline[edgeIndex];
-  const edgeB = outline[(edgeIndex + 1) % n];
-  const edgeLen = segmentLengthMm(edgeA, edgeB);
-  if (edgeLen < 1e-6) return null;
+  const resolved = resolveOpeningEdge(outline, opening.edgeIndex);
+  if (!resolved) return null;
+  const { edgeA, edgeB, edgeLen } = resolved;
   const t = clampOpeningT(edgeLen, opening.widthMm, opening.t);
   const half = Math.min(opening.widthMm / 2, edgeLen / 2);
   const ux = (edgeB.x - edgeA.x) / edgeLen;
@@ -787,19 +1184,33 @@ export function drawBuilding(
   selected: boolean,
   unitSystem: UnitSystem,
   selectedOpeningId?: string | null,
+  /** When set, only draw openings on this story (1 = ground). */
+  planStoryFilter?: number | "all" | null,
 ) {
+  const exterior = resolveHouseExteriorColor(
+    building.exteriorFinishId,
+    building.exteriorColor,
+  );
   drawPolygon(
     ctx,
     vp,
     building.outline,
     selected,
-    selected ? "#5c4a3a" : "#7a6550",
-    "rgba(122,101,80,0.35)",
+    houseExteriorPlanStroke(exterior, selected),
+    houseExteriorPlanFill(exterior),
     unitSystem,
     true,
     selected,
   );
+  const stories = Math.max(1, building.stories || 1);
   for (const opening of building.openings ?? []) {
+    if (
+      planStoryFilter != null &&
+      planStoryFilter !== "all" &&
+      clampOpeningStory(opening.story, stories) !== planStoryFilter
+    ) {
+      continue;
+    }
     drawBuildingOpening(
       ctx,
       vp,

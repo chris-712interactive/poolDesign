@@ -49,7 +49,45 @@ export type PoolBody = {
   depthStations?: DepthStation[];
   /** Unit direction of the depth axis in plan (shallow → deep). */
   depthAxis?: PointMm;
+  /**
+   * Spa → pool spillover weir (only for kind spa). Defaults on when the spa
+   * shares a wall with a pool; set enabled: false to disable.
+   */
+  spillover?: SpaSpillover;
 };
+
+/** Visual style of the spa→pool cascade. */
+export type SpaSpilloverStyle = "sheet" | "scuppers" | "sheer";
+
+export const SPA_SPILLOVER_STYLES: SpaSpilloverStyle[] = [
+  "sheet",
+  "scuppers",
+  "sheer",
+];
+
+/** Authorable spa spillover into an attached pool. */
+export type SpaSpillover = {
+  enabled: boolean;
+  /** Target pool body id; validated against geometric join */
+  targetPoolId?: string;
+  /** Spa outside-outline edge index for the weir */
+  edgeIndex?: number;
+  /** Weir length along the edge (mm) */
+  widthMm?: number;
+  /** Center offset along shared overlap from its midpoint (mm) */
+  offsetMm?: number;
+  /** Notch depth below spa rim (mm) */
+  notchDepthMm?: number;
+  style?: SpaSpilloverStyle;
+  /** Scuppers only: number of openings (2–8) */
+  scupperCount?: number;
+  /** Scuppers only: clear gap between openings (mm) */
+  scupperGapMm?: number;
+};
+
+export function isSpaSpilloverStyle(v: unknown): v is SpaSpilloverStyle {
+  return v === "sheet" || v === "scuppers" || v === "sheer";
+}
 
 /** How a patio handles existing grade fall-away relative to house FFE. */
 export type PatioGradeStrategy = "fill" | "retaining" | "both";
@@ -142,6 +180,11 @@ export type BuildingOpening = {
    * Defaults to 1 when missing. Clamped to the building's story count.
    */
   story?: number;
+  /**
+   * Bottom of the opening above that story's finished floor (mm).
+   * Windows default to ~36″; doors / sliders default to 0 (on the floor).
+   */
+  sillAboveFloorMm?: number;
 };
 
 /** Standard exterior door 36″ × 80″ */
@@ -199,7 +242,21 @@ export type Building = {
   outline: PointMm[];
   /** Above-grade stories (1, 2, 3+). Defaults to 1 when missing. */
   stories: number;
+  /**
+   * Clear floor-to-ceiling height per story (mm).
+   * Defaults to 8′ (`DEFAULT_CEILING_HEIGHT_MM`) when missing.
+   */
+  ceilingHeightMm?: number;
   kind?: BuildingKind;
+  /**
+   * Exterior wall finish id from `HOUSE_EXTERIOR_FINISHES`, or `"custom"`.
+   * Defaults to white when missing.
+   */
+  exteriorFinishId?: string;
+  /**
+   * Custom exterior RGB (0–255). Used when `exteriorFinishId` is `"custom"`.
+   */
+  exteriorColor?: { r: number; g: number; b: number };
   /** Doors and windows on wall edges */
   openings?: BuildingOpening[];
 };
@@ -230,6 +287,15 @@ export type PlacedObject = {
    * Umbrellas use this for canopy canvas.
    */
   fabricFinishId?: string;
+  /**
+   * Bubbler option: niche LED under the fountain (affects estimate).
+   * Only meaningful for spa_bubbler / pool_bubbler.
+   */
+  hasLedLight?: boolean;
+  /** Scale figure sex — only for `person_scale`. */
+  personSex?: "female" | "male";
+  /** Scale figure outfit id — only for `person_scale`. */
+  personOutfitId?: string;
 };
 
 export type PlumbingRun = {
@@ -238,12 +304,190 @@ export type PlumbingRun = {
   circuit: "suction" | "return" | "gas" | "other";
   /** Polyline vertices in mm */
   points: PointMm[];
+  /**
+   * Optional elevation of each point above grade (mm). Parallel to `points`.
+   * Negative = buried trench; positive = riser / equipment port height.
+   * When omitted, 3D treats the whole run as buried.
+   */
+  elevationsMm?: number[];
   pipeDiameterMm?: number;
   /** Optional link to a pool/spa body (auto spa plumbing) */
   parentBodyId?: string;
   /** Optional link to pad equipment (pump / pad) this run serves */
   equipmentObjectId?: string;
+  /**
+   * Auto-built pad manifold (risers + pump→filter→heater→salt).
+   * Rebuilt when pad equipment moves; not tied to a water body.
+   */
+  padLocal?: boolean;
 };
+
+/** Property fence material / style. */
+export type FenceKind =
+  | "aluminum"
+  | "wood"
+  | "vinyl"
+  | "wrought_iron"
+  | "chain_link"
+  | "glass";
+
+export const FENCE_KINDS: FenceKind[] = [
+  "aluminum",
+  "wood",
+  "vinyl",
+  "wrought_iron",
+  "chain_link",
+  "glass",
+];
+
+/** Gate style placed as an opening on a fence run. */
+export type GateKind = "swing" | "double_swing" | "sliding";
+
+export const GATE_KINDS: GateKind[] = ["swing", "double_swing", "sliding"];
+
+/** Typical residential fence height 6′ */
+export const DEFAULT_FENCE_HEIGHT_MM = 1828.8;
+/** Glass pool barriers are often ~5′ */
+export const DEFAULT_GLASS_FENCE_HEIGHT_MM = 1524;
+/** Plan / 3D panel thickness */
+export const FENCE_THICKNESS_MM = 50;
+
+/** Single pedestrian gate ~36″ */
+export const DEFAULT_GATE_WIDTH_MM = 914.4;
+/** Double swing / driveway-style ~10′ */
+export const DEFAULT_DOUBLE_GATE_WIDTH_MM = 3048;
+/** Sliding gate ~12′ */
+export const DEFAULT_SLIDING_GATE_WIDTH_MM = 3657.6;
+
+export type FenceGate = {
+  id: string;
+  kind: GateKind;
+  /** Segment: points[edgeIndex] → points[edgeIndex + 1] (open polyline). */
+  edgeIndex: number;
+  /** Center of gate along the edge, 0..1 */
+  t: number;
+  widthMm: number;
+  /** Gate leaf height; defaults to fence height when omitted. */
+  heightMm?: number;
+  /** Optional color override (otherwise inherits fence finish). */
+  finishId?: string;
+};
+
+/** Open polyline fence run along a property / yard line. */
+export type FenceRun = {
+  id: string;
+  name: string;
+  kind: FenceKind;
+  /** Open polyline vertices in mm */
+  points: PointMm[];
+  /** Height above grade (mm). Defaults by kind when omitted. */
+  heightMm?: number;
+  /** Color / stain / powder-coat finish id (see fence-finishes). */
+  finishId?: string;
+  gates?: FenceGate[];
+};
+
+export function fenceKindLabel(kind: FenceKind): string {
+  if (kind === "wrought_iron") return "Wrought iron";
+  if (kind === "chain_link") return "Chain link";
+  if (kind === "aluminum") return "Aluminum";
+  if (kind === "vinyl") return "Vinyl";
+  if (kind === "glass") return "Glass";
+  return "Wood";
+}
+
+export function gateKindLabel(kind: GateKind): string {
+  if (kind === "double_swing") return "Double swing";
+  if (kind === "sliding") return "Sliding";
+  return "Swing";
+}
+
+export function defaultFenceHeightMm(kind: FenceKind): number {
+  return kind === "glass"
+    ? DEFAULT_GLASS_FENCE_HEIGHT_MM
+    : DEFAULT_FENCE_HEIGHT_MM;
+}
+
+export function defaultGateSize(kind: GateKind): {
+  widthMm: number;
+  heightMm: number;
+} {
+  if (kind === "double_swing") {
+    return {
+      widthMm: DEFAULT_DOUBLE_GATE_WIDTH_MM,
+      heightMm: DEFAULT_FENCE_HEIGHT_MM,
+    };
+  }
+  if (kind === "sliding") {
+    return {
+      widthMm: DEFAULT_SLIDING_GATE_WIDTH_MM,
+      heightMm: DEFAULT_FENCE_HEIGHT_MM,
+    };
+  }
+  return {
+    widthMm: DEFAULT_GATE_WIDTH_MM,
+    heightMm: DEFAULT_FENCE_HEIGHT_MM,
+  };
+}
+
+export function isFenceKind(value: unknown): value is FenceKind {
+  return (
+    typeof value === "string" && (FENCE_KINDS as string[]).includes(value)
+  );
+}
+
+export function isGateKind(value: unknown): value is GateKind {
+  return typeof value === "string" && (GATE_KINDS as string[]).includes(value);
+}
+
+/**
+ * Gate endpoints on an open fence polyline (same math as building openings,
+ * but edges are not closed).
+ */
+export function gateEndpoints(
+  points: PointMm[],
+  gate: Pick<FenceGate, "edgeIndex" | "t" | "widthMm">,
+): {
+  a: PointMm;
+  b: PointMm;
+  center: PointMm;
+  edgeA: PointMm;
+  edgeB: PointMm;
+} | null {
+  if (points.length < 2) return null;
+  const maxEdge = points.length - 2;
+  const edgeIndex = Math.min(maxEdge, Math.max(0, gate.edgeIndex | 0));
+  const edgeA = points[edgeIndex];
+  const edgeB = points[edgeIndex + 1];
+  const edgeLen = segmentLengthMm(edgeA, edgeB);
+  if (edgeLen < 1e-6) return null;
+  const t = clampOpeningT(edgeLen, gate.widthMm, gate.t);
+  const half = Math.min(gate.widthMm / 2, edgeLen / 2);
+  const ux = (edgeB.x - edgeA.x) / edgeLen;
+  const uy = (edgeB.y - edgeA.y) / edgeLen;
+  const center = {
+    x: edgeA.x + (edgeB.x - edgeA.x) * t,
+    y: edgeA.y + (edgeB.y - edgeA.y) * t,
+  };
+  return {
+    edgeA,
+    edgeB,
+    center,
+    a: { x: center.x - ux * half, y: center.y - uy * half },
+    b: { x: center.x + ux * half, y: center.y + uy * half },
+  };
+}
+
+/** Fence LF for takeoff: path length minus gate openings. */
+export function fenceBillableLengthMm(fence: FenceRun): number {
+  const total = polylineLengthMm(fence.points);
+  const gates = fence.gates ?? [];
+  let openings = 0;
+  for (const g of gates) {
+    openings += Math.max(0, g.widthMm);
+  }
+  return Math.max(0, total - openings);
+}
 
 export type PoolFeatureKind = "steps" | "bench" | "sunshelf";
 
@@ -299,6 +543,8 @@ export type DesignDocument = {
   objects: PlacedObject[];
   plumbingRuns: PlumbingRun[];
   features: PoolFeature[];
+  /** Property fence runs with optional gates */
+  fences?: FenceRun[];
   /** Optional BOM edits (removed auto lines + custom adds) */
   estimate?: DesignEstimate;
   /** Spot elevations relative to house FFE */
@@ -314,6 +560,7 @@ export function emptyDesignDocument(
     "pool",
     "patio",
     "covers",
+    "fence",
     "plumbing",
     "furniture",
     "features",
@@ -337,6 +584,7 @@ export function emptyDesignDocument(
     objects: [],
     plumbingRuns: [],
     features: [],
+    fences: [],
     estimate: { removedLineKeys: [], customLines: [] },
     gradeSamples: [],
     gradeOptions: { retainingTriggerMm: DEFAULT_RETAINING_TRIGGER_MM },

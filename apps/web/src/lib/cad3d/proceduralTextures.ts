@@ -500,28 +500,97 @@ export function makeUmbrellaCanvasTexture(): TexPair {
   return pair;
 }
 
-/** Soft caustic-ish pattern for water surface tint (low contrast). */
+/**
+ * Pool-water height field used for caustics + normals.
+ * Combines multi-scale ripples with soft caustic cells.
+ */
+function waterHeight(x: number, y: number, seed: number): number {
+  const n1 = fbm(x / 48, y / 48, seed, 5);
+  const n2 = fbm(x / 18, y / 18, seed + 17, 3);
+  const ripple =
+    0.55 * Math.sin(x * 0.11 + n1 * 5.5) * Math.cos(y * 0.095 + n2 * 4.8) +
+    0.28 * Math.sin((x + y) * 0.07 + n1 * 3.2) +
+    0.18 * Math.sin((x - y * 0.7) * 0.14 + n2 * 2.4);
+  // Soft cellular caustic ridges
+  const cx = x / 36 + n1 * 0.8;
+  const cy = y / 36 + n2 * 0.8;
+  const fx = cx - Math.floor(cx) - 0.5;
+  const fy = cy - Math.floor(cy) - 0.5;
+  const cell = Math.pow(1 - Math.min(1, Math.hypot(fx, fy) * 2.1), 2.4);
+  return ripple * 0.62 + cell * 0.38;
+}
+
+/** Turquoise caustic albedo for the water surface tint. */
 export function makeWaterSurfaceTexture(): THREE.CanvasTexture {
-  const size = 256;
+  const size = 512;
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext("2d")!;
   const img = ctx.createImageData(size, size);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const n =
-        0.55 +
-        0.25 * Math.sin(x * 0.09 + fbm(x / 40, y / 40, 3, 3) * 6) *
-          Math.cos(y * 0.08 + fbm(x / 50, y / 50, 8, 3) * 5);
-      const v = Math.floor(n * 255);
-      setPixel(img, x, y, v, v + 8, v + 12, 255);
+      const h = waterHeight(x, y, 3);
+      const h2 = waterHeight(x * 1.35 + 40, y * 1.2 - 18, 11);
+      const caustic = Math.pow(Math.max(0, h * 0.65 + h2 * 0.45), 1.35);
+      // Deep teal → bright cyan caustic flashes (chlorinated pool look)
+      const r = Math.min(255, 8 + caustic * 55 + h2 * 18);
+      const g = Math.min(255, 95 + caustic * 110 + h * 20);
+      const b = Math.min(255, 120 + caustic * 95 + h * 10);
+      setPixel(img, x, y, r, g, b, 255);
     }
   }
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(3, 3);
+  tex.repeat.set(2.4, 2.4);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * Tangent-space normal map from the water height field.
+ * Pass a seed so surface / clearcoat layers can scroll independently.
+ */
+export function makeWaterNormalTexture(seed = 3): THREE.CanvasTexture {
+  const size = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const img = ctx.createImageData(size, size);
+  const strength = 2.8;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const hL = waterHeight(x - 1, y, seed);
+      const hR = waterHeight(x + 1, y, seed);
+      const hD = waterHeight(x, y - 1, seed);
+      const hU = waterHeight(x, y + 1, seed);
+      // OpenGL-style normal map (Y+ up)
+      let nx = (hL - hR) * strength;
+      let ny = (hD - hU) * strength;
+      let nz = 1;
+      const inv = 1 / Math.hypot(nx, ny, nz);
+      nx *= inv;
+      ny *= inv;
+      nz *= inv;
+      setPixel(
+        img,
+        x,
+        y,
+        Math.floor((nx * 0.5 + 0.5) * 255),
+        Math.floor((ny * 0.5 + 0.5) * 255),
+        Math.floor((nz * 0.5 + 0.5) * 255),
+        255,
+      );
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(3.2, 3.2);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
   return tex;
 }

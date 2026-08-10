@@ -114,4 +114,49 @@ describe("buildTakeoff", () => {
       "plaster_interior::Pool",
     );
   });
+
+  it("adds bubbler niche LED lines only when enabled", () => {
+    const design = emptyDesignDocument("residential");
+    design.poolBodies = [
+      {
+        id: "p1",
+        name: "Pool",
+        outline: rect(20 * FT, 40 * FT),
+        depthShallowMm: 3 * FT,
+        depthDeepMm: 8 * FT,
+        kind: "pool",
+      },
+    ];
+    design.objects = [
+      {
+        id: "b1",
+        catalogItemId: "pool_bubbler",
+        name: "Bubbler A",
+        position: { x: 1000, y: 1000 },
+        rotationDeg: 0,
+        layerId: "equipment",
+        widthMm: 6 * 25.4,
+        depthMm: 6 * 25.4,
+        hasLedLight: true,
+      },
+      {
+        id: "b2",
+        catalogItemId: "pool_bubbler",
+        name: "Bubbler B",
+        position: { x: 2000, y: 1000 },
+        rotationDeg: 0,
+        layerId: "equipment",
+        widthMm: 6 * 25.4,
+        depthMm: 6 * 25.4,
+      },
+    ];
+
+    const takeoff = buildTakeoff(design, "imperial");
+    const bubblers = takeoff.lines.find((l) => l.catalogItemId === "pool_bubbler");
+    assert.ok(bubblers);
+    assert.equal(bubblers!.quantity, 2);
+    const leds = takeoff.lines.find((l) => l.catalogItemId === "bubbler_led");
+    assert.ok(leds);
+    assert.equal(leds!.quantity, 1);
+  });
 });

@@ -12,6 +12,8 @@ import {
   DEFAULT_SPA_WALL_THICKNESS_MM,
   DEFAULT_SUNSHELF_DEPTH_MM,
   DESIGN_LEVEL_LABELS,
+  FENCE_KINDS,
+  GATE_KINDS,
   applySpaPackage,
   attachFixturePlumbing,
   axisAlignedRect,
@@ -28,7 +30,15 @@ import {
   pointAtRectDepth,
   rectFromThreePoints,
   designGuideSteps,
+  defaultFenceFinishId,
+  defaultFenceHeightMm,
+  DEFAULT_HOUSE_EXTERIOR_FINISH_ID,
+  defaultGateSize,
+  fenceBillableLengthMm,
+  fenceKindLabel,
   formatLength,
+  gateEndpoints,
+  gateKindLabel,
   insideBoundsFromOutside,
   insideOutlineFromOutside,
   isPadEquipmentId,
@@ -42,7 +52,21 @@ import {
   diningTableShape,
   furnitureFinishRoles,
   getPlaceableItem,
+  isBubblerId,
   isDiningSetId,
+  isWallWaterFixtureId,
+  snapWaterWallFixture,
+  DEFAULT_PERSON_OUTFIT_ID,
+  DEFAULT_PERSON_SEX,
+  PERSON_OUTFITS,
+  PERSON_SEXES,
+  defaultPersonHeightMm,
+  personFootprintMm,
+  resolvePersonHeightMm,
+  resolvePersonOutfitId,
+  resolvePersonSex,
+  type PersonOutfitId,
+  type PersonSex,
   objectFootprint,
   objectLibraryForLevel,
   objectPlanSizeMm,
@@ -77,9 +101,13 @@ import {
   coverSupportFootingSizeMm,
   coverSupportPostSizeMm,
   createCoverSupports,
+  DEFAULT_CEILING_HEIGHT_MM,
   defaultOpeningSize,
+  defaultSillAboveFloorMm,
   openingKindLabel,
+  openingSillAboveFloorMm,
   openingSillMm,
+  resolveCeilingHeightMm,
   addDepthBreak,
   depthProfileForBody,
   depthStationPlanPoint,
@@ -89,12 +117,20 @@ import {
   removeDepthBreak,
   updateDepthStation,
   waterBodyKind,
+  listSpaSpilloverEdges,
+  resolveSpaSpillover,
   type Building,
   type BuildingOpening,
   type BuildingOpeningKind,
   type DepthTransition,
   type DesignDocument,
   type DesignLevel,
+  type FenceGate,
+  type FenceKind,
+  type FenceRun,
+  type GateKind,
+  type SpaSpillover,
+  type SpaSpilloverStyle,
   type PatioCover,
   type PatioCoverKind,
   type PatioRegion,
@@ -110,6 +146,8 @@ import {
 } from "@pool-design/shared";
 import { EstimatePanel } from "@/components/EstimatePanel";
 import { CadScene3DDynamic } from "@/components/CadScene3DDynamic";
+import { FenceFinishPicker } from "@/components/FenceFinishPicker";
+import { HouseFinishPicker } from "@/components/HouseFinishPicker";
 import { FurnitureFinishPicker } from "@/components/FurnitureFinishPicker";
 import { PatioFinishPicker } from "@/components/PatioFinishPicker";
 import {
@@ -132,6 +170,7 @@ import {
   drawDepthProfile,
   drawDraft,
   drawFeature,
+  drawFence,
   drawGradeSample,
   drawGrid,
   drawMeasure,
@@ -141,6 +180,7 @@ import {
   drawRetainingEdges,
   drawRun,
   drawEdgeLabel,
+  drawSpaSpillover,
   openingEndpoints,
 } from "@/lib/cad/draw";
 
@@ -156,6 +196,8 @@ type Selection =
   | { kind: "cover"; id: string }
   | { kind: "coverSupport"; coverId: string; id: string }
   | { kind: "run"; id: string }
+  | { kind: "fence"; id: string }
+  | { kind: "gate"; fenceId: string; id: string }
   | { kind: "object"; id: string }
   | { kind: "feature"; id: string }
   | { kind: "gradeSample"; id: string }
@@ -171,7 +213,14 @@ type DragState =
     }
   | {
       mode: "vertex";
-      kind: "pool" | "patio" | "building" | "cover" | "run" | "feature";
+      kind:
+        | "pool"
+        | "patio"
+        | "building"
+        | "cover"
+        | "run"
+        | "fence"
+        | "feature";
       id: string;
       index: number;
     }
@@ -188,6 +237,7 @@ type DragState =
         | "building"
         | "cover"
         | "run"
+        | "fence"
         | "object"
         | "feature"
         | "gradeSample";
@@ -197,6 +247,11 @@ type DragState =
   | {
       mode: "opening";
       buildingId: string;
+      id: string;
+    }
+  | {
+      mode: "gate";
+      fenceId: string;
       id: string;
     }
   | {
@@ -231,7 +286,65 @@ function formatArea(mm2: number, unitSystem: UnitSystem): string {
 }
 
 function layerVisible(design: DesignDocument, id: string): boolean {
-  return design.layers.find((l) => l.id === id)?.visible !== false;
+  const layer = design.layers.find((l) => l.id === id);
+  if (!layer) return false;
+  return layer.visible !== false;
+}
+
+/**
+ * True if any named layer that exists is visible.
+ * Missing aliases (e.g. "building" when only "house" exists) are ignored —
+ * otherwise hiding "house" would still show via a phantom "building" layer.
+ */
+function anyLayerVisible(design: DesignDocument, ...ids: string[]): boolean {
+  const present = ids.filter((id) => design.layers.some((l) => l.id === id));
+  if (present.length === 0) return true;
+  return present.some((id) => layerVisible(design, id));
+}
+
+/** Placed objects respect their own layerId when that layer exists. */
+function objectLayerVisible(
+  design: DesignDocument,
+  obj: { layerId: string },
+): boolean {
+  const hasLayer = design.layers.some((l) => l.id === obj.layerId);
+  if (hasLayer && !layerVisible(design, obj.layerId)) return false;
+  return true;
+}
+
+/** Whether a current selection still belongs to a visible layer. */
+function selectionOnVisibleLayer(
+  design: DesignDocument,
+  sel: Selection,
+): boolean {
+  if (!sel) return true;
+  switch (sel.kind) {
+    case "pool":
+      return anyLayerVisible(design, "pool", "pools");
+    case "patio":
+      return anyLayerVisible(design, "patio", "deck");
+    case "building":
+    case "opening":
+      return anyLayerVisible(design, "house", "building");
+    case "cover":
+    case "coverSupport":
+      return layerVisible(design, "covers");
+    case "feature":
+      return layerVisible(design, "features");
+    case "run":
+      return layerVisible(design, "plumbing");
+    case "fence":
+    case "gate":
+      return layerVisible(design, "fence");
+    case "object": {
+      const obj = design.objects.find((o) => o.id === sel.id);
+      return obj ? objectLayerVisible(design, obj) : false;
+    }
+    case "gradeSample":
+      return true;
+    default:
+      return true;
+  }
 }
 
 function rotationHandleWorld(obj: PlacedObject): PointMm {
@@ -277,9 +390,15 @@ export function CadWorkspace({
   const [tool, setTool] = useState<Tool>("pool_rect");
   const [waterKind, setWaterKind] = useState<WaterBodyKind>("pool");
   const [coverKind, setCoverKind] = useState<PatioCoverKind>("pergola");
+  const [fenceKind, setFenceKind] = useState<FenceKind>("aluminum");
+  const [gateKind, setGateKind] = useState<GateKind>("swing");
   const [openingKind, setOpeningKind] =
     useState<BuildingOpeningKind>("door");
   const [openingStory, setOpeningStory] = useState(1);
+  /** Plan view: which story's openings to show ("all" or a 1-based story). */
+  const [planStoryFilter, setPlanStoryFilter] = useState<"all" | number>(
+    "all",
+  );
   const [houseStories, setHouseStories] = useState(2);
   const [placeItemId, setPlaceItemId] = useState<string | null>(null);
   const [ortho, setOrtho] = useState(false);
@@ -294,6 +413,13 @@ export function CadWorkspace({
   const [selection, setSelection] = useState<Selection>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [lengthBuffer, setLengthBuffer] = useState("");
+  const selectionRef = useRef<Selection>(null);
+  const lengthBufferRef = useRef("");
+  const draftPointsRef = useRef<PointMm[]>([]);
+  const deleteSelectionRef = useRef<() => void>(() => {});
+  selectionRef.current = selection;
+  lengthBufferRef.current = lengthBuffer;
+  draftPointsRef.current = draftPoints;
   const [showHelp, setShowHelp] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
@@ -374,6 +500,15 @@ export function CadWorkspace({
     if (!opening) return null;
     return { building, opening };
   }, [design.buildings, selection]);
+  const maxPlanStories = useMemo(
+    () =>
+      Math.max(
+        1,
+        houseStories,
+        ...(design.buildings ?? []).map((b) => Math.max(1, b.stories || 1)),
+      ),
+    [design.buildings, houseStories],
+  );
   const selectedCover = useMemo(
     () =>
       selection?.kind === "cover"
@@ -388,6 +523,21 @@ export function CadWorkspace({
         : null,
     [design.plumbingRuns, selection],
   );
+  const selectedFence = useMemo(
+    () =>
+      selection?.kind === "fence"
+        ? (design.fences ?? []).find((f) => f.id === selection.id) ?? null
+        : null,
+    [design.fences, selection],
+  );
+  const selectedGate = useMemo(() => {
+    if (selection?.kind !== "gate") return null;
+    const fence = (design.fences ?? []).find((f) => f.id === selection.fenceId);
+    if (!fence) return null;
+    const gate = (fence.gates ?? []).find((g) => g.id === selection.id);
+    if (!gate) return null;
+    return { fence, gate };
+  }, [design.fences, selection]);
   const selectedObject = useMemo(
     () =>
       selection?.kind === "object"
@@ -467,8 +617,15 @@ export function CadWorkspace({
     [angleSnap, unitSystem, wantOrtho],
   );
 
+  const wallFixturePreview = useMemo(() => {
+    if (!cursor || !isPlacingObject || !placeItem) return null;
+    if (!isWallWaterFixtureId(placeItem.id)) return null;
+    return snapWaterWallFixture(design.poolBodies, cursor);
+  }, [cursor, design.poolBodies, isPlacingObject, placeItem]);
+
   const previewPoint = useMemo(() => {
     if (!cursor) return null;
+    if (wallFixturePreview) return wallFixturePreview.position;
     if (draftPoints.length === 0) return cursor;
     // Third click of rect tools: free cursor — depth is perpendicular to first side.
     if (
@@ -480,7 +637,7 @@ export function CadWorkspace({
       return cursor;
     }
     return constrainPoint(draftPoints[draftPoints.length - 1], cursor);
-  }, [constrainPoint, cursor, draftPoints, tool]);
+  }, [constrainPoint, cursor, draftPoints, tool, wallFixturePreview]);
 
   const draftSegmentMm = useMemo(() => {
     if (!previewPoint || draftPoints.length === 0) return 0;
@@ -534,6 +691,7 @@ export function CadWorkspace({
     (next: DesignDocument) => {
       setPast((p) => [...p.slice(-49), design]);
       setFuture([]);
+      designRef.current = next;
       setDesign(next);
       void persist(next);
     },
@@ -575,7 +733,7 @@ export function CadWorkspace({
 
     drawGrid(ctx, rect.width, rect.height, vp, unitSystem);
 
-    if (layerVisible(design, "house") || layerVisible(design, "building")) {
+    if (anyLayerVisible(design, "house", "building")) {
       for (const building of design.buildings ?? []) {
         const openingSelectedId =
           selection?.kind === "opening" &&
@@ -589,11 +747,12 @@ export function CadWorkspace({
           selection?.kind === "building" && selection.id === building.id,
           unitSystem,
           openingSelectedId,
+          planStoryFilter,
         );
       }
     }
 
-    if (layerVisible(design, "patio") || layerVisible(design, "deck")) {
+    if (anyLayerVisible(design, "patio", "deck")) {
       for (const patio of design.patios) {
         drawPolygon(
           ctx,
@@ -644,7 +803,7 @@ export function CadWorkspace({
       }
     }
 
-    if (layerVisible(design, "pool") || layerVisible(design, "pools")) {
+    if (anyLayerVisible(design, "pool", "pools")) {
       for (const pool of design.poolBodies) {
         const isSpa = waterBodyKind(pool) === "spa";
         const selected =
@@ -675,6 +834,12 @@ export function CadWorkspace({
             unitSystem,
             false,
             false,
+          );
+          drawSpaSpillover(
+            ctx,
+            vp,
+            pool,
+            design.poolBodies.filter((p) => waterBodyKind(p) === "pool"),
           );
         } else if (selected) {
           drawDepthProfile(ctx, vp, pool, unitSystem);
@@ -707,9 +872,24 @@ export function CadWorkspace({
       }
     }
 
+    if (layerVisible(design, "fence")) {
+      for (const fence of design.fences ?? []) {
+        drawFence(
+          ctx,
+          vp,
+          fence,
+          selection?.kind === "fence" && selection.id === fence.id,
+          unitSystem,
+          selection?.kind === "fence" && selection.id === fence.id,
+          selection?.kind === "gate" && selection.fenceId === fence.id
+            ? selection.id
+            : null,
+        );
+      }
+    }
+
     for (const obj of design.objects ?? []) {
-      const hasLayer = design.layers.some((l) => l.id === obj.layerId);
-      if (hasLayer && !layerVisible(design, obj.layerId)) continue;
+      if (!objectLayerVisible(design, obj)) continue;
       drawPlacedObject(
         ctx,
         vp,
@@ -727,7 +907,7 @@ export function CadWorkspace({
           catalogItemId: placeItem.id,
           name: placeItem.name,
           position: previewPoint,
-          rotationDeg: 0,
+          rotationDeg: wallFixturePreview?.rotationDeg ?? 0,
           layerId: placeItem.layerId,
           widthMm: placeItem.widthMm,
           depthMm: placeItem.depthMm,
@@ -825,8 +1005,10 @@ export function CadWorkspace({
           ? "#8a6a2f"
           : tool === "house_poly"
             ? "#7a6550"
-            : "#146353",
-        tool !== "plumbing",
+            : tool === "fence"
+              ? "#2a2a2c"
+              : "#146353",
+        tool !== "plumbing" && tool !== "fence",
         tool === "pool_poly" || tool === "patio" || tool === "house_poly",
       );
       if (
@@ -868,13 +1050,36 @@ export function CadWorkspace({
     measurePoints,
     isPlacingObject,
     placeItem,
+    planStoryFilter,
     previewPoint,
     selection,
     tool,
     unitSystem,
     vp,
     waterKind,
+    wallFixturePreview,
   ]);
+
+  // Drop selection when the plan story filter hides that opening.
+  useEffect(() => {
+    if (selection?.kind !== "opening" || planStoryFilter === "all") return;
+    const building = (design.buildings ?? []).find(
+      (b) => b.id === selection.buildingId,
+    );
+    const opening = building?.openings?.find((o) => o.id === selection.id);
+    if (!building || !opening) return;
+    const story = clampOpeningStory(
+      opening.story,
+      Math.max(1, building.stories || 1),
+    );
+    if (story !== planStoryFilter) setSelection(null);
+  }, [design.buildings, planStoryFilter, selection]);
+
+  // Drop selection when its layer is hidden (matches draw + hit-test).
+  useEffect(() => {
+    if (!selection) return;
+    if (!selectionOnVisibleLayer(design, selection)) setSelection(null);
+  }, [design, selection]);
 
   useEffect(() => {
     if (designMode !== "2d") return;
@@ -883,6 +1088,29 @@ export function CadWorkspace({
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [drawScene, designMode]);
+
+  // Window-level Delete/Backspace so it works when the 3D canvas has focus.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (!selectionRef.current) return;
+      if (lengthBufferRef.current || draftPointsRef.current.length > 0) return;
+      e.preventDefault();
+      deleteSelectionRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   function canvasLocal(e: { clientX: number; clientY: number }) {
     const canvas = canvasRef.current!;
@@ -959,6 +1187,7 @@ export function CadWorkspace({
       outline,
       stories,
       kind: "house",
+      exteriorFinishId: DEFAULT_HOUSE_EXTERIOR_FINISH_ID,
     };
     let layers = design.layers;
     if (
@@ -1030,6 +1259,7 @@ export function CadWorkspace({
       widthMm: size.widthMm,
       heightMm: size.heightMm,
       story: clampOpeningStory(openingStory, stories),
+      sillAboveFloorMm: defaultSillAboveFloorMm(openingKind),
     };
     commitDesign({
       ...design,
@@ -1090,8 +1320,66 @@ export function CadWorkspace({
     setLengthBuffer("");
   }
 
+  function finishFence() {
+    if (draftPoints.length < 2) {
+      setDraftPoints([]);
+      return;
+    }
+    let layers = design.layers;
+    if (!layers.some((l) => l.id === "fence")) {
+      layers = [...layers, { id: "fence", name: "fence", visible: true }];
+    }
+    const fence: FenceRun = {
+      id: newId("fence"),
+      name: `Fence ${(design.fences ?? []).length + 1}`,
+      kind: fenceKind,
+      points: draftPoints,
+      heightMm: defaultFenceHeightMm(fenceKind),
+      finishId: defaultFenceFinishId(fenceKind),
+      gates: [],
+    };
+    commitDesign({
+      ...design,
+      layers,
+      fences: [...(design.fences ?? []), fence],
+    });
+    setSelection({ kind: "fence", id: fence.id });
+    setDraftPoints([]);
+    setLengthBuffer("");
+  }
+
+  function commitGateOnFence(point: PointMm) {
+    const hit = nearestFenceEdge(design.fences ?? [], point, 900);
+    if (!hit) return false;
+    const fence = (design.fences ?? []).find((f) => f.id === hit.fenceId);
+    if (!fence) return false;
+    const size = defaultGateSize(gateKind);
+    const edgeLen = segmentLengthMm(hit.edgeA, hit.edgeB);
+    if (edgeLen < size.widthMm * 0.5) return false;
+    const t = clampOpeningT(edgeLen, size.widthMm, hit.t);
+    const gate: FenceGate = {
+      id: newId("gate"),
+      kind: gateKind,
+      edgeIndex: hit.edgeIndex,
+      t,
+      widthMm: size.widthMm,
+      heightMm: fence.heightMm ?? defaultFenceHeightMm(fence.kind),
+    };
+    commitDesign({
+      ...design,
+      fences: (design.fences ?? []).map((f) =>
+        f.id === fence.id
+          ? { ...f, gates: [...(f.gates ?? []), gate] }
+          : f,
+      ),
+    });
+    setSelection({ kind: "gate", fenceId: fence.id, id: gate.id });
+    return true;
+  }
+
   function finishDraft() {
     if (tool === "plumbing") finishPlumbing();
+    else if (tool === "fence") finishFence();
     else if (tool === "pool_poly") finishPolygon("pool");
     else if (tool === "patio") finishPolygon("patio");
     else if (tool === "house_poly") finishPolygon("house");
@@ -1140,14 +1428,28 @@ export function CadWorkspace({
     point: PointMm,
   ):
     | {
-        kind: "pool" | "patio" | "building" | "cover" | "run" | "feature";
+        kind:
+          | "pool"
+          | "patio"
+          | "building"
+          | "cover"
+          | "run"
+          | "fence"
+          | "feature";
         id: string;
         index: number;
       }
     | null {
     const tol = VERTEX_HIT_PX / vp.scale;
     const check = (
-      kind: "pool" | "patio" | "building" | "cover" | "run" | "feature",
+      kind:
+        | "pool"
+        | "patio"
+        | "building"
+        | "cover"
+        | "run"
+        | "fence"
+        | "feature",
       id: string,
       pts: PointMm[],
     ) => {
@@ -1178,6 +1480,10 @@ export function CadWorkspace({
     }
     if (selection?.kind === "run" && selectedRun) {
       const hit = check("run", selectedRun.id, selectedRun.points);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "fence" && selectedFence) {
+      const hit = check("fence", selectedFence.id, selectedFence.points);
       if (hit) return hit;
     }
     if (selection?.kind === "feature" && selectedFeature) {
@@ -1232,165 +1538,215 @@ export function CadWorkspace({
     }
     for (let i = (design.objects ?? []).length - 1; i >= 0; i--) {
       const obj = design.objects[i];
+      if (!objectLayerVisible(design, obj)) continue;
       const nearCenter = segmentLengthMm(point, obj.position) <= objectHitMm;
       if (nearCenter || pointInPolygon(point, objectFootprint(obj))) {
         return { kind: "object", id: obj.id };
       }
     }
-    for (let i = (design.features ?? []).length - 1; i >= 0; i--) {
-      const feature = design.features[i];
-      if (pointInPolygon(point, feature.outline)) {
-        return { kind: "feature", id: feature.id };
-      }
-    }
-    for (let i = design.plumbingRuns.length - 1; i >= 0; i--) {
-      const run = design.plumbingRuns[i];
-      for (let j = 1; j < run.points.length; j++) {
-        if (distToSegment(point, run.points[j - 1], run.points[j]) <= 120) {
-          return { kind: "run", id: run.id };
+    if (layerVisible(design, "features")) {
+      for (let i = (design.features ?? []).length - 1; i >= 0; i--) {
+        const feature = design.features[i];
+        if (pointInPolygon(point, feature.outline)) {
+          return { kind: "feature", id: feature.id };
         }
       }
     }
-    for (let i = design.poolBodies.length - 1; i >= 0; i--) {
-      if (pointInPolygon(point, design.poolBodies[i].outline)) {
-        return { kind: "pool", id: design.poolBodies[i].id };
-      }
-    }
-    for (let i = (design.patioCovers ?? []).length - 1; i >= 0; i--) {
-      const cover = design.patioCovers[i];
-      for (let j = (cover.supports ?? []).length - 1; j >= 0; j--) {
-        const s = cover.supports![j];
-        const hitR = coverSupportFootingSizeMm(s) / 2 + 40;
-        if (
-          Math.hypot(point.x - s.position.x, point.y - s.position.y) <= hitR
-        ) {
-          return {
-            kind: "coverSupport",
-            coverId: cover.id,
-            id: s.id,
-          };
-        }
-      }
-      if (pointInPolygon(point, cover.outline)) {
-        return { kind: "cover", id: cover.id };
-      }
-    }
-    for (let i = (design.buildings ?? []).length - 1; i >= 0; i--) {
-      const building = design.buildings[i];
-      for (let j = (building.openings ?? []).length - 1; j >= 0; j--) {
-        const opening = building.openings![j];
-        const geom = openingEndpoints(building.outline, opening);
-        if (
-          geom &&
-          distToSegment(point, geom.a, geom.b) <= openingHitMm
-        ) {
-          return {
-            kind: "opening",
-            buildingId: building.id,
-            id: opening.id,
-          };
+    if (layerVisible(design, "plumbing")) {
+      for (let i = design.plumbingRuns.length - 1; i >= 0; i--) {
+        const run = design.plumbingRuns[i];
+        for (let j = 1; j < run.points.length; j++) {
+          if (distToSegment(point, run.points[j - 1], run.points[j]) <= 120) {
+            return { kind: "run", id: run.id };
+          }
         }
       }
     }
-    for (let i = design.patios.length - 1; i >= 0; i--) {
-      if (pointInPolygon(point, design.patios[i].outline)) {
-        return { kind: "patio", id: design.patios[i].id };
+    if (layerVisible(design, "fence")) {
+      for (let i = (design.fences ?? []).length - 1; i >= 0; i--) {
+        const fence = design.fences![i];
+        for (let j = (fence.gates ?? []).length - 1; j >= 0; j--) {
+          const gate = fence.gates![j];
+          const geom = gateEndpoints(fence.points, gate);
+          if (geom && distToSegment(point, geom.a, geom.b) <= openingHitMm) {
+            return { kind: "gate", fenceId: fence.id, id: gate.id };
+          }
+        }
+        for (let j = 1; j < fence.points.length; j++) {
+          if (distToSegment(point, fence.points[j - 1], fence.points[j]) <= 140) {
+            return { kind: "fence", id: fence.id };
+          }
+        }
       }
     }
-    for (let i = (design.buildings ?? []).length - 1; i >= 0; i--) {
-      if (pointInPolygon(point, design.buildings[i].outline)) {
-        return { kind: "building", id: design.buildings[i].id };
+    if (anyLayerVisible(design, "pool", "pools")) {
+      for (let i = design.poolBodies.length - 1; i >= 0; i--) {
+        if (pointInPolygon(point, design.poolBodies[i].outline)) {
+          return { kind: "pool", id: design.poolBodies[i].id };
+        }
+      }
+    }
+    if (layerVisible(design, "covers")) {
+      for (let i = (design.patioCovers ?? []).length - 1; i >= 0; i--) {
+        const cover = design.patioCovers[i];
+        for (let j = (cover.supports ?? []).length - 1; j >= 0; j--) {
+          const s = cover.supports![j];
+          const hitR = coverSupportFootingSizeMm(s) / 2 + 40;
+          if (
+            Math.hypot(point.x - s.position.x, point.y - s.position.y) <= hitR
+          ) {
+            return {
+              kind: "coverSupport",
+              coverId: cover.id,
+              id: s.id,
+            };
+          }
+        }
+        if (pointInPolygon(point, cover.outline)) {
+          return { kind: "cover", id: cover.id };
+        }
+      }
+    }
+    if (anyLayerVisible(design, "house", "building")) {
+      for (let i = (design.buildings ?? []).length - 1; i >= 0; i--) {
+        const building = design.buildings[i];
+        const stories = Math.max(1, building.stories || 1);
+        for (let j = (building.openings ?? []).length - 1; j >= 0; j--) {
+          const opening = building.openings![j];
+          if (
+            planStoryFilter !== "all" &&
+            clampOpeningStory(opening.story, stories) !== planStoryFilter
+          ) {
+            continue;
+          }
+          const geom = openingEndpoints(building.outline, opening);
+          if (
+            geom &&
+            distToSegment(point, geom.a, geom.b) <= openingHitMm
+          ) {
+            return {
+              kind: "opening",
+              buildingId: building.id,
+              id: opening.id,
+            };
+          }
+        }
+      }
+    }
+    if (anyLayerVisible(design, "patio", "deck")) {
+      for (let i = design.patios.length - 1; i >= 0; i--) {
+        if (pointInPolygon(point, design.patios[i].outline)) {
+          return { kind: "patio", id: design.patios[i].id };
+        }
+      }
+    }
+    if (anyLayerVisible(design, "house", "building")) {
+      for (let i = (design.buildings ?? []).length - 1; i >= 0; i--) {
+        if (pointInPolygon(point, design.buildings[i].outline)) {
+          return { kind: "building", id: design.buildings[i].id };
+        }
       }
     }
     return null;
   }
 
   function deleteSelection() {
-    if (!selection) return;
-    if (selection.kind === "pool") {
-      const stripped = stripBodyChildren(design, selection.id);
+    const sel = selectionRef.current;
+    if (!sel) return;
+    const d = designRef.current;
+    if (sel.kind === "pool") {
+      const stripped = stripBodyChildren(d, sel.id);
       commitDesign({
         ...stripped,
-        poolBodies: stripped.poolBodies.filter((p) => p.id !== selection.id),
+        poolBodies: stripped.poolBodies.filter((p) => p.id !== sel.id),
       });
-    } else if (selection.kind === "patio") {
+    } else if (sel.kind === "patio") {
       commitDesign({
-        ...design,
-        patios: design.patios.filter((p) => p.id !== selection.id),
-        patioCovers: (design.patioCovers ?? []).map((c) =>
-          c.patioId === selection.id ? { ...c, patioId: undefined } : c,
+        ...d,
+        patios: d.patios.filter((p) => p.id !== sel.id),
+        patioCovers: (d.patioCovers ?? []).map((c) =>
+          c.patioId === sel.id ? { ...c, patioId: undefined } : c,
         ),
       });
-    } else if (selection.kind === "building") {
+    } else if (sel.kind === "building") {
       commitDesign({
-        ...design,
-        buildings: (design.buildings ?? []).filter(
-          (b) => b.id !== selection.id,
-        ),
+        ...d,
+        buildings: (d.buildings ?? []).filter((b) => b.id !== sel.id),
       });
-    } else if (selection.kind === "opening") {
+    } else if (sel.kind === "opening") {
       commitDesign({
-        ...design,
-        buildings: (design.buildings ?? []).map((b) =>
-          b.id === selection.buildingId
+        ...d,
+        buildings: (d.buildings ?? []).map((b) =>
+          b.id === sel.buildingId
             ? {
                 ...b,
-                openings: (b.openings ?? []).filter(
-                  (o) => o.id !== selection.id,
-                ),
+                openings: (b.openings ?? []).filter((o) => o.id !== sel.id),
               }
             : b,
         ),
       });
-    } else if (selection.kind === "cover") {
+    } else if (sel.kind === "cover") {
       commitDesign({
-        ...design,
-        patioCovers: (design.patioCovers ?? []).filter(
-          (c) => c.id !== selection.id,
-        ),
+        ...d,
+        patioCovers: (d.patioCovers ?? []).filter((c) => c.id !== sel.id),
       });
-    } else if (selection.kind === "coverSupport") {
+    } else if (sel.kind === "coverSupport") {
       commitDesign({
-        ...design,
-        patioCovers: (design.patioCovers ?? []).map((c) =>
-          c.id === selection.coverId
+        ...d,
+        patioCovers: (d.patioCovers ?? []).map((c) =>
+          c.id === sel.coverId
             ? {
                 ...c,
-                supports: (c.supports ?? []).filter(
-                  (s) => s.id !== selection.id,
-                ),
+                supports: (c.supports ?? []).filter((s) => s.id !== sel.id),
               }
             : c,
         ),
       });
-    } else if (selection.kind === "run") {
+    } else if (sel.kind === "run") {
       commitDesign({
-        ...design,
-        plumbingRuns: design.plumbingRuns.filter((r) => r.id !== selection.id),
+        ...d,
+        plumbingRuns: d.plumbingRuns.filter((r) => r.id !== sel.id),
       });
-    } else if (selection.kind === "object") {
-      const removed = design.objects.find((o) => o.id === selection.id);
+    } else if (sel.kind === "fence") {
+      commitDesign({
+        ...d,
+        fences: (d.fences ?? []).filter((f) => f.id !== sel.id),
+      });
+    } else if (sel.kind === "gate") {
+      commitDesign({
+        ...d,
+        fences: (d.fences ?? []).map((f) =>
+          f.id === sel.fenceId
+            ? {
+                ...f,
+                gates: (f.gates ?? []).filter((g) => g.id !== sel.id),
+              }
+            : f,
+        ),
+      });
+    } else if (sel.kind === "object") {
+      const removed = d.objects.find((o) => o.id === sel.id);
       let next: DesignDocument = {
-        ...design,
-        objects: design.objects.filter((o) => o.id !== selection.id),
+        ...d,
+        objects: d.objects.filter((o) => o.id !== sel.id),
       };
       if (removed) next = syncPlumbingAfterObjectRemoved(next, removed);
       commitDesign(next);
-    } else if (selection.kind === "feature") {
+    } else if (sel.kind === "feature") {
       commitDesign({
-        ...design,
-        features: (design.features ?? []).filter((f) => f.id !== selection.id),
+        ...d,
+        features: (d.features ?? []).filter((f) => f.id !== sel.id),
       });
-    } else if (selection.kind === "gradeSample") {
+    } else if (sel.kind === "gradeSample") {
       commitDesign({
-        ...design,
-        gradeSamples: (design.gradeSamples ?? []).filter(
-          (s) => s.id !== selection.id,
-        ),
+        ...d,
+        gradeSamples: (d.gradeSamples ?? []).filter((s) => s.id !== sel.id),
       });
     }
+    selectionRef.current = null;
     setSelection(null);
   }
+  deleteSelectionRef.current = deleteSelection;
 
   function addRectFeature(
     kind: Extract<PoolFeatureKind, "steps" | "bench" | "sunshelf">,
@@ -1474,6 +1830,13 @@ export function CadWorkspace({
           buildingId: hit.buildingId,
           id: hit.id,
         });
+      } else if (hit?.kind === "gate") {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({
+          mode: "gate",
+          fenceId: hit.fenceId,
+          id: hit.id,
+        });
       } else if (hit?.kind === "coverSupport") {
         dragOriginRef.current = structuredClone(design);
         setDrag({
@@ -1482,7 +1845,18 @@ export function CadWorkspace({
           id: hit.id,
           last: point,
         });
-      } else if (hit) {
+      } else if (
+        hit &&
+        (hit.kind === "pool" ||
+          hit.kind === "patio" ||
+          hit.kind === "building" ||
+          hit.kind === "cover" ||
+          hit.kind === "run" ||
+          hit.kind === "fence" ||
+          hit.kind === "object" ||
+          hit.kind === "feature" ||
+          hit.kind === "gradeSample")
+      ) {
         dragOriginRef.current = structuredClone(design);
         setDrag({ mode: "move", kind: hit.kind, id: hit.id, last: point });
       }
@@ -1491,6 +1865,11 @@ export function CadWorkspace({
 
     if (tool === "opening") {
       commitOpeningOnWall(point);
+      return;
+    }
+
+    if (tool === "gate") {
+      commitGateOnFence(point);
       return;
     }
 
@@ -1520,10 +1899,18 @@ export function CadWorkspace({
 
     if (isPlacingObject) {
       if (!placeItem) return;
-      const parentBodyId = isWaterFixtureId(placeItem.id)
-        ? nearestWaterBodyId(design.poolBodies, point)
-        : undefined;
-      const placed = placeLibraryItem(design, placeItem, point, parentBodyId);
+      const wallSnap = isWallWaterFixtureId(placeItem.id)
+        ? snapWaterWallFixture(design.poolBodies, point)
+        : null;
+      const placeAt = wallSnap?.position ?? point;
+      const parentBodyId = wallSnap?.bodyId
+        ? wallSnap.bodyId
+        : isWaterFixtureId(placeItem.id)
+          ? nearestWaterBodyId(design.poolBodies, placeAt)
+          : undefined;
+      const placed = placeLibraryItem(design, placeItem, placeAt, parentBodyId, {
+        rotationDeg: wallSnap?.rotationDeg,
+      });
       let next = placed.design;
       // Pad gear: rebuild all body trenches to the new pad location.
       if (isPadEquipmentId(placeItem.id)) {
@@ -1533,7 +1920,7 @@ export function CadWorkspace({
       if (isPlumbingFixtureId(placeItem.id) && parentBodyId) {
         next = attachFixturePlumbing(next, {
           bodyId: parentBodyId,
-          position: point,
+          position: placeAt,
           catalogItemId: placeItem.id,
         });
       }
@@ -1582,7 +1969,8 @@ export function CadWorkspace({
       tool === "pool_poly" ||
       tool === "patio" ||
       tool === "house_poly" ||
-      tool === "plumbing"
+      tool === "plumbing" ||
+      tool === "fence"
     ) {
       const from = draftPoints[draftPoints.length - 1] ?? null;
       setShiftDown(e.shiftKey);
@@ -1710,8 +2098,13 @@ export function CadWorkspace({
                     ? (designRef.current.features ?? []).find(
                         (f) => f.id === drag.id,
                       )?.outline
-                    : designRef.current.plumbingRuns.find((r) => r.id === drag.id)
-                        ?.points;
+                    : drag.kind === "fence"
+                      ? (designRef.current.fences ?? []).find(
+                          (f) => f.id === drag.id,
+                        )?.points
+                      : designRef.current.plumbingRuns.find(
+                          (r) => r.id === drag.id,
+                        )?.points;
         if (pts && pts.length > 1) {
           const prev = pts[(drag.index - 1 + pts.length) % pts.length];
           snapped = constrainPoint(prev, snapped, true);
@@ -1793,6 +2186,21 @@ export function CadWorkspace({
             ),
           };
         }
+        if (drag.kind === "fence") {
+          return {
+            ...d,
+            fences: (d.fences ?? []).map((f) =>
+              f.id === drag.id
+                ? {
+                    ...f,
+                    points: f.points.map((pt, i) =>
+                      i === drag.index ? snapped : pt,
+                    ),
+                  }
+                : f,
+            ),
+          };
+        }
         return {
           ...d,
           plumbingRuns: d.plumbingRuns.map((r) =>
@@ -1845,6 +2253,39 @@ export function CadWorkspace({
       return;
     }
 
+    if (drag.mode === "gate") {
+      setDesign((d) => {
+        const fence = (d.fences ?? []).find((f) => f.id === drag.fenceId);
+        const gate = fence?.gates?.find((g) => g.id === drag.id);
+        if (!fence || !gate || fence.points.length < 2) return d;
+        const maxEdge = fence.points.length - 2;
+        const edgeIndex = Math.min(maxEdge, Math.max(0, gate.edgeIndex));
+        const edgeA = fence.points[edgeIndex];
+        const edgeB = fence.points[edgeIndex + 1];
+        const edgeLen = segmentLengthMm(edgeA, edgeB);
+        if (edgeLen < 1e-6) return d;
+        const tRaw =
+          ((point.x - edgeA.x) * (edgeB.x - edgeA.x) +
+            (point.y - edgeA.y) * (edgeB.y - edgeA.y)) /
+          (edgeLen * edgeLen);
+        const t = clampOpeningT(edgeLen, gate.widthMm, tRaw);
+        return {
+          ...d,
+          fences: (d.fences ?? []).map((f) =>
+            f.id === drag.fenceId
+              ? {
+                  ...f,
+                  gates: (f.gates ?? []).map((g) =>
+                    g.id === drag.id ? { ...g, t } : g,
+                  ),
+                }
+              : f,
+          ),
+        };
+      });
+      return;
+    }
+
     if (drag.mode === "coverSupport") {
       const dx = point.x - drag.last.x;
       const dy = point.y - drag.last.y;
@@ -1875,6 +2316,32 @@ export function CadWorkspace({
     }
 
     if (drag.mode === "move") {
+      if (drag.kind === "object") {
+        const obj = designRef.current.objects.find((o) => o.id === drag.id);
+        if (obj && isWallWaterFixtureId(obj.catalogItemId)) {
+          const snap = snapWaterWallFixture(
+            designRef.current.poolBodies,
+            point,
+          );
+          if (snap) {
+            setDesign((d) => ({
+              ...d,
+              objects: d.objects.map((o) =>
+                o.id === drag.id
+                  ? {
+                      ...o,
+                      position: snap.position,
+                      rotationDeg: snap.rotationDeg,
+                      parentBodyId: snap.bodyId,
+                    }
+                  : o,
+              ),
+            }));
+            setDrag({ ...drag, last: point });
+            return;
+          }
+        }
+      }
       const dx = point.x - drag.last.x;
       const dy = point.y - drag.last.y;
       if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return;
@@ -1888,6 +2355,7 @@ export function CadWorkspace({
       drag?.mode === "vertex" ||
       drag?.mode === "move" ||
       drag?.mode === "opening" ||
+      drag?.mode === "gate" ||
       drag?.mode === "coverSupport" ||
       drag?.mode === "rotate" ||
       drag?.mode === "depthStation"
@@ -1985,6 +2453,7 @@ export function CadWorkspace({
       setDraftPoints([]);
       setLengthBuffer("");
       setMeasurePoints([]);
+      setSelection(null);
       return;
     }
     if ((e.key === "r" || e.key === "R") && selectedObject) {
@@ -2026,8 +2495,6 @@ export function CadWorkspace({
     if (e.key === "o" || e.key === "O") setOrtho((v) => !v);
     if (e.key === "a" || e.key === "A") setAngleSnap((v) => !v);
     if (e.key === "?" || (e.shiftKey && e.key === "/")) setShowHelp((v) => !v);
-    // Backspace only edits the typed-length buffer while drawing — never deletes objects.
-    // Object removal is via the Properties "Delete" button only.
     if (e.key === "Backspace" && lengthBuffer) {
       e.preventDefault();
       setLengthBuffer((b) => b.slice(0, -1));
@@ -2038,6 +2505,7 @@ export function CadWorkspace({
     if (
       draftPoints.length > 0 &&
       (tool === "plumbing" ||
+        tool === "fence" ||
         tool === "pool_poly" ||
         tool === "patio" ||
         tool === "pool_rect" ||
@@ -2100,10 +2568,16 @@ export function CadWorkspace({
                   ? "Click corners. Hold Shift for 90° lines. Type length + Enter. Close near start."
                   : tool === "grade_point"
                     ? "Click to place a grade point. Set drop/rise from house FFE in Properties."
-                  : tool === "plumbing"
+                  : tool === "fence"
+                    ? `Draw ${fenceKindLabel(fenceKind).toLowerCase()} fence path. Hold Shift for 90°. Finish draft when done. Set color in Properties.`
+                    : tool === "gate"
+                      ? `Click a fence segment to place a ${gateKindLabel(gateKind).toLowerCase()} gate. Drag to slide; edit size in Properties.`
+                    : tool === "plumbing"
                     ? "Click segments. Hold Shift (or Ortho) for 90° lines. Type length + Enter."
                     : isPadEquipTool(tool)
-                      ? `Click to place ${placeItem?.name ?? "equipment"}. Pools/spas auto-route plumbing to the pad.`
+                      ? isWallWaterFixtureId(placeItem?.id ?? "")
+                        ? `Click near a pool/spa wall to place ${placeItem?.name ?? "light"} — snaps to the wall and faces inward.`
+                        : `Click to place ${placeItem?.name ?? "equipment"}. Pools/spas auto-route plumbing to the pad.`
                       : tool === "place"
                         ? "Pick furniture/fixture, then click to place. R rotates 15°."
                         : tool === "measure"
@@ -2170,7 +2644,7 @@ export function CadWorkspace({
               </div>
               {designMode === "3d" ? (
                 <span className="muted cad-mode-note">
-                  Preview only — switch to 2D to edit
+                  Select in 3D · edit or Delete in Properties · draw in 2D
                 </span>
               ) : null}
             </div>
@@ -2189,6 +2663,7 @@ export function CadWorkspace({
                 <CadScene3DDynamic
                   design={design}
                   projectId={projectId}
+                  projectName={projectName}
                   selection={
                     selection?.kind === "gradeSample" ? null : selection
                   }
@@ -2196,6 +2671,7 @@ export function CadWorkspace({
                     setSelection(sel);
                     if (sel) setSideTab("properties");
                   }}
+                  onDelete={selection ? deleteSelection : undefined}
                 />
               ) : (
                 <>
@@ -2209,6 +2685,7 @@ export function CadWorkspace({
                     onDoubleClick={() => {
                       if (
                         tool === "plumbing" ||
+                        tool === "fence" ||
                         tool === "pool_poly" ||
                         tool === "patio" ||
                         tool === "house_poly"
@@ -2231,20 +2708,39 @@ export function CadWorkspace({
                         : "—"}
                     </div>
                     <div>
-                      {tool === "plumbing" ? "Run total" : "Path"}:{" "}
+                      {tool === "plumbing"
+                        ? "Run total"
+                        : tool === "fence"
+                          ? "Fence total"
+                          : "Path"}
+                      :{" "}
                       {draftPoints.length > 0
                         ? formatLength(
                             polylineLengthMm(draftPoints) + draftSegmentMm,
                             unitSystem,
                           )
-                        : selectedRun
+                        : selectedFence
                           ? formatLength(
-                              polylineLengthMm(selectedRun.points),
+                              polylineLengthMm(selectedFence.points),
                               unitSystem,
                             )
-                          : "—"}
+                          : selectedRun
+                            ? formatLength(
+                                polylineLengthMm(selectedRun.points),
+                                unitSystem,
+                              )
+                            : "—"}
                     </div>
                     {lengthBuffer && <div>Typed: {lengthBuffer}</div>}
+                    {planStoryFilter !== "all" && (
+                      <div>
+                        Plan:{" "}
+                        {planStoryFilter === 1
+                          ? "ground floor"
+                          : `story ${planStoryFilter}`}{" "}
+                        only
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -2279,9 +2775,12 @@ export function CadWorkspace({
                   tool={tool}
                   waterKind={waterKind}
                   coverKind={coverKind}
+                  fenceKind={fenceKind}
+                  gateKind={gateKind}
                   openingKind={openingKind}
                   openingStory={openingStory}
-                  houseStories={houseStories}
+                  planStoryFilter={planStoryFilter}
+                  houseStories={Math.max(houseStories, maxPlanStories)}
                   placeItemId={placeItemId}
                   placeLibrary={placeLibrary}
                   poolFixtureLibrary={poolFixtureLibrary}
@@ -2298,13 +2797,18 @@ export function CadWorkspace({
                     tool === "pool_poly" ||
                     tool === "patio" ||
                     tool === "house_poly" ||
-                    tool === "plumbing"
+                    tool === "plumbing" ||
+                    tool === "fence"
                   }
                   finishDraftLabel={
-                    tool === "plumbing" ? "Finish run" : "Close shape"
+                    tool === "plumbing"
+                      ? "Finish run"
+                      : tool === "fence"
+                        ? "Finish fence"
+                        : "Close shape"
                   }
                   canFinishDraft={
-                    tool === "plumbing"
+                    tool === "plumbing" || tool === "fence"
                       ? draftPoints.length >= 2
                       : draftPoints.length >= 3
                   }
@@ -2316,7 +2820,10 @@ export function CadWorkspace({
                   }}
                   onWaterKind={setWaterKind}
                   onCoverKind={setCoverKind}
+                  onFenceKind={setFenceKind}
+                  onGateKind={setGateKind}
                   onOpeningKind={setOpeningKind}
+                  onPlanStoryFilter={setPlanStoryFilter}
                   onOpeningStory={setOpeningStory}
                   onHouseStories={setHouseStories}
                   onPlaceItemId={setPlaceItemId}
@@ -2517,8 +3024,11 @@ export function CadWorkspace({
                     />
                     {waterBodyKind(selectedPool) === "spa" && (
                       <SpaShellFields
-                        key={`spa-shell-${selectedPool.id}-${spaWallThicknessMm(selectedPool)}-${spaShellHeightMm(selectedPool)}`}
+                        key={`spa-shell-${selectedPool.id}-${spaWallThicknessMm(selectedPool)}-${spaShellHeightMm(selectedPool)}-${JSON.stringify(selectedPool.spillover ?? null)}`}
                         body={selectedPool}
+                        pools={design.poolBodies.filter(
+                          (p) => waterBodyKind(p) === "pool",
+                        )}
                         unitSystem={unitSystem}
                         onWallThickness={(wallThicknessMm) => {
                           const updated = {
@@ -2543,6 +3053,16 @@ export function CadWorkspace({
                             poolBodies: design.poolBodies.map((p) =>
                               p.id === selectedPool.id
                                 ? { ...p, shellHeightMm }
+                                : p,
+                            ),
+                          })
+                        }
+                        onSpillover={(spillover) =>
+                          commitDesign({
+                            ...design,
+                            poolBodies: design.poolBodies.map((p) =>
+                              p.id === selectedPool.id
+                                ? { ...p, spillover }
                                 : p,
                             ),
                           })
@@ -2886,6 +3406,8 @@ export function CadWorkspace({
                                             kind,
                                             widthMm: defaults.widthMm,
                                             heightMm: defaults.heightMm,
+                                            sillAboveFloorMm:
+                                              defaultSillAboveFloorMm(kind),
                                             t: clampOpeningT(
                                               (() => {
                                                 const n = b.outline.length;
@@ -2980,6 +3502,10 @@ export function CadWorkspace({
                           b.outline[i],
                           b.outline[(i + 1) % n],
                         );
+                        const stories = Math.max(1, b.stories || 1);
+                        const ceilingMm = resolveCeilingHeightMm(
+                          b.ceilingHeightMm,
+                        );
                         commitDesign({
                           ...design,
                           buildings: (design.buildings ?? []).map((bld) =>
@@ -2997,14 +3523,37 @@ export function CadWorkspace({
                                             edgeLen,
                                           )
                                         : o.widthMm;
+                                    const sillAboveFloorMm =
+                                      patch.sillAboveFloorMm != null
+                                        ? Math.max(0, patch.sillAboveFloorMm)
+                                        : openingSillAboveFloorMm(
+                                            o.kind,
+                                            o.sillAboveFloorMm,
+                                          );
+                                    const maxH = Math.max(
+                                      100,
+                                      buildingHeightMm(stories, ceilingMm) -
+                                        openingSillMm(
+                                          o.kind,
+                                          o.story,
+                                          stories,
+                                          sillAboveFloorMm,
+                                          ceilingMm,
+                                        ) -
+                                        50,
+                                    );
                                     const heightMm =
                                       patch.heightMm != null
-                                        ? Math.max(50, patch.heightMm)
+                                        ? Math.min(
+                                            Math.max(50, patch.heightMm),
+                                            maxH,
+                                          )
                                         : o.heightMm;
                                     return {
                                       ...o,
                                       widthMm,
                                       heightMm,
+                                      sillAboveFloorMm,
                                       t: clampOpeningT(
                                         edgeLen,
                                         widthMm,
@@ -3024,8 +3573,8 @@ export function CadWorkspace({
                     >
                       Type sizes like 3′-0″, 36″, or 6′8″ then press Enter.
                       Defaults match common stock: door 3′×6′8″, sliding
-                      6′×6′8″, window 3′×4′. Drag on the plan to slide along
-                      the wall.
+                      6′×6′8″, window 3′×4′ with a 3′ sill. Drag on the plan
+                      to slide along the wall.
                     </p>
                     <button
                       type="button"
@@ -3120,12 +3669,62 @@ export function CadWorkspace({
                         }}
                       />
                     </div>
+                    <div className="field">
+                      <label htmlFor="bldg-ceiling">Ceiling height</label>
+                      <input
+                        id="bldg-ceiling"
+                        key={`bldg-ceiling-${selectedBuilding.id}-${selectedBuilding.ceilingHeightMm ?? "default"}`}
+                        defaultValue={formatLength(
+                          selectedBuilding.ceilingHeightMm ??
+                            DEFAULT_CEILING_HEIGHT_MM,
+                          unitSystem,
+                        )}
+                        onBlur={(e) => {
+                          const mm = parseLengthToMm(
+                            e.target.value,
+                            unitSystem,
+                          );
+                          if (mm == null || mm <= 0) return;
+                          commitDesign({
+                            ...design,
+                            buildings: (design.buildings ?? []).map((b) =>
+                              b.id === selectedBuilding.id
+                                ? {
+                                    ...b,
+                                    ceilingHeightMm:
+                                      resolveCeilingHeightMm(mm),
+                                  }
+                                : b,
+                            ),
+                          });
+                        }}
+                      />
+                    </div>
+                    <HouseFinishPicker
+                      finishId={selectedBuilding.exteriorFinishId}
+                      customColor={selectedBuilding.exteriorColor}
+                      onChange={({ exteriorFinishId, exteriorColor }) =>
+                        commitDesign({
+                          ...design,
+                          buildings: (design.buildings ?? []).map((b) =>
+                            b.id === selectedBuilding.id
+                              ? {
+                                  ...b,
+                                  exteriorFinishId,
+                                  exteriorColor,
+                                }
+                              : b,
+                          ),
+                        })
+                      }
+                    />
                     <p
                       className="muted"
                       style={{ margin: 0, fontSize: "0.78rem" }}
                     >
-                      Use 2+ for multi-story homes. Footprint stays the same;
-                      story count is noted on the plan.
+                      Use 2+ for multi-story homes — floors and ceilings are
+                      added between stories. Default ceiling height is 8′
+                      (adjust for taller rooms).
                       {(selectedBuilding.openings ?? []).length > 0
                         ? ` ${(selectedBuilding.openings ?? []).length} opening(s) on walls — select an opening to edit size.`
                         : " Use the Door / window tool to click openings onto walls."}
@@ -3488,9 +4087,215 @@ export function CadWorkspace({
                     </button>
                   </div>
                 )}
+                {selectedFence && (
+                  <div className="stack">
+                    <strong>{selectedFence.name}</strong>
+                    <div className="muted" style={{ fontSize: "0.85rem" }}>
+                      {formatLength(
+                        fenceBillableLengthMm(selectedFence),
+                        unitSystem,
+                      )}{" "}
+                      (gates deducted) ·{" "}
+                      {(selectedFence.gates ?? []).length} gate
+                      {(selectedFence.gates ?? []).length === 1 ? "" : "s"}
+                    </div>
+                    <div className="field">
+                      <label htmlFor="fence-kind">Type</label>
+                      <select
+                        id="fence-kind"
+                        value={selectedFence.kind}
+                        onChange={(e) => {
+                          const kind = e.target.value as FenceKind;
+                          commitDesign({
+                            ...design,
+                            fences: (design.fences ?? []).map((f) =>
+                              f.id === selectedFence.id
+                                ? {
+                                    ...f,
+                                    kind,
+                                    heightMm:
+                                      f.heightMm ?? defaultFenceHeightMm(kind),
+                                    finishId: defaultFenceFinishId(kind),
+                                  }
+                                : f,
+                            ),
+                          });
+                        }}
+                      >
+                        {FENCE_KINDS.map((id) => (
+                          <option key={id} value={id}>
+                            {fenceKindLabel(id)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="fence-height">Height</label>
+                      <input
+                        id="fence-height"
+                        key={`fence-h-${selectedFence.id}-${selectedFence.heightMm}-${selectedFence.kind}`}
+                        defaultValue={formatLength(
+                          selectedFence.heightMm ??
+                            defaultFenceHeightMm(selectedFence.kind),
+                          unitSystem,
+                        )}
+                        onBlur={(e) => {
+                          const mm = parseLengthToMm(
+                            e.target.value,
+                            unitSystem,
+                          );
+                          if (mm == null || mm <= 0) return;
+                          commitDesign({
+                            ...design,
+                            fences: (design.fences ?? []).map((f) =>
+                              f.id === selectedFence.id
+                                ? { ...f, heightMm: mm }
+                                : f,
+                            ),
+                          });
+                        }}
+                      />
+                    </div>
+                    <FenceFinishPicker
+                      kind={selectedFence.kind}
+                      finishId={selectedFence.finishId}
+                      onChange={(finishId) =>
+                        commitDesign({
+                          ...design,
+                          fences: (design.fences ?? []).map((f) =>
+                            f.id === selectedFence.id
+                              ? { ...f, finishId }
+                              : f,
+                          ),
+                        })
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
+                    >
+                      Delete fence
+                    </button>
+                  </div>
+                )}
+                {selectedGate && (
+                  <div className="stack">
+                    <strong>{gateKindLabel(selectedGate.gate.kind)}</strong>
+                    <div className="muted" style={{ fontSize: "0.85rem" }}>
+                      On {selectedGate.fence.name}
+                    </div>
+                    <div className="field">
+                      <label htmlFor="gate-kind">Type</label>
+                      <select
+                        id="gate-kind"
+                        value={selectedGate.gate.kind}
+                        onChange={(e) => {
+                          const kind = e.target.value as GateKind;
+                          const defaults = defaultGateSize(kind);
+                          commitDesign({
+                            ...design,
+                            fences: (design.fences ?? []).map((f) =>
+                              f.id === selectedGate.fence.id
+                                ? {
+                                    ...f,
+                                    gates: (f.gates ?? []).map((g) => {
+                                      if (g.id !== selectedGate.gate.id) {
+                                        return g;
+                                      }
+                                      const edgeIndex = Math.min(
+                                        f.points.length - 2,
+                                        Math.max(0, g.edgeIndex),
+                                      );
+                                      const edgeLen = segmentLengthMm(
+                                        f.points[edgeIndex],
+                                        f.points[edgeIndex + 1],
+                                      );
+                                      return {
+                                        ...g,
+                                        kind,
+                                        widthMm: defaults.widthMm,
+                                        heightMm:
+                                          f.heightMm ??
+                                          defaultFenceHeightMm(f.kind),
+                                        t: clampOpeningT(
+                                          edgeLen,
+                                          defaults.widthMm,
+                                          g.t,
+                                        ),
+                                      };
+                                    }),
+                                  }
+                                : f,
+                            ),
+                          });
+                        }}
+                      >
+                        {GATE_KINDS.map((id) => (
+                          <option key={id} value={id}>
+                            {gateKindLabel(id)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="gate-width">Width</label>
+                      <input
+                        id="gate-width"
+                        key={`gate-w-${selectedGate.gate.id}-${selectedGate.gate.widthMm}`}
+                        defaultValue={formatLength(
+                          selectedGate.gate.widthMm,
+                          unitSystem,
+                        )}
+                        onBlur={(e) => {
+                          const mm = parseLengthToMm(
+                            e.target.value,
+                            unitSystem,
+                          );
+                          if (mm == null || mm <= 0) return;
+                          commitDesign({
+                            ...design,
+                            fences: (design.fences ?? []).map((f) =>
+                              f.id === selectedGate.fence.id
+                                ? {
+                                    ...f,
+                                    gates: (f.gates ?? []).map((g) => {
+                                      if (g.id !== selectedGate.gate.id) {
+                                        return g;
+                                      }
+                                      const edgeIndex = Math.min(
+                                        f.points.length - 2,
+                                        Math.max(0, g.edgeIndex),
+                                      );
+                                      const edgeLen = segmentLengthMm(
+                                        f.points[edgeIndex],
+                                        f.points[edgeIndex + 1],
+                                      );
+                                      return {
+                                        ...g,
+                                        widthMm: mm,
+                                        t: clampOpeningT(edgeLen, mm, g.t),
+                                      };
+                                    }),
+                                  }
+                                : f,
+                            ),
+                          });
+                        }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
+                    >
+                      Delete gate
+                    </button>
+                  </div>
+                )}
                 {selectedObject && (
                   <FurnitureFields
-                    key={`${selectedObject.id}-${selectedObject.catalogItemId}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.rotationDeg}-${selectedObject.frameFinishId}-${selectedObject.fabricFinishId}`}
+                    key={`${selectedObject.id}-${selectedObject.catalogItemId}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.heightMm}-${selectedObject.rotationDeg}-${selectedObject.frameFinishId}-${selectedObject.fabricFinishId}-${selectedObject.hasLedLight}-${selectedObject.personSex}-${selectedObject.personOutfitId}`}
                     object={selectedObject}
                     unitSystem={unitSystem}
                     onRotate={(deg) =>
@@ -3522,6 +4327,43 @@ export function CadWorkspace({
                         objects: design.objects.map((o) =>
                           o.id === selectedObject.id ? { ...o, ...patch } : o,
                         ),
+                      })
+                    }
+                    onLedChange={(hasLedLight) =>
+                      commitDesign({
+                        ...design,
+                        objects: design.objects.map((o) =>
+                          o.id === selectedObject.id
+                            ? { ...o, hasLedLight }
+                            : o,
+                        ),
+                      })
+                    }
+                    onPersonChange={(patch) =>
+                      commitDesign({
+                        ...design,
+                        objects: design.objects.map((o) => {
+                          if (o.id !== selectedObject.id) return o;
+                          const sex = resolvePersonSex(
+                            patch.personSex ?? o.personSex,
+                          );
+                          const outfitId = resolvePersonOutfitId(
+                            patch.personOutfitId ?? o.personOutfitId,
+                          );
+                          const heightMm = resolvePersonHeightMm(
+                            patch.heightMm ?? o.heightMm,
+                          );
+                          const foot = personFootprintMm(heightMm, sex);
+                          return {
+                            ...o,
+                            personSex: sex,
+                            personOutfitId: outfitId,
+                            heightMm,
+                            widthMm: foot.widthMm,
+                            depthMm: foot.depthMm,
+                            name: `Person (${formatLength(heightMm, unitSystem)})`,
+                          };
+                        }),
                       })
                     }
                     onDiningShape={(shape) => {
@@ -3733,6 +4575,42 @@ export function CadWorkspace({
                     </label>
                   ))}
                 </div>
+                {maxPlanStories > 1 && (
+                  <div className="field" style={{ marginTop: "0.85rem" }}>
+                    <label htmlFor="plan-story-filter">Plan story filter</label>
+                    <select
+                      id="plan-story-filter"
+                      value={
+                        planStoryFilter === "all"
+                          ? "all"
+                          : String(planStoryFilter)
+                      }
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "all") setPlanStoryFilter("all");
+                        else setPlanStoryFilter(Number(v));
+                      }}
+                    >
+                      <option value="all">All stories</option>
+                      {Array.from({ length: maxPlanStories }, (_, i) => i + 1).map(
+                        (n) => (
+                          <option key={n} value={n}>
+                            {n === 1
+                              ? "Ground floor only"
+                              : `Story ${n} only`}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                    <p
+                      className="muted"
+                      style={{ margin: "0.35rem 0 0", fontSize: "0.78rem" }}
+                    >
+                      Hide other stories&apos; doors/windows on the 2D plan so
+                      overlapping openings are easier to select.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </aside>
@@ -3752,7 +4630,11 @@ function OpeningSizeFields({
   opening: BuildingOpening;
   building: Building;
   unitSystem: UnitSystem;
-  onChange: (patch: { widthMm?: number; heightMm?: number }) => void;
+  onChange: (patch: {
+    widthMm?: number;
+    heightMm?: number;
+    sillAboveFloorMm?: number;
+  }) => void;
 }) {
   const defaults = defaultOpeningSize(opening.kind);
   const n = building.outline.length;
@@ -3765,13 +4647,26 @@ function OpeningSizeFields({
         )
       : Infinity;
   const stories = Math.max(1, building.stories || 1);
-  const sillMm = openingSillMm(opening.kind, opening.story, stories);
+  const ceilingMm = resolveCeilingHeightMm(building.ceilingHeightMm);
+  const sillAboveFloorMm = openingSillAboveFloorMm(
+    opening.kind,
+    opening.sillAboveFloorMm,
+  );
+  const sillMm = openingSillMm(
+    opening.kind,
+    opening.story,
+    stories,
+    sillAboveFloorMm,
+    ceilingMm,
+  );
   const maxHeightMm = Math.max(
     100,
-    buildingHeightMm(stories) - sillMm - 50,
+    buildingHeightMm(stories, ceilingMm) - sillMm - 50,
   );
+  const maxSillAboveFloorMm = Math.max(0, ceilingMm - opening.heightMm - 50);
   const [widthError, setWidthError] = useState<string | null>(null);
   const [heightError, setHeightError] = useState<string | null>(null);
+  const [sillError, setSillError] = useState<string | null>(null);
 
   function commitWidth(raw: string) {
     const mm = parseLengthToMm(raw, unitSystem);
@@ -3804,6 +4699,22 @@ function OpeningSizeFields({
     onChange({ heightMm: clamped });
   }
 
+  function commitSill(raw: string) {
+    const mm = parseLengthToMm(raw, unitSystem);
+    if (mm == null || mm < 0) {
+      setSillError("Couldn’t read that size — try 3′, 36″, or 0″");
+      return;
+    }
+    setSillError(null);
+    const clamped = Math.min(mm, maxSillAboveFloorMm);
+    if (clamped < mm - 0.5) {
+      setSillError(
+        `Max sill is ${formatLength(maxSillAboveFloorMm, unitSystem)} for this height`,
+      );
+    }
+    onChange({ sillAboveFloorMm: clamped });
+  }
+
   return (
     <div className="stack" style={{ gap: "0.55rem" }}>
       <div className="field">
@@ -3833,6 +4744,36 @@ function OpeningSizeFields({
           </div>
         )}
       </div>
+      {opening.kind === "window" && (
+        <div className="field">
+          <label htmlFor="opening-sill">Sill height</label>
+          <input
+            id="opening-sill"
+            key={`opening-sill-${opening.id}-${sillAboveFloorMm}`}
+            defaultValue={formatLength(sillAboveFloorMm, unitSystem)}
+            placeholder={formatLength(
+              defaultSillAboveFloorMm("window"),
+              unitSystem,
+            )}
+            onBlur={(e) => commitSill(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+          />
+          <div className="muted" style={{ fontSize: "0.72rem" }}>
+            Above finished floor · default{" "}
+            {formatLength(defaultSillAboveFloorMm("window"), unitSystem)}
+          </div>
+          {sillError && (
+            <div className="error" style={{ fontSize: "0.75rem" }}>
+              {sillError}
+            </div>
+          )}
+        </div>
+      )}
       <div className="field">
         <label htmlFor="opening-height">Height</label>
         <input
@@ -3850,9 +4791,6 @@ function OpeningSizeFields({
         />
         <div className="muted" style={{ fontSize: "0.72rem" }}>
           Default {formatLength(defaults.heightMm, unitSystem)}
-          {opening.kind === "window"
-            ? ` · sill ~${formatLength(914.4, unitSystem)} above floor`
-            : ""}
         </div>
         {heightError && (
           <div className="error" style={{ fontSize: "0.75rem" }}>
@@ -3866,9 +4804,11 @@ function OpeningSizeFields({
         onClick={() => {
           setWidthError(null);
           setHeightError(null);
+          setSillError(null);
           onChange({
             widthMm: defaults.widthMm,
             heightMm: defaults.heightMm,
+            sillAboveFloorMm: defaultSillAboveFloorMm(opening.kind),
           });
         }}
       >
@@ -3934,23 +4874,43 @@ function RectDimensionFields({
 
 function SpaShellFields({
   body,
+  pools,
   unitSystem,
   onWallThickness,
   onShellHeight,
+  onSpillover,
 }: {
   body: PoolBody;
+  pools: PoolBody[];
   unitSystem: UnitSystem;
   onWallThickness: (wallThicknessMm: number) => void;
   onShellHeight: (shellHeightMm: number) => void;
+  onSpillover: (spillover: SpaSpillover) => void;
 }) {
   const wall = spaWallThicknessMm(body);
   const shellHeight = spaShellHeightMm(body);
   const inside = insideBoundsFromOutside(body.outline, wall);
+  const edges = listSpaSpilloverEdges(body, pools);
+  const canSpill = edges.length > 0;
+  const spillCfg: SpaSpillover = body.spillover ?? { enabled: true };
+  const enabled = canSpill && spillCfg.enabled !== false;
+  const resolved = resolveSpaSpillover(
+    { ...body, spillover: { ...spillCfg, enabled } },
+    pools,
+  );
 
   const commitShellHeight = (raw: string) => {
     const mm = parseLengthToMm(raw, unitSystem);
     // Any non-negative length (0 = flush with deck; no upper cap).
     if (mm != null && Number.isFinite(mm) && mm >= 0) onShellHeight(mm);
+  };
+
+  const patchSpillover = (patch: Partial<SpaSpillover>) => {
+    onSpillover({
+      ...spillCfg,
+      enabled: spillCfg.enabled !== false,
+      ...patch,
+    });
   };
 
   return (
@@ -3994,6 +4954,169 @@ function SpaShellFields({
         Inside waterline: {formatLength(inside.width, unitSystem)} ×{" "}
         {formatLength(inside.height, unitSystem)}
       </div>
+
+      <strong style={{ fontSize: "0.9rem", marginTop: "0.25rem" }}>
+        Spillover
+      </strong>
+      {!canSpill ? (
+        <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
+          Attach this spa to a pool wall to enable a spillover weir.
+        </p>
+      ) : (
+        <>
+          <label
+            className="field"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              flexDirection: "row",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) =>
+                patchSpillover({ enabled: e.target.checked })
+              }
+            />
+            <span>Spill into attached pool</span>
+          </label>
+          {enabled && (
+            <>
+              {edges.length > 1 && (
+                <div className="field">
+                  <label htmlFor="spa-spill-edge">Weir edge</label>
+                  <select
+                    id="spa-spill-edge"
+                    value={
+                      spillCfg.edgeIndex ?? resolved?.edgeIndex ?? edges[0].edgeIndex
+                    }
+                    onChange={(e) => {
+                      const edgeIndex = Number(e.target.value);
+                      const edge = edges.find((x) => x.edgeIndex === edgeIndex);
+                      patchSpillover({
+                        edgeIndex,
+                        targetPoolId: edge?.poolId,
+                      });
+                    }}
+                  >
+                    {edges.map((e, i) => (
+                      <option key={`${e.poolId}-${e.edgeIndex}`} value={e.edgeIndex}>
+                        Side {i + 1} ({formatLength(e.overlapLenMm, unitSystem)}{" "}
+                        shared)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="field">
+                <label htmlFor="spa-spill-style">Style</label>
+                <select
+                  id="spa-spill-style"
+                  value={spillCfg.style ?? resolved?.style ?? "sheet"}
+                  onChange={(e) =>
+                    patchSpillover({
+                      style: e.target.value as SpaSpilloverStyle,
+                    })
+                  }
+                >
+                  <option value="sheet">Sheet</option>
+                  <option value="scuppers">Scuppers</option>
+                  <option value="sheer">Sheer descent</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="spa-spill-w">Weir width</label>
+                <input
+                  id="spa-spill-w"
+                  key={`spill-w-${body.id}-${resolved?.widthMm ?? 0}`}
+                  defaultValue={formatLength(
+                    spillCfg.widthMm ?? resolved?.widthMm ?? 24 * 25.4,
+                    unitSystem,
+                  )}
+                  onBlur={(e) => {
+                    const mm = parseLengthToMm(e.target.value, unitSystem);
+                    if (mm != null && mm > 50) patchSpillover({ widthMm: mm });
+                  }}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="spa-spill-off">Offset along edge</label>
+                <input
+                  id="spa-spill-off"
+                  key={`spill-off-${body.id}-${spillCfg.offsetMm ?? 0}`}
+                  defaultValue={formatLength(spillCfg.offsetMm ?? 0, unitSystem)}
+                  onBlur={(e) => {
+                    const mm = parseLengthToMm(e.target.value, unitSystem);
+                    if (mm != null && Number.isFinite(mm)) {
+                      patchSpillover({ offsetMm: mm });
+                    }
+                  }}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="spa-spill-notch">Notch depth (below rim)</label>
+                <input
+                  id="spa-spill-notch"
+                  key={`spill-notch-${body.id}-${spillCfg.notchDepthMm ?? resolved?.notchDepthMm ?? 0}`}
+                  defaultValue={formatLength(
+                    spillCfg.notchDepthMm ??
+                      resolved?.notchDepthMm ??
+                      1.5 * 25.4,
+                    unitSystem,
+                  )}
+                  onBlur={(e) => {
+                    const mm = parseLengthToMm(e.target.value, unitSystem);
+                    if (mm != null && mm >= 5) {
+                      patchSpillover({ notchDepthMm: mm });
+                    }
+                  }}
+                />
+              </div>
+              {(spillCfg.style ?? resolved?.style) === "scuppers" && (
+                <>
+                  <div className="field">
+                    <label htmlFor="spa-spill-sc-count">Scupper count</label>
+                    <input
+                      id="spa-spill-sc-count"
+                      type="number"
+                      min={2}
+                      max={8}
+                      value={spillCfg.scupperCount ?? 3}
+                      onChange={(e) => {
+                        const n = Number(e.target.value);
+                        if (Number.isFinite(n)) {
+                          patchSpillover({
+                            scupperCount: Math.min(8, Math.max(2, Math.round(n))),
+                          });
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="spa-spill-sc-gap">Scupper gap</label>
+                    <input
+                      id="spa-spill-sc-gap"
+                      key={`spill-gap-${body.id}-${spillCfg.scupperGapMm ?? 0}`}
+                      defaultValue={formatLength(
+                        spillCfg.scupperGapMm ?? 4 * 25.4,
+                        unitSystem,
+                      )}
+                      onBlur={(e) => {
+                        const mm = parseLengthToMm(e.target.value, unitSystem);
+                        if (mm != null && mm >= 10) {
+                          patchSpillover({ scupperGapMm: mm });
+                        }
+                      }}
+                    />
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -4150,6 +5273,8 @@ function FurnitureFields({
   onRotate,
   onDimensions,
   onFinishChange,
+  onLedChange,
+  onPersonChange,
   onDiningShape,
   onDelete,
 }: {
@@ -4161,6 +5286,12 @@ function FurnitureFields({
     frameFinishId?: string;
     fabricFinishId?: string;
   }) => void;
+  onLedChange?: (hasLedLight: boolean) => void;
+  onPersonChange?: (patch: {
+    personSex?: PersonSex;
+    personOutfitId?: PersonOutfitId;
+    heightMm?: number;
+  }) => void;
   onDiningShape?: (shape: "rect" | "round") => void;
   onDelete: () => void;
 }) {
@@ -4170,10 +5301,84 @@ function FurnitureFields({
   const finishRoles = furnitureFinishRoles(object.catalogItemId);
   const hasFinishes =
     finishRoles.frame || finishRoles.fabric || finishRoles.canopy;
+  const bubbler = isBubblerId(object.catalogItemId);
+  const isPerson = object.catalogItemId === "person_scale";
+  const personSex = resolvePersonSex(object.personSex);
+  const personOutfit = resolvePersonOutfitId(object.personOutfitId);
+  const personHeight = resolvePersonHeightMm(
+    object.heightMm ?? defaultPersonHeightMm(personSex),
+  );
 
   return (
     <div className="stack">
       <strong>{object.name}</strong>
+      {isPerson && onPersonChange && (
+        <>
+          <div className="field">
+            <label htmlFor="person-sex">Sex</label>
+            <select
+              id="person-sex"
+              value={personSex}
+              onChange={(e) => {
+                const sex = resolvePersonSex(e.target.value);
+                const keepCustomHeight =
+                  Math.abs(personHeight - defaultPersonHeightMm(personSex)) >
+                  25;
+                onPersonChange({
+                  personSex: sex,
+                  heightMm: keepCustomHeight
+                    ? personHeight
+                    : defaultPersonHeightMm(sex),
+                });
+              }}
+            >
+              {PERSON_SEXES.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="person-height">Height</label>
+            <input
+              id="person-height"
+              key={`person-h-${object.id}-${personHeight}`}
+              defaultValue={formatLength(personHeight, unitSystem)}
+              placeholder={unitSystem === "imperial" ? "e.g. 5′8″" : "e.g. 1.7m"}
+              onBlur={(e) => {
+                const mm = parseLengthToMm(e.target.value, unitSystem);
+                if (mm == null || mm <= 0) return;
+                onPersonChange({ heightMm: mm });
+              }}
+            />
+            <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
+              Typical defaults: female 5′4″, male 5′10″. Range about 4′10″–6′8″.
+            </p>
+          </div>
+          <div className="field">
+            <label htmlFor="person-outfit">Outfit</label>
+            <select
+              id="person-outfit"
+              value={personOutfit}
+              onChange={(e) =>
+                onPersonChange({
+                  personOutfitId: resolvePersonOutfitId(e.target.value),
+                })
+              }
+            >
+              {PERSON_OUTFITS.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
+              {PERSON_OUTFITS.find((o) => o.id === personOutfit)?.hint}
+            </p>
+          </div>
+        </>
+      )}
       {hasFinishes && onFinishChange && (
         <FurnitureFinishPicker
           catalogItemId={object.catalogItemId}
@@ -4182,6 +5387,31 @@ function FurnitureFields({
           onFrameChange={(frameFinishId) => onFinishChange({ frameFinishId })}
           onFabricChange={(fabricFinishId) => onFinishChange({ fabricFinishId })}
         />
+      )}
+      {bubbler && onLedChange && (
+        <div className="field">
+          <label
+            htmlFor="bubbler-led"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              id="bubbler-led"
+              type="checkbox"
+              checked={object.hasLedLight === true}
+              onChange={(e) => onLedChange(e.target.checked)}
+            />
+            Niche LED light
+          </label>
+          <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
+            Color-changing RGB light from below (adds a bubbler LED line to the
+            estimate).
+          </p>
+        </div>
       )}
       {dining && onDiningShape && (
         <div className="field">
@@ -4198,51 +5428,56 @@ function FurnitureFields({
           </select>
         </div>
       )}
-      {dining && diningShape === "round" ? (
-        <div className="field">
-          <label htmlFor="furn-width">Table diameter</label>
-          <input
-            id="furn-width"
-            defaultValue={formatLength(object.widthMm, unitSystem)}
-            placeholder={unitSystem === "imperial" ? `e.g. 5'` : "e.g. 1.5m"}
-            onBlur={(e) => {
-              const mm = parseLengthToMm(e.target.value, unitSystem);
-              if (mm != null && mm > 0) onDimensions(mm, mm);
-            }}
-          />
-        </div>
-      ) : (
-        <>
+      {!isPerson &&
+        (dining && diningShape === "round" ? (
           <div className="field">
-            <label htmlFor="furn-width">
-              {dining ? "Table width" : "Width"}
-            </label>
+            <label htmlFor="furn-width">Table diameter</label>
             <input
               id="furn-width"
               defaultValue={formatLength(object.widthMm, unitSystem)}
-              placeholder={unitSystem === "imperial" ? `e.g. 6'` : "e.g. 1.8m"}
+              placeholder={unitSystem === "imperial" ? `e.g. 5'` : "e.g. 1.5m"}
               onBlur={(e) => {
                 const mm = parseLengthToMm(e.target.value, unitSystem);
-                if (mm != null && mm > 0) onDimensions(mm, object.depthMm);
+                if (mm != null && mm > 0) onDimensions(mm, mm);
               }}
             />
           </div>
-          <div className="field">
-            <label htmlFor="furn-depth">
-              {dining ? "Table depth" : "Depth / length"}
-            </label>
-            <input
-              id="furn-depth"
-              defaultValue={formatLength(object.depthMm, unitSystem)}
-              placeholder={unitSystem === "imperial" ? `e.g. 3'` : "e.g. 0.9m"}
-              onBlur={(e) => {
-                const mm = parseLengthToMm(e.target.value, unitSystem);
-                if (mm != null && mm > 0) onDimensions(object.widthMm, mm);
-              }}
-            />
-          </div>
-        </>
-      )}
+        ) : (
+          <>
+            <div className="field">
+              <label htmlFor="furn-width">
+                {dining ? "Table width" : "Width"}
+              </label>
+              <input
+                id="furn-width"
+                defaultValue={formatLength(object.widthMm, unitSystem)}
+                placeholder={
+                  unitSystem === "imperial" ? `e.g. 6'` : "e.g. 1.8m"
+                }
+                onBlur={(e) => {
+                  const mm = parseLengthToMm(e.target.value, unitSystem);
+                  if (mm != null && mm > 0) onDimensions(mm, object.depthMm);
+                }}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="furn-depth">
+                {dining ? "Table depth" : "Depth / length"}
+              </label>
+              <input
+                id="furn-depth"
+                defaultValue={formatLength(object.depthMm, unitSystem)}
+                placeholder={
+                  unitSystem === "imperial" ? `e.g. 3'` : "e.g. 0.9m"
+                }
+                onBlur={(e) => {
+                  const mm = parseLengthToMm(e.target.value, unitSystem);
+                  if (mm != null && mm > 0) onDimensions(object.widthMm, mm);
+                }}
+              />
+            </div>
+          </>
+        ))}
       {dining && (
         <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
           Dimensions are the tabletop. Plan footprint with chairs:{" "}
@@ -4280,13 +5515,13 @@ function FurnitureFields({
         >
           +15°
         </button>
+        <button type="button" className="btn danger" onClick={onDelete}>
+          Delete
+        </button>
       </div>
       <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
         Or drag the circle handle on the plan. Press R for +15°.
       </p>
-      <button type="button" className="btn danger" onClick={onDelete}>
-        Delete
-      </button>
     </div>
   );
 }
@@ -4313,20 +5548,37 @@ function placeLibraryItem(
   item: PlaceableItem,
   position: PointMm,
   parentBodyId?: string,
+  opts?: { rotationDeg?: number },
 ): { design: DesignDocument; object: PlacedObject } {
+  const isPerson = item.id === "person_scale";
+  const personSex = DEFAULT_PERSON_SEX;
+  const personHeight = isPerson
+    ? defaultPersonHeightMm(personSex)
+    : item.heightMm;
+  const personFoot = isPerson
+    ? personFootprintMm(personHeight, personSex)
+    : null;
   const object: PlacedObject = {
     id: newId("obj"),
     catalogItemId: item.id,
-    name: item.name,
+    name: isPerson
+      ? `Person (${personSex === "female" ? "5′4″" : "5′10″"})`
+      : item.name,
     position,
-    rotationDeg: 0,
+    rotationDeg: opts?.rotationDeg ?? 0,
     layerId: item.layerId,
-    widthMm: item.widthMm,
-    depthMm: item.depthMm,
-    heightMm: item.heightMm,
+    widthMm: personFoot?.widthMm ?? item.widthMm,
+    depthMm: personFoot?.depthMm ?? item.depthMm,
+    heightMm: personHeight,
     parentBodyId,
     frameFinishId: defaultFrameFinishId(item.id),
     fabricFinishId: defaultFabricFinishId(item.id),
+    ...(isPerson
+      ? {
+          personSex,
+          personOutfitId: DEFAULT_PERSON_OUTFIT_ID,
+        }
+      : {}),
   };
   let layers = design.layers;
   if (!layers.some((l) => l.id === item.layerId)) {
@@ -4361,9 +5613,18 @@ function nearestBuildingEdge(
   for (const building of buildings) {
     const outline = building.outline;
     if (outline.length < 2) continue;
-    for (let i = 0; i < outline.length; i++) {
-      const edgeA = outline[i];
-      const edgeB = outline[(i + 1) % outline.length];
+    // Match 3D wall ring: drop duplicate closing vertex so edgeIndex is stable.
+    const ring =
+      outline.length > 1 &&
+      Math.hypot(
+        outline[0].x - outline[outline.length - 1].x,
+        outline[0].y - outline[outline.length - 1].y,
+      ) < 1
+        ? outline.slice(0, -1)
+        : outline;
+    for (let i = 0; i < ring.length; i++) {
+      const edgeA = ring[i];
+      const edgeB = ring[(i + 1) % ring.length];
       const edgeLen = segmentLengthMm(edgeA, edgeB);
       if (edgeLen < 1e-6) continue;
       const tRaw =
@@ -4423,6 +5684,7 @@ function translateDesign(
     | "building"
     | "cover"
     | "run"
+    | "fence"
     | "object"
     | "feature"
     | "gradeSample",
@@ -4493,6 +5755,14 @@ function translateDesign(
       ),
     };
   }
+  if (kind === "fence") {
+    return {
+      ...d,
+      fences: (d.fences ?? []).map((f) =>
+        f.id === id ? { ...f, points: f.points.map(shift) } : f,
+      ),
+    };
+  }
   if (kind === "feature") {
     return {
       ...d,
@@ -4515,6 +5785,54 @@ function translateDesign(
       o.id === id ? { ...o, position: shift(o.position) } : o,
     ),
   };
+}
+
+function nearestFenceEdge(
+  fences: FenceRun[],
+  point: PointMm,
+  maxDistMm: number,
+): {
+  fenceId: string;
+  edgeIndex: number;
+  t: number;
+  edgeA: PointMm;
+  edgeB: PointMm;
+  dist: number;
+} | null {
+  let best: {
+    fenceId: string;
+    edgeIndex: number;
+    t: number;
+    edgeA: PointMm;
+    edgeB: PointMm;
+    dist: number;
+  } | null = null;
+  for (const fence of fences) {
+    for (let i = 0; i < fence.points.length - 1; i++) {
+      const a = fence.points[i];
+      const b = fence.points[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len2 = dx * dx + dy * dy;
+      if (len2 < 1e-6) continue;
+      const tRaw = ((point.x - a.x) * dx + (point.y - a.y) * dy) / len2;
+      const t = Math.max(0, Math.min(1, tRaw));
+      const proj = { x: a.x + dx * t, y: a.y + dy * t };
+      const dist = segmentLengthMm(point, proj);
+      if (dist > maxDistMm) continue;
+      if (!best || dist < best.dist) {
+        best = {
+          fenceId: fence.id,
+          edgeIndex: i,
+          t,
+          edgeA: a,
+          edgeB: b,
+          dist,
+        };
+      }
+    }
+  }
+  return best;
 }
 
 function distToSegment(p: PointMm, a: PointMm, b: PointMm): number {
