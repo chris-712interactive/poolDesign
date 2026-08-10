@@ -25,21 +25,20 @@ pnpm dev
 ## Vercel project
 
 1. Import the GitHub repo into Vercel.
-2. **Root Directory:** leave monorepo root; set:
-   - **Framework:** Next.js
-   - **Build Command:** `pnpm db:generate && pnpm --filter @pool-design/web build`
-   - **Install Command:** `pnpm install`
-   - **Output:** default for Next.js (`apps/web` via pnpm filter — or set Root Directory to `apps/web` and ensure workspace packages resolve)
-3. Recommended: set Vercel **Root Directory** to `apps/web`, and in that project’s settings allow access to the monorepo (`pnpm-workspace.yaml` at parent). Alternatively use:
+2. Set **Root Directory** to `apps/web` (required — `next.config` lives there).
+3. Enable including files outside the Root Directory so workspace packages resolve.
+4. `apps/web/vercel.json` already sets:
 
 ```
-Build Command: cd ../.. && pnpm db:generate && pnpm --filter @pool-design/web build
 Install Command: cd ../.. && pnpm install
+Build Command:   cd ../.. && pnpm --filter @pool-design/db generate && pnpm --filter @pool-design/web build
 ```
 
-Simplest reliable setup: **Root Directory = repository root**, with `vercel.json` (see below).
+Do **not** use `pnpm db:generate` in the Vercel UI — that script only exists on the monorepo root package, and with Root Directory `apps/web` pnpm will report `Command "db:generate" not found`.
 
-4. Environment variables:
+If the dashboard overrides `vercel.json`, paste the Install/Build commands above into Project Settings → General / Build & Development Settings.
+
+5. Environment variables:
 
 | Name | Value |
 |------|--------|
@@ -54,7 +53,7 @@ Simplest reliable setup: **Root Directory = repository root**, with `vercel.json
 | `STRIPE_PRICE_PRO_MONTHLY` | Price ID |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Publishable key |
 
-5. After first deploy, run migrate/push against production DB:
+6. After first deploy, run migrate/push against production DB:
 
 ```bash
 DATABASE_URL="postgresql://..." pnpm db:push
