@@ -380,7 +380,7 @@ export function normalizeDesignDocument(
     fences: normalizeFences(doc.fences),
     estimate: normalizeEstimate(doc.estimate),
   };
-  // Rebuild auto trenches only when they currently clip a house/patio.
+  // Rebuild auto trenches only when they currently clip a house foundation.
   return repairAutoPlumbingIfNeeded(normalized);
 }
 

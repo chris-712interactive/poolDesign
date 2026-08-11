@@ -433,7 +433,7 @@ describe("routeOrthoAvoiding obstacles", () => {
     assert.equal(boxHits(path, box), false);
   });
 
-  it("auto body trenches go around house and patio deck", () => {
+  it("may route under patio deck but not under the house", () => {
     let design: DesignDocument = {
       ...emptyDesignDocument("residential"),
       poolBodies: [
@@ -487,7 +487,7 @@ describe("routeOrthoAvoiding obstacles", () => {
     };
     design = rebuildBodyPlumbing(design, "p1");
     const CLEAR = FT;
-    const blocked = obstaclesFromDesign(design).map((o) => {
+    const houseBoxes = obstaclesFromDesign(design).map((o) => {
       const xs = o.outline.map((p) => p.x);
       const ys = o.outline.map((p) => p.y);
       return {
@@ -497,14 +497,32 @@ describe("routeOrthoAvoiding obstacles", () => {
         maxY: Math.max(...ys) + CLEAR,
       };
     });
+    assert.ok(houseBoxes.length >= 1, "house should be an obstacle");
     for (const r of design.plumbingRuns.filter((x) => !x.padLocal)) {
-      for (const box of blocked) {
+      for (const box of houseBoxes) {
         assert.equal(
           boxHits(r.points, box),
           false,
-          `${r.circuit} should not cross blocked obstacle`,
+          `${r.circuit} should not cross house foundation`,
         );
       }
     }
+  });
+
+  it("allows a short trench across patio when house is clear", () => {
+    const patio = {
+      outline: rect(20 * FT, 10 * FT, 20 * FT, 10 * FT),
+      priority: "soft" as const,
+    };
+    const from = { x: 10 * FT, y: 15 * FT };
+    const to = { x: 50 * FT, y: 15 * FT };
+    const path = routeOrthoAvoiding(from, to, [patio]);
+    // Soft patio is ignored for blocking — straight L/ortho is fine.
+    assert.equal(boxHits(path, {
+      minX: 20 * FT,
+      minY: 10 * FT,
+      maxX: 40 * FT,
+      maxY: 20 * FT,
+    }), true);
   });
 });

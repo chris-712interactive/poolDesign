@@ -2,7 +2,8 @@
  * Pool / spa trench plumbing helpers based on common residential pad practice:
  * - Flow order: suction → pump → filter → heater → (salt) → returns
  * - Prefer ortho (H/V) runs with few elbows
- * - Never trench under houses/buildings; avoid patios unless no reasonable path
+ * - Never trench under houses/buildings (foundations). Patio deck is fine —
+ *   pools/trenches go in before the patio pour.
  * - Run suction & return as parallel lines (~12" apart)
  * - Suction ≥ 2"; returns ≥ 2" trunk
  */
@@ -67,64 +68,6 @@ function expandBounds(b: Bounds, margin: number): Bounds {
 
 function boundsFromOutline(outline: PointMm[]): Bounds {
   return outlineBounds(outline);
-}
-
-function intersectBounds(a: Bounds, b: Bounds): Bounds | null {
-  const minX = Math.max(a.minX, b.minX);
-  const minY = Math.max(a.minY, b.minY);
-  const maxX = Math.min(a.maxX, b.maxX);
-  const maxY = Math.min(a.maxY, b.maxY);
-  if (maxX - minX < 1 || maxY - minY < 1) return null;
-  return {
-    minX,
-    minY,
-    maxX,
-    maxY,
-    width: maxX - minX,
-    height: maxY - minY,
-    cx: (minX + maxX) / 2,
-    cy: (minY + maxY) / 2,
-  };
-}
-
-/** Up to four slabs = `outer` minus `hole` (AABB difference). */
-function subtractBounds(outer: Bounds, hole: Bounds): Bounds[] {
-  const hit = intersectBounds(outer, hole);
-  if (!hit) return [outer];
-  const out: Bounds[] = [];
-  const push = (minX: number, minY: number, maxX: number, maxY: number) => {
-    if (maxX - minX < 50 || maxY - minY < 50) return;
-    out.push({
-      minX,
-      minY,
-      maxX,
-      maxY,
-      width: maxX - minX,
-      height: maxY - minY,
-      cx: (minX + maxX) / 2,
-      cy: (minY + maxY) / 2,
-    });
-  };
-  // Left / right / bottom / top slabs around the intersection.
-  push(outer.minX, outer.minY, hit.minX, outer.maxY);
-  push(hit.maxX, outer.minY, outer.maxX, outer.maxY);
-  push(hit.minX, outer.minY, hit.maxX, hit.minY);
-  push(hit.minX, hit.maxY, hit.maxX, outer.maxY);
-  return out;
-}
-
-/**
- * Punch water-body free zones out of a patio AABB so shell exits aren't
- * trapped "inside" the deck obstacle, while the surrounding deck stays blocked.
- */
-function punchBounds(outer: Bounds, holes: Bounds[]): Bounds[] {
-  let pieces = [outer];
-  for (const hole of holes) {
-    const next: Bounds[] = [];
-    for (const p of pieces) next.push(...subtractBounds(p, hole));
-    pieces = next;
-  }
-  return pieces;
 }
 
 function pointInBounds(p: PointMm, b: Bounds, margin = 0): boolean {
@@ -287,7 +230,10 @@ export function placeEquipmentPadWithStandardKit(
 
 export type RouteObstacle = {
   outline: PointMm[];
-  /** hard = house/building (never under); soft = patio (avoid if possible) */
+  /**
+   * hard = house/building (never trench under foundation).
+   * soft = reserved (e.g. prefer to avoid); not used as a hard block.
+   */
   priority: "hard" | "soft";
 };
 
@@ -438,19 +384,20 @@ export function routeOrtho(from: PointMm, to: PointMm): PointMm[] {
 }
 
 /**
- * Ortho route that never crosses houses or patio deck (auto-routes only).
- * Manual plumbing runs are unchanged — designers can still draw under structures.
+ * Ortho route that never crosses house foundations (auto-routes only).
+ * Patio deck is allowed — trenches are typically set before the pour.
+ * Manual plumbing runs are unchanged — designers can still draw anywhere.
  */
 export function routeOrthoAvoiding(
   from: PointMm,
   to: PointMm,
   obstacles: RouteObstacle[] = [],
 ): PointMm[] {
-  if (!obstacles.length) return routeOrtho(from, to);
+  // Only foundations are hard-blocked. Soft obstacles do not reject a path.
+  const hard = obstacles.filter((o) => o.priority === "hard");
+  if (!hard.length) return routeOrtho(from, to);
 
-  // Auto-routing treats both house and patio as blocked. Patio outlines are
-  // usually pre-punched around water bodies in obstaclesFromDesign.
-  const blockedBoxes = obstacles.map((o) =>
+  const blockedBoxes = hard.map((o) =>
     expandBounds(outlineBounds(o.outline), CLEARANCE_MM),
   );
 
@@ -466,7 +413,7 @@ export function routeOrthoAvoiding(
     candidates.push(...bypassCandidates(from, to, box));
   }
 
-  // Route around the union of all blocked AABBs (house + deck slabs).
+  // Route around the union of all house AABBs.
   if (blockedBoxes.length) {
     const union = blockedBoxes.reduce(
       (acc, b) => ({
@@ -484,9 +431,12 @@ export function routeOrthoAvoiding(
     candidates.push(
       ...bypassCandidates(from, to, expandBounds(union, CLEARANCE_MM)),
     );
-    // Extra ring further out — helps when pad and pool sit on opposite sides.
+    // Extra rings further out — helps when pad and pool sit on opposite sides.
     candidates.push(
       ...bypassCandidates(from, to, expandBounds(union, CLEARANCE_MM * 3)),
+    );
+    candidates.push(
+      ...bypassCandidates(from, to, expandBounds(union, CLEARANCE_MM * 6)),
     );
   }
 
@@ -496,8 +446,7 @@ export function routeOrthoAvoiding(
   for (const raw of candidates) {
     const path = dedupePoints(raw);
     if (pathHits(path, blockedBoxes) > 0) continue;
-    const score =
-      polylineLen(path) + bendCount(path) * BEND_PENALTY_MM;
+    const score = polylineLen(path) + bendCount(path) * BEND_PENALTY_MM;
     if (score < bestScore) {
       bestScore = score;
       best = path;
@@ -506,8 +455,8 @@ export function routeOrthoAvoiding(
 
   if (best) return best;
 
-  // No clear candidate — still refuse to tunnel through structures.
-  // Walk around the union on the longest clear side as a last resort.
+  // No clear candidate among the first set — walk wider rings; still refuse
+  // to tunnel under a foundation.
   if (blockedBoxes.length) {
     const union = blockedBoxes.reduce(
       (acc, b) => ({
@@ -522,55 +471,29 @@ export function routeOrthoAvoiding(
       }),
       blockedBoxes[0],
     );
-    const ring = expandBounds(union, CLEARANCE_MM * 4);
-    const ringPaths = bypassCandidates(from, to, ring);
-    for (const raw of ringPaths) {
-      const path = dedupePoints(raw);
-      if (pathHits(path, blockedBoxes) > 0) continue;
-      return path;
+    for (const mult of [4, 8, 12, 20]) {
+      const ring = expandBounds(union, CLEARANCE_MM * mult);
+      for (const raw of bypassCandidates(from, to, ring)) {
+        const path = dedupePoints(raw);
+        if (pathHits(path, blockedBoxes) > 0) continue;
+        return path;
+      }
     }
   }
 
-  // Absolute fallback: direct ortho (may still clip if endpoints are inside
-  // blocked regions — user can edit). Prefer this over inventing nonsense.
+  // Absolute fallback: direct ortho. May still clip if an endpoint lies inside
+  // a foundation — user can edit. Prefer this over inventing nonsense.
   return routeOrtho(from, to);
 }
 
-/** Collect house + patio obstacles from the design (auto-route blockers). */
+/** Collect house foundations as hard auto-route blockers (patios are not blocked). */
 export function obstaclesFromDesign(design: DesignDocument): RouteObstacle[] {
-  const hard: RouteObstacle[] = (design.buildings ?? [])
+  return (design.buildings ?? [])
     .filter((b) => (b.outline?.length ?? 0) >= 3)
     .map((b) => ({
       outline: b.outline,
       priority: "hard" as const,
     }));
-
-  // Patio deck is also blocked for auto-routes, but punch out water bodies so
-  // shell exits aren't trapped inside the deck AABB.
-  const waterHoles = (design.poolBodies ?? [])
-    .filter((b) => (b.outline?.length ?? 0) >= 3)
-    .map((b) => expandBounds(boundsFromOutline(b.outline), 2 * FT));
-
-  for (const patio of design.patios ?? []) {
-    if ((patio.outline?.length ?? 0) < 3) continue;
-    const outer = boundsFromOutline(patio.outline);
-    const pieces = waterHoles.length
-      ? punchBounds(outer, waterHoles)
-      : [outer];
-    for (const piece of pieces) {
-      hard.push({
-        outline: [
-          { x: piece.minX, y: piece.minY },
-          { x: piece.maxX, y: piece.minY },
-          { x: piece.maxX, y: piece.maxY },
-          { x: piece.minX, y: piece.maxY },
-        ],
-        priority: "hard",
-      });
-    }
-  }
-
-  return hard;
 }
 
 /** Offset a polyline perpendicular to its overall from→to direction. */
@@ -1334,17 +1257,18 @@ export function ensurePadManifoldPlumbing(
 }
 
 /**
- * If any auto body trench currently crosses a house/patio, rebuild those runs.
- * Manual runs (no parentBodyId) are left alone. Refreshes the pad manifold only
- * when flow equipment exists but pad-local runs are missing/empty.
+ * If any auto body trench currently crosses a house foundation, rebuild those
+ * runs. Patio crossings are allowed. Manual runs (no parentBodyId) are left
+ * alone. Refreshes the pad manifold only when flow equipment exists but
+ * pad-local runs are missing/empty.
  */
 export function repairAutoPlumbingIfNeeded(
   design: DesignDocument,
 ): DesignDocument {
   const obstacles = obstaclesFromDesign(design);
-  const blocked = obstacles.map((o) =>
-    expandBounds(outlineBounds(o.outline), CLEARANCE_MM),
-  );
+  const blocked = obstacles
+    .filter((o) => o.priority === "hard")
+    .map((o) => expandBounds(outlineBounds(o.outline), CLEARANCE_MM));
   const clipped = design.plumbingRuns.some(
     (r) =>
       !!r.parentBodyId &&
@@ -1423,7 +1347,7 @@ export function nearestEdgePoint(outline: PointMm[], target: PointMm): PointMm {
   return { x: clamps.x, y: b.maxY };
 }
 
-/** Pick shell exit whose trench to target best avoids houses/patios. */
+/** Pick shell exit whose trench to equipment best avoids house foundations. */
 function bestShellExit(
   outline: PointMm[],
   target: PointMm,
@@ -1437,9 +1361,9 @@ function bestShellExit(
     { x: b.cx, y: b.maxY },
     nearestEdgePoint(outline, target),
   ];
-  const blockedBoxes = obstacles.map((o) =>
-    expandBounds(outlineBounds(o.outline), CLEARANCE_MM),
-  );
+  const blockedBoxes = obstacles
+    .filter((o) => o.priority === "hard")
+    .map((o) => expandBounds(outlineBounds(o.outline), CLEARANCE_MM));
 
   let best = candidates[0];
   let bestScore = Infinity;
@@ -1466,13 +1390,14 @@ export type BodyPlumbingOptions = {
   suctionStart?: PointMm;
   returnEnds?: PointMm[];
   featureEnds?: PointMm[];
-  /** Houses and patio deck slabs to route around (auto-routes never cross). */
+  /** House foundations to route around (auto-routes never cross). Patios OK. */
   obstacles?: RouteObstacle[];
 };
 
 /**
  * Build editable trench runs from a water body to placed equipment.
- * Auto-routes around houses and patio decks; designers can still draw under them.
+ * Auto-routes around house foundations; patio deck is fine to cross.
+ * Designers can still draw under houses manually if needed.
  */
 export function buildBodyPlumbingRuns(
   opts: BodyPlumbingOptions,
@@ -1508,7 +1433,7 @@ export function buildBodyPlumbingRuns(
         : 0),
   };
 
-  // Inside-shell legs stay short; trench from shell → pad avoids obstacles.
+  // Inside-shell legs stay short; trench from shell → pad avoids foundations.
   const suctionPath = dedupePoints([
     suctionStart,
     exitSuction,
@@ -1525,10 +1450,10 @@ export function buildBodyPlumbingRuns(
   // Parallel offset of the trench segment only (keep equipment endpoint)
   let returnMain = offsetPolyline(returnTrunk, PARALLEL_OFFSET_MM);
   returnMain[0] = connection.returnOrigin;
-  // Re-validate offset path; if it clips a blocked obstacle, fall back to unoffset trunk
-  const blockedBoxes = obstacles.map((o) =>
-    expandBounds(outlineBounds(o.outline), CLEARANCE_MM),
-  );
+  // Re-validate offset path; if it clips a foundation, fall back to unoffset trunk
+  const blockedBoxes = obstacles
+    .filter((o) => o.priority === "hard")
+    .map((o) => expandBounds(outlineBounds(o.outline), CLEARANCE_MM));
   if (pathHits(returnMain, blockedBoxes) > 0) {
     returnMain = returnTrunk;
   }
