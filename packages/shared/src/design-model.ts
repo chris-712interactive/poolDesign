@@ -58,6 +58,11 @@ export type PoolBody = {
    */
   spillover?: SpaSpillover;
   /**
+   * Pool vanishing / infinity edge + catch trough (kind pool only).
+   * Authorable per outline edge; disabled by default until edges are enabled.
+   */
+  infinityEdge?: InfinityEdge;
+  /**
    * Waterline tile finish id from the waterline tile library.
    * Visual only — takeoff still uses catalog `waterline_tile` LF.
    */
@@ -110,6 +115,57 @@ export type SpaSpillover = {
 export function isSpaSpilloverStyle(v: unknown): v is SpaSpilloverStyle {
   return v === "sheet" || v === "scuppers" || v === "sheer";
 }
+
+/** Visual style of a pool vanishing / infinity weir. */
+export type InfinityEdgeStyle = "sheet" | "scuppers" | "sheer";
+
+export const INFINITY_EDGE_STYLES: InfinityEdgeStyle[] = [
+  "sheet",
+  "scuppers",
+  "sheer",
+];
+
+export function isInfinityEdgeStyle(v: unknown): v is InfinityEdgeStyle {
+  return v === "sheet" || v === "scuppers" || v === "sheer";
+}
+
+/** Authorable weir on one pool outline edge that spills into a catch trough. */
+export type InfinityEdgeWeir = {
+  edgeIndex: number;
+  /** When false, this edge is not spilling (still listed as a candidate). */
+  enabled?: boolean;
+  widthMm?: number;
+  offsetMm?: number;
+};
+
+/** Catch / surge trough dimensions outside the vanishing edge. */
+export type InfinityTrough = {
+  /** Outward width from the outer shell face (default ~24″). */
+  widthMm?: number;
+  /** Vertical depth of the catch basin (default ~30″). */
+  depthMm?: number;
+  /** Design water depth in the trough used for surge volume (default ~18″). */
+  waterDepthMm?: number;
+};
+
+/** Authorable pool infinity / vanishing edge into a catch trough. */
+export type InfinityEdge = {
+  enabled: boolean;
+  /** Per-edge weirs. When omitted/empty, no edges spill until the user enables some. */
+  weirs?: InfinityEdgeWeir[];
+  /** Notch depth below pool rim (mm) — shared across weirs. */
+  notchDepthMm?: number;
+  style?: InfinityEdgeStyle;
+  trough?: InfinityTrough;
+  /** Scuppers only: number of openings (2–8). */
+  scupperCount?: number;
+  /** Scuppers only: clear gap between openings (mm). */
+  scupperGapMm?: number;
+  /** Optional override for edge flow readout (GPM). */
+  flowGpmOverride?: number;
+  /** Optional override for recommended surge volume (gal). */
+  surgeGalOverride?: number;
+};
 
 /** How a patio handles existing grade fall-away relative to house FFE. */
 export type PatioGradeStrategy = "fill" | "retaining" | "both";

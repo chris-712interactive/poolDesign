@@ -169,6 +169,86 @@ describe("normalizeDesignDocument", () => {
     assert.ok((s.scupperGapMm ?? 0) >= 10);
   });
 
+  it("clamps pool infinity-edge fields", () => {
+    const raw = {
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [],
+      poolBodies: [
+        {
+          id: "pool_1",
+          name: "Pool",
+          kind: "pool",
+          outline: [
+            { x: 0, y: 0 },
+            { x: 6000, y: 0 },
+            { x: 6000, y: 12000 },
+            { x: 0, y: 12000 },
+          ],
+          depthShallowMm: 900,
+          depthDeepMm: 2400,
+          infinityEdge: {
+            enabled: true,
+            style: "sheer",
+            scupperCount: 99,
+            notchDepthMm: 1,
+            scupperGapMm: 1,
+            weirs: [{ edgeIndex: 0, enabled: true, widthMm: -5 }],
+            trough: { widthMm: 10, depthMm: 20, waterDepthMm: 5 },
+            flowGpmOverride: -10,
+            surgeGalOverride: 999999,
+          },
+        },
+      ],
+      plumbingRuns: [],
+    } as unknown as DesignDocument;
+
+    const next = normalizeDesignDocument(raw);
+    const ie = next.poolBodies[0].infinityEdge!;
+    assert.equal(ie.enabled, true);
+    assert.equal(ie.style, "sheer");
+    assert.equal(ie.scupperCount, 8);
+    assert.ok(ie.weirs?.length);
+    assert.ok((ie.weirs![0].widthMm ?? 0) >= 50);
+    assert.ok((ie.notchDepthMm ?? 0) >= 5);
+    assert.ok((ie.trough?.widthMm ?? 0) >= 100);
+    assert.equal(ie.flowGpmOverride, 0);
+    assert.ok((ie.surgeGalOverride ?? 0) <= 50_000);
+    assert.equal(next.poolBodies[0].spillover, undefined);
+  });
+
+  it("drops infinity edge on spas and spillover on pools", () => {
+    const raw = {
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [],
+      poolBodies: [
+        {
+          id: "spa_1",
+          name: "Spa",
+          kind: "spa",
+          outline: [
+            { x: 0, y: 0 },
+            { x: 1000, y: 0 },
+            { x: 1000, y: 1000 },
+            { x: 0, y: 1000 },
+          ],
+          depthShallowMm: 900,
+          depthDeepMm: 900,
+          infinityEdge: { enabled: true, weirs: [{ edgeIndex: 0 }] },
+          spillover: { enabled: true },
+        },
+      ],
+      plumbingRuns: [],
+    } as unknown as DesignDocument;
+
+    const next = normalizeDesignDocument(raw);
+    assert.equal(next.poolBodies[0].infinityEdge, undefined);
+    assert.ok(next.poolBodies[0].spillover);
+  });
+
   it("migrates legacy dining_table_set to round tabletop sizing", () => {
     const FT = 304.8;
     const raw = {

@@ -125,6 +125,12 @@ import {
   resolveSpaSpillovers,
   patchSpaSpilloverWeir,
   spilloverWeirFromDrag,
+  listInfinityEdgeCandidates,
+  resolveInfinityEdges,
+  resolveInfinityEdge,
+  patchInfinityEdgeWeir,
+  infinityWeirFromDrag,
+  computeInfinityHydraulics,
   type Building,
   type BuildingOpening,
   type BuildingOpeningKind,
@@ -138,6 +144,8 @@ import {
   type GateKind,
   type SpaSpillover,
   type SpaSpilloverStyle,
+  type InfinityEdge,
+  type InfinityEdgeStyle,
   type PatioCover,
   type PatioCoverKind,
   type PatioRegion,
@@ -191,6 +199,7 @@ import {
   drawRun,
   drawEdgeLabel,
   drawSpaSpillover,
+  drawInfinityEdge,
   openingEndpoints,
 } from "@/lib/cad/draw";
 
@@ -277,6 +286,12 @@ type DragState =
   | {
       mode: "spilloverWeir";
       spaId: string;
+      edgeIndex: number;
+      handle: "start" | "end" | "body";
+    }
+  | {
+      mode: "infinityWeir";
+      poolId: string;
       edgeIndex: number;
       handle: "start" | "end" | "body";
     };
@@ -864,8 +879,14 @@ export function CadWorkspace({
                 selection?.kind === "pool" && selection.id === pool.id,
             },
           );
-        } else if (selected) {
-          drawDepthProfile(ctx, vp, pool, unitSystem);
+        } else {
+          drawInfinityEdge(ctx, vp, pool, {
+            selected:
+              selection?.kind === "pool" && selection.id === pool.id,
+          });
+          if (selected) {
+            drawDepthProfile(ctx, vp, pool, unitSystem);
+          }
         }
       }
     }
@@ -1567,6 +1588,55 @@ export function CadWorkspace({
     return null;
   }
 
+  function hitInfinityWeir(
+    point: PointMm,
+  ): {
+    poolId: string;
+    edgeIndex: number;
+    handle: "start" | "end" | "body";
+  } | null {
+    if (selection?.kind !== "pool" || !selectedPool) return null;
+    if (waterBodyKind(selectedPool) !== "pool") return null;
+    if (selectedPool.infinityEdge?.enabled !== true) return null;
+    const edges = resolveInfinityEdges(selectedPool);
+    const tol = (VERTEX_HIT_PX + 6) / vp.scale;
+    for (const edge of edges) {
+      if (segmentLengthMm(point, edge.a) <= tol) {
+        return {
+          poolId: selectedPool.id,
+          edgeIndex: edge.edgeIndex,
+          handle: "start",
+        };
+      }
+      if (segmentLengthMm(point, edge.b) <= tol) {
+        return {
+          poolId: selectedPool.id,
+          edgeIndex: edge.edgeIndex,
+          handle: "end",
+        };
+      }
+      const mid = {
+        x: (edge.a.x + edge.b.x) / 2,
+        y: (edge.a.y + edge.b.y) / 2,
+      };
+      if (segmentLengthMm(point, mid) <= tol) {
+        return {
+          poolId: selectedPool.id,
+          edgeIndex: edge.edgeIndex,
+          handle: "body",
+        };
+      }
+      if (distToSegment(point, edge.a, edge.b) <= tol) {
+        return {
+          poolId: selectedPool.id,
+          edgeIndex: edge.edgeIndex,
+          handle: "body",
+        };
+      }
+    }
+    return null;
+  }
+
   function hitDepthStation(
     point: PointMm,
   ): { poolId: string; stationId: string } | null {
@@ -1889,6 +1959,12 @@ export function CadWorkspace({
         setDrag({ mode: "spilloverWeir", ...spillHit });
         return;
       }
+      const infinityHit = hitInfinityWeir(point);
+      if (infinityHit) {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({ mode: "infinityWeir", ...infinityHit });
+        return;
+      }
       const depthHit = hitDepthStation(point);
       if (depthHit) {
         dragOriginRef.current = structuredClone(design);
@@ -2156,6 +2232,38 @@ export function CadWorkspace({
           ...d,
           poolBodies: d.poolBodies.map((p) =>
             p.id === drag.spaId ? { ...p, spillover } : p,
+          ),
+        };
+      });
+      return;
+    }
+
+    if (drag.mode === "infinityWeir") {
+      setDesign((d) => {
+        const pool = d.poolBodies.find((p) => p.id === drag.poolId);
+        if (!pool || waterBodyKind(pool) !== "pool") return d;
+        const candidates = listInfinityEdgeCandidates(pool);
+        const candidate = candidates.find(
+          (c) => c.edgeIndex === drag.edgeIndex,
+        );
+        const edges = resolveInfinityEdges(pool);
+        const current = edges.find((s) => s.edgeIndex === drag.edgeIndex);
+        if (!candidate || !current) return d;
+        const params = infinityWeirFromDrag(
+          candidate,
+          current,
+          drag.handle,
+          point,
+        );
+        const infinityEdge = patchInfinityEdgeWeir(pool, drag.edgeIndex, {
+          enabled: true,
+          widthMm: params.widthMm,
+          offsetMm: params.offsetMm,
+        });
+        return {
+          ...d,
+          poolBodies: d.poolBodies.map((p) =>
+            p.id === drag.poolId ? { ...p, infinityEdge } : p,
           ),
         };
       });
@@ -2485,7 +2593,8 @@ export function CadWorkspace({
       drag?.mode === "coverSupport" ||
       drag?.mode === "rotate" ||
       drag?.mode === "depthStation" ||
-      drag?.mode === "spilloverWeir"
+      drag?.mode === "spilloverWeir" ||
+      drag?.mode === "infinityWeir"
     ) {
       let next = designRef.current;
       // After reshaping a spa shell, reflow benches/equipment/plumbing inside.
@@ -3068,6 +3177,7 @@ export function CadWorkspace({
                                 shellHeightMm:
                                   selectedPool.shellHeightMm ??
                                   DEFAULT_SPA_SHELL_HEIGHT_MM,
+                                infinityEdge: undefined,
                               };
                               const withKind = {
                                 ...design,
@@ -3090,6 +3200,7 @@ export function CadWorkspace({
                                 wallThicknessMm:
                                   selectedPool.wallThicknessMm ??
                                   DEFAULT_POOL_WALL_THICKNESS_MM,
+                                spillover: undefined,
                               };
                               const stripped = stripBodyChildren(
                                 design,
@@ -3169,6 +3280,23 @@ export function CadWorkspace({
                             poolBodies: design.poolBodies.map((p) =>
                               p.id === selectedPool.id
                                 ? { ...p, wallThicknessMm }
+                                : p,
+                            ),
+                          })
+                        }
+                      />
+                    )}
+                    {waterBodyKind(selectedPool) === "pool" && (
+                      <InfinityEdgeFields
+                        key={`infinity-${selectedPool.id}-${JSON.stringify(selectedPool.infinityEdge ?? null)}`}
+                        body={selectedPool}
+                        unitSystem={unitSystem}
+                        onInfinityEdge={(infinityEdge) =>
+                          commitDesign({
+                            ...design,
+                            poolBodies: design.poolBodies.map((p) =>
+                              p.id === selectedPool.id
+                                ? { ...p, infinityEdge }
                                 : p,
                             ),
                           })
@@ -5076,6 +5204,288 @@ function PoolWallFields({
         Inside waterline: {formatLength(inside.width, unitSystem)} ×{" "}
         {formatLength(inside.height, unitSystem)}
       </div>
+    </div>
+  );
+}
+
+function InfinityEdgeFields({
+  body,
+  unitSystem,
+  onInfinityEdge,
+}: {
+  body: PoolBody;
+  unitSystem: UnitSystem;
+  onInfinityEdge: (infinityEdge: InfinityEdge) => void;
+}) {
+  const candidates = listInfinityEdgeCandidates(body);
+  const cfg: InfinityEdge = body.infinityEdge ?? { enabled: false };
+  const featureOn = cfg.enabled === true;
+  const edges = featureOn
+    ? resolveInfinityEdges({
+        ...body,
+        infinityEdge: { ...cfg, enabled: true },
+      })
+    : [];
+  const hydro = featureOn ? computeInfinityHydraulics(body) : null;
+  const trough = cfg.trough ?? {};
+
+  const patch = (next: Partial<InfinityEdge>) => {
+    onInfinityEdge({
+      ...cfg,
+      enabled: true,
+      ...next,
+    });
+  };
+
+  const setFeatureEnabled = (on: boolean) => {
+    if (!on) {
+      onInfinityEdge({ ...cfg, enabled: false });
+      return;
+    }
+    const weirs =
+      cfg.weirs?.length
+        ? cfg.weirs
+        : candidates.map((c) => ({
+            edgeIndex: c.edgeIndex,
+            enabled: false,
+          }));
+    onInfinityEdge({ ...cfg, enabled: true, weirs });
+  };
+
+  return (
+    <div className="stack" style={{ gap: "0.55rem" }}>
+      <strong style={{ fontSize: "0.9rem", marginTop: "0.25rem" }}>
+        Infinity edge
+      </strong>
+      <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
+        Vanishing weir into a catch trough. Enable edges below, then drag weir
+        handles on the 2D plan. Sizing is a design aid — verify with your PE.
+      </p>
+      <label
+        className="field"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+          flexDirection: "row",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={featureOn}
+          onChange={(e) => setFeatureEnabled(e.target.checked)}
+        />
+        <span>Enable infinity / vanishing edge</span>
+      </label>
+      {featureOn && (
+        <>
+          <div className="stack" style={{ gap: "0.35rem" }}>
+            {candidates.map((c) => {
+              const weir = cfg.weirs?.find((w) => w.edgeIndex === c.edgeIndex);
+              const edgeOn = weir?.enabled === true;
+              const resolved = edges.find((r) => r.edgeIndex === c.edgeIndex);
+              return (
+                <label
+                  key={c.edgeIndex}
+                  className="field"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.45rem",
+                    flexDirection: "row",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={edgeOn}
+                    onChange={(ev) => {
+                      const infinityEdge = patchInfinityEdgeWeir(
+                        { ...body, infinityEdge: { ...cfg, enabled: true } },
+                        c.edgeIndex,
+                        {
+                          enabled: ev.target.checked,
+                          widthMm: weir?.widthMm ?? resolved?.widthMm,
+                          offsetMm: weir?.offsetMm,
+                        },
+                      );
+                      onInfinityEdge({ ...infinityEdge, enabled: true });
+                    }}
+                  />
+                  <span style={{ fontSize: "0.85rem" }}>
+                    Edge {c.edgeIndex + 1}
+                    {resolved
+                      ? ` · ${formatLength(resolved.widthMm, unitSystem)} weir`
+                      : ` · ${formatLength(c.edgeLenMm, unitSystem)}`}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="field">
+            <label htmlFor="inf-style">Style</label>
+            <select
+              id="inf-style"
+              value={cfg.style ?? resolveInfinityEdge(body)?.style ?? "sheet"}
+              onChange={(e) =>
+                patch({ style: e.target.value as InfinityEdgeStyle })
+              }
+            >
+              <option value="sheet">Sheet</option>
+              <option value="scuppers">Scuppers</option>
+              <option value="sheer">Sheer descent</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="inf-notch">Notch depth (below rim)</label>
+            <input
+              id="inf-notch"
+              key={`inf-notch-${body.id}-${cfg.notchDepthMm ?? 0}`}
+              defaultValue={formatLength(
+                cfg.notchDepthMm ??
+                  resolveInfinityEdge(body)?.notchDepthMm ??
+                  1.5 * 25.4,
+                unitSystem,
+              )}
+              onBlur={(e) => {
+                const mm = parseLengthToMm(e.target.value, unitSystem);
+                if (mm != null && mm >= 5) patch({ notchDepthMm: mm });
+              }}
+            />
+          </div>
+          {(cfg.style ?? "sheet") === "scuppers" && (
+            <>
+              <div className="field">
+                <label htmlFor="inf-sc-count">Scupper count</label>
+                <input
+                  id="inf-sc-count"
+                  type="number"
+                  min={2}
+                  max={8}
+                  value={cfg.scupperCount ?? 3}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (Number.isFinite(n)) {
+                      patch({
+                        scupperCount: Math.min(8, Math.max(2, Math.round(n))),
+                      });
+                    }
+                  }}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="inf-sc-gap">Scupper gap</label>
+                <input
+                  id="inf-sc-gap"
+                  key={`inf-gap-${body.id}-${cfg.scupperGapMm ?? 0}`}
+                  defaultValue={formatLength(
+                    cfg.scupperGapMm ?? 4 * 25.4,
+                    unitSystem,
+                  )}
+                  onBlur={(e) => {
+                    const mm = parseLengthToMm(e.target.value, unitSystem);
+                    if (mm != null && mm >= 10) {
+                      patch({ scupperGapMm: mm });
+                    }
+                  }}
+                />
+              </div>
+            </>
+          )}
+          <strong style={{ fontSize: "0.85rem" }}>Catch trough</strong>
+          <div className="field">
+            <label htmlFor="inf-trough-w">Trough width (outward)</label>
+            <input
+              id="inf-trough-w"
+              key={`inf-tw-${body.id}-${trough.widthMm ?? 0}`}
+              defaultValue={formatLength(
+                trough.widthMm ?? 24 * 25.4,
+                unitSystem,
+              )}
+              onBlur={(e) => {
+                const mm = parseLengthToMm(e.target.value, unitSystem);
+                if (mm != null && mm >= 100) {
+                  patch({ trough: { ...trough, widthMm: mm } });
+                }
+              }}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="inf-trough-d">Trough depth</label>
+            <input
+              id="inf-trough-d"
+              key={`inf-td-${body.id}-${trough.depthMm ?? 0}`}
+              defaultValue={formatLength(
+                trough.depthMm ?? 30 * 25.4,
+                unitSystem,
+              )}
+              onBlur={(e) => {
+                const mm = parseLengthToMm(e.target.value, unitSystem);
+                if (mm != null && mm >= 150) {
+                  patch({ trough: { ...trough, depthMm: mm } });
+                }
+              }}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="inf-trough-wd">Design water depth</label>
+            <input
+              id="inf-trough-wd"
+              key={`inf-twd-${body.id}-${trough.waterDepthMm ?? 0}`}
+              defaultValue={formatLength(
+                trough.waterDepthMm ?? 18 * 25.4,
+                unitSystem,
+              )}
+              onBlur={(e) => {
+                const mm = parseLengthToMm(e.target.value, unitSystem);
+                if (mm != null && mm >= 50) {
+                  patch({ trough: { ...trough, waterDepthMm: mm } });
+                }
+              }}
+            />
+          </div>
+          {hydro && (
+            <div
+              className="stack"
+              style={{
+                gap: "0.25rem",
+                padding: "0.55rem 0.65rem",
+                background: "rgba(15,92,74,0.08)",
+                borderRadius: 6,
+                fontSize: "0.8rem",
+              }}
+            >
+              <strong style={{ fontSize: "0.82rem" }}>Hydraulic sizing</strong>
+              <div>
+                Weir length: {hydro.weirLf.toFixed(1)} lf · style {hydro.style}
+              </div>
+              <div>
+                Edge flow: {hydro.edgeFlowGpm.toFixed(0)} GPM
+                {hydro.flowOverridden ? " (override)" : ""}
+              </div>
+              <div>
+                Trough volume: {hydro.troughVolumeGal.toFixed(0)} gal
+              </div>
+              <div>
+                Displacement surge (~1″):{" "}
+                {hydro.displacementSurgeGal.toFixed(0)} gal
+              </div>
+              <div>
+                Recommended collection:{" "}
+                {hydro.recommendedSurgeGal.toFixed(0)} gal
+                {hydro.surgeOverridden ? " (override)" : ""}
+              </div>
+              <div>
+                Edge pump: {hydro.edgePumpGpm} GPM (incl. 15% margin)
+              </div>
+            </div>
+          )}
+          {!hydro && (
+            <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
+              Enable at least one edge to see flow, trough, and pump sizing.
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

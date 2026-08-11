@@ -25,6 +25,10 @@ import {
   type SpaSpillover,
   isSpaSpilloverStyle,
   type SpaSpilloverWeir,
+  type InfinityEdge,
+  type InfinityEdgeWeir,
+  type InfinityTrough,
+  isInfinityEdgeStyle,
 } from "./design-model";
 import {
   isWallWaterFixtureId,
@@ -362,6 +366,8 @@ export function normalizeDesignDocument(
               : p.shellHeightMm,
           spillover:
             kind === "spa" ? normalizeSpaSpillover(p.spillover) : undefined,
+          infinityEdge:
+            kind === "pool" ? normalizeInfinityEdge(p.infinityEdge) : undefined,
           waterlineTileId:
             p.waterlineTileId && isWaterlineTileId(p.waterlineTileId)
               ? p.waterlineTileId
@@ -457,6 +463,77 @@ function normalizeSpaSpillover(
   }
   if (raw.scupperGapMm != null) {
     out.scupperGapMm = clampFinite(raw.scupperGapMm, 4 * IN, 10, 2000);
+  }
+  if (raw.enabled === false) out.enabled = false;
+  return out;
+}
+
+/** Clamp authorable pool infinity-edge fields; undefined when absent. */
+function normalizeInfinityEdge(
+  raw: InfinityEdge | undefined,
+): InfinityEdge | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const style = isInfinityEdgeStyle(raw.style) ? raw.style : undefined;
+  const out: InfinityEdge = {
+    enabled: raw.enabled !== false,
+  };
+  if (Array.isArray(raw.weirs)) {
+    out.weirs = raw.weirs
+      .filter(
+        (w) =>
+          w &&
+          typeof w === "object" &&
+          typeof w.edgeIndex === "number" &&
+          Number.isFinite(w.edgeIndex),
+      )
+      .map((w) => {
+        const weir: InfinityEdgeWeir = {
+          edgeIndex: Math.max(0, Math.floor(w.edgeIndex)),
+        };
+        if (w.enabled === false) weir.enabled = false;
+        else if (w.enabled === true) weir.enabled = true;
+        if (w.widthMm != null) {
+          weir.widthMm = clampFinite(w.widthMm, 24 * IN, 50, 50_000);
+        }
+        if (w.offsetMm != null) {
+          weir.offsetMm = clampFinite(w.offsetMm, 0, -20_000, 20_000);
+        }
+        return weir;
+      });
+  }
+  if (raw.notchDepthMm != null) {
+    out.notchDepthMm = clampFinite(raw.notchDepthMm, 1.5 * IN, 5, 600);
+  }
+  if (style) out.style = style;
+  if (raw.scupperCount != null) {
+    out.scupperCount = Math.round(clampFinite(raw.scupperCount, 3, 2, 8));
+  }
+  if (raw.scupperGapMm != null) {
+    out.scupperGapMm = clampFinite(raw.scupperGapMm, 4 * IN, 10, 2000);
+  }
+  if (raw.trough && typeof raw.trough === "object") {
+    const trough: InfinityTrough = {};
+    if (raw.trough.widthMm != null) {
+      trough.widthMm = clampFinite(raw.trough.widthMm, 24 * IN, 100, 3000);
+    }
+    if (raw.trough.depthMm != null) {
+      trough.depthMm = clampFinite(raw.trough.depthMm, 30 * IN, 150, 3000);
+    }
+    if (raw.trough.waterDepthMm != null) {
+      trough.waterDepthMm = clampFinite(
+        raw.trough.waterDepthMm,
+        18 * IN,
+        50,
+        2500,
+      );
+    }
+    if (Object.keys(trough).length) out.trough = trough;
+  }
+  if (raw.flowGpmOverride != null) {
+    out.flowGpmOverride = clampFinite(raw.flowGpmOverride, 0, 0, 5000);
+  }
+  if (raw.surgeGalOverride != null) {
+    out.surgeGalOverride = clampFinite(raw.surgeGalOverride, 0, 0, 50_000);
   }
   if (raw.enabled === false) out.enabled = false;
   return out;

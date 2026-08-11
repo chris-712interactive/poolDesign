@@ -29,6 +29,9 @@ import {
   type UnitSystem,
   resolveSpaSpillovers,
   listSpaSpilloverEdges,
+  resolveInfinityEdges,
+  listInfinityEdgeCandidates,
+  infinityTroughPolygon,
 } from "@pool-design/shared";
 import { type Viewport, worldToScreen } from "@/lib/cad/math";
 
@@ -201,6 +204,102 @@ export function drawSpaSpillover(
         y: (spill.a.y + spill.b.y) / 2,
       };
       drawHandle(mid);
+    }
+  }
+}
+
+/** Plan cues for pool infinity / vanishing edges + catch trough. */
+export function drawInfinityEdge(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  pool: PoolBody,
+  opts?: { selected?: boolean },
+) {
+  const selected = opts?.selected === true;
+  const edges = resolveInfinityEdges(pool);
+  const candidates = listInfinityEdgeCandidates(pool);
+  if (!candidates.length && !edges.length) return;
+  if (pool.infinityEdge?.enabled !== true) return;
+
+  const drawSeg = (a: PointMm, b: PointMm, width: number, color: string) => {
+    const sa = worldToScreen(a, vp);
+    const sb = worldToScreen(b, vp);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(sa.x, sa.y);
+    ctx.lineTo(sb.x, sb.y);
+    ctx.stroke();
+  };
+
+  const drawHandle = (p: PointMm) => {
+    const c = worldToScreen(p, vp);
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = "#0f5c4a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  };
+
+  // Faint full-edge span when selected (editable range).
+  if (selected) {
+    for (const edge of candidates) {
+      ctx.setLineDash([6, 5]);
+      drawSeg(edge.edgeA, edge.edgeB, 1.5, "rgba(15,92,74,0.3)");
+      ctx.setLineDash([]);
+    }
+  }
+
+  for (const edge of edges) {
+    // Catch trough outline.
+    const trough = infinityTroughPolygon(edge);
+    const screen = trough.map((p) => worldToScreen(p, vp));
+    ctx.fillStyle = "rgba(15,92,74,0.12)";
+    ctx.strokeStyle = "rgba(15,92,74,0.55)";
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(screen[0].x, screen[0].y);
+    for (let i = 1; i < screen.length; i++) {
+      ctx.lineTo(screen[i].x, screen[i].y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    drawSeg(edge.a, edge.b, selected ? 6 : 5, "#7ed9c0");
+    drawSeg(edge.a, edge.b, selected ? 2.5 : 2, "#0f5c4a");
+
+    // Outward ticks toward trough.
+    for (const p of [edge.a, edge.b]) {
+      drawSeg(
+        p,
+        {
+          x: p.x + edge.nx * 180,
+          y: p.y + edge.ny * 180,
+        },
+        2,
+        "#0f5c4a",
+      );
+    }
+
+    if (edge.style === "scuppers") {
+      for (const o of edge.openings) {
+        drawSeg(o.a, o.b, 3.5, "#b8f0de");
+      }
+    }
+
+    if (selected) {
+      drawHandle(edge.a);
+      drawHandle(edge.b);
+      drawHandle({
+        x: (edge.a.x + edge.b.x) / 2,
+        y: (edge.a.y + edge.b.y) / 2,
+      });
     }
   }
 }

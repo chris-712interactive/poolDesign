@@ -28,6 +28,8 @@ import {
 import { getWaterlineTile } from "./waterline-tiles";
 import type { UnitSystem } from "./units";
 import { mmToInches } from "./units";
+import { computeInfinityHydraulics, infinityTroughLf } from "./infinity-hydraulics";
+import { resolveInfinityEdges } from "./infinity-edge";
 
 /** Typical #3/#4 shell reinforcing allowance (lb per sf of shell surface) */
 const REBAR_LB_PER_SF_SHELL = 2;
@@ -382,6 +384,37 @@ export function buildTakeoff(
         "One package per water body",
       );
     }
+  }
+
+  // Infinity / vanishing edge: trough LF + dedicated edge pump per pool.
+  let troughLfTotal = 0;
+  let edgePumpCount = 0;
+  for (const pool of pools) {
+    const edges = resolveInfinityEdges(pool);
+    if (!edges.length) continue;
+    troughLfTotal += infinityTroughLf(pool);
+    edgePumpCount += 1;
+    const hydro = computeInfinityHydraulics(pool, edges);
+    if (hydro) {
+      push(
+        "infinity_trough",
+        infinityTroughLf(pool),
+        "lf",
+        `${pool.name}: ~${Math.round(hydro.edgePumpGpm)} GPM edge pump · ${Math.round(hydro.recommendedSurgeGal)} gal surge`,
+      );
+    } else {
+      push("infinity_trough", infinityTroughLf(pool), "lf", pool.name);
+    }
+  }
+  if (edgePumpCount > 0) {
+    push(
+      "equip_edge_pump",
+      edgePumpCount,
+      "ea",
+      troughLfTotal > 0
+        ? `One edge pump per infinity-edge pool (${roundQty(troughLfTotal, 1)} lf trough)`
+        : "One edge pump per infinity-edge pool",
+    );
   }
 
   const features = design.features ?? [];

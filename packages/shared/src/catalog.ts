@@ -251,6 +251,26 @@ export const DEFAULT_CATALOG: CatalogItem[] = [
     levels: ["commercial", "water_park"],
   },
   {
+    id: "infinity_trough",
+    name: "Infinity-edge catch trough",
+    category: "structure",
+    unit: "lf",
+    unitPriceCents: 18500,
+    levels: ["residential", "commercial", "water_park"],
+    description:
+      "Vanishing-edge catch / surge trough shell along enabled weir length",
+  },
+  {
+    id: "equip_edge_pump",
+    name: "Infinity-edge return pump",
+    category: "equipment",
+    unit: "ea",
+    unitPriceCents: 320000,
+    levels: ["residential", "commercial", "water_park"],
+    description:
+      "Dedicated edge pump returning catch-basin water to the main pool",
+  },
+  {
     id: "labor_install",
     name: "Installation labor",
     category: "labor",

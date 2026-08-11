@@ -57,11 +57,15 @@ import {
   waterBodyKind,
   ensurePadManifoldPlumbing,
   repairAutoPlumbingIfNeeded,
+  resolveInfinityEdges,
+  infinityOmitIntervals,
+  infinityTroughPolygon,
   type BuildingOpeningKind,
   type DepthTransition,
   type DesignDocument,
   type PointMm,
   type ResolvedSpaSpillover,
+  type ResolvedInfinityEdge,
 } from "@pool-design/shared";
 import {
   openOutlineRing,
@@ -467,6 +471,91 @@ function ringPoints(outline: PointMm[]): PointMm[] {
     return closed.slice(0, -1);
   }
   return closed;
+}
+
+/**
+ * Catch trough shells + short fall sheets for pool infinity edges.
+ */
+function pushInfinityEdgeMeshes(
+  meshes: MeshDescriptor[],
+  opts: {
+    poolId: string;
+    edges: ResolvedInfinityEdge[];
+    crestY: number;
+    select: SceneSelection;
+  },
+) {
+  if (!opts.edges.length) return;
+
+  for (const edge of opts.edges) {
+    const troughPoly = closeOutline(infinityTroughPolygon(edge));
+    if (troughPoly.length < 4) continue;
+
+    const troughDepthM = mmToMeters(edge.troughDepthMm);
+    const troughWaterM = mmToMeters(edge.troughWaterDepthMm);
+    const troughBottom = -troughDepthM;
+    const troughTop = Math.max(opts.crestY * 0.15, 0.02);
+
+    meshes.push({
+      kind: "extrude",
+      id: `pool_${opts.poolId}_trough_${edge.edgeIndex}`,
+      material: "poolShell",
+      outlineMm: troughPoly,
+      bottomY: troughBottom,
+      height: Math.max(0.15, troughTop - troughBottom),
+      select: opts.select,
+    });
+
+    const waterTop = Math.min(
+      troughTop - 0.02,
+      -troughDepthM + troughWaterM,
+    );
+    const waterH = Math.max(0.05, waterTop - (troughBottom + 0.04));
+    meshes.push({
+      kind: "extrude",
+      id: `pool_${opts.poolId}_troughwater_${edge.edgeIndex}`,
+      material: "poolWater",
+      outlineMm: troughPoly,
+      bottomY: waterTop - waterH,
+      height: waterH,
+      opacity: 0.55,
+      select: opts.select,
+    });
+
+    // Thin fall sheets from weir crest into the trough.
+    for (let oi = 0; oi < edge.openings.length; oi++) {
+      const opening = edge.openings[oi];
+      const len = Math.hypot(
+        opening.b.x - opening.a.x,
+        opening.b.y - opening.a.y,
+      );
+      if (len < 40) continue;
+      const sheet: PointMm[] = [
+        opening.a,
+        opening.b,
+        {
+          x: opening.b.x + edge.nx * edge.troughWidthMm * 0.55,
+          y: opening.b.y + edge.ny * edge.troughWidthMm * 0.55,
+        },
+        {
+          x: opening.a.x + edge.nx * edge.troughWidthMm * 0.55,
+          y: opening.a.y + edge.ny * edge.troughWidthMm * 0.55,
+        },
+      ];
+      const fallBottom = waterTop - 0.01;
+      const fallH = Math.max(0.08, opts.crestY - fallBottom);
+      meshes.push({
+        kind: "extrude",
+        id: `pool_${opts.poolId}_inffall_${edge.edgeIndex}_${oi}`,
+        material: "spilloverWater",
+        outlineMm: closeOutline(sheet),
+        bottomY: fallBottom,
+        height: fallH,
+        opacity: edge.style === "sheer" ? 0.5 : 0.72,
+        select: opts.select,
+      });
+    }
+  }
 }
 
 /** Vertical wall panels around an outline (hollow basin). */
@@ -2514,18 +2603,88 @@ export function buildSceneModel(
             : waterInner;
 
         const floorY = -depthM;
-        pushWallRing(meshes, {
-          outlineMm: wallOutline,
-          bottomY: floorY,
-          height: depthM + lip,
-          thicknessMm: wallT,
-          material: "poolShell",
-          select,
-          idPrefix: `pool_wall_${body.id}`,
-          inward: true,
-          // Drop pool walls on spa-facing edges; spa draws the spillover.
-          openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
-        });
+        const infinityEdges = resolveInfinityEdges(body);
+        // Edge indexes come from the authorable pool outline, not spa-clipped walls.
+        const pts = ringPoints(outer);
+        const infinityOmits = infinityEdges.length
+          ? infinityEdges.map((edge) => {
+              const edgeA = pts[edge.edgeIndex];
+              const edgeB = pts[(edge.edgeIndex + 1) % pts.length];
+              if (!edgeA || !edgeB) {
+                return { edgeIndex: edge.edgeIndex, intervals: [] as [number, number][] };
+              }
+              const edgeLen = Math.hypot(edgeB.x - edgeA.x, edgeB.y - edgeA.y);
+              let intervals = infinityOmitIntervals(edge, edgeA, edgeB);
+              const prev = infinityEdges.find(
+                (s) => (s.edgeIndex + 1) % pts.length === edge.edgeIndex,
+              );
+              const next = infinityEdges.find(
+                (s) => s.edgeIndex === (edge.edgeIndex + 1) % pts.length,
+              );
+              if (prev || next) {
+                intervals = intervals.map(([t0, t1]) => {
+                  let lo = t0;
+                  let hi = t1;
+                  if (prev) lo = Math.min(lo, 0);
+                  if (next) hi = Math.max(hi, edgeLen);
+                  return [lo, hi] as [number, number];
+                });
+              }
+              return { edgeIndex: edge.edgeIndex, intervals };
+            })
+          : undefined;
+        const notchDepthMm = infinityEdges[0]?.notchDepthMm ?? 0;
+        const crestY = infinityEdges.length
+          ? Math.min(
+              lip - 0.005,
+              Math.max(
+                waterTopY - 0.01,
+                lip - mmToMeters(Math.max(notchDepthMm, 20)),
+              ),
+            )
+          : lip;
+
+        if (infinityEdges.length && infinityOmits && crestY < lip - 0.005) {
+          // Solid shell up to weir crest.
+          pushWallRing(meshes, {
+            outlineMm: wallOutline,
+            bottomY: floorY,
+            height: Math.max(0.05, crestY - floorY),
+            thicknessMm: wallT,
+            material: "poolShell",
+            select,
+            idPrefix: `pool_wall_${body.id}_low`,
+            inward: true,
+            openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
+          });
+          // Upper rim notched at vanishing openings (indexes match only when
+          // the wall outline is still the authorable pool ring).
+          pushWallRing(meshes, {
+            outlineMm: wallOutline,
+            bottomY: crestY,
+            height: Math.max(0.02, lip - crestY),
+            thicknessMm: wallT,
+            material: "poolShell",
+            select,
+            idPrefix: `pool_wall_${body.id}_rim`,
+            inward: true,
+            openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
+            edgeOmits: spaOutlines.length === 0 ? infinityOmits : undefined,
+          });
+        } else {
+          pushWallRing(meshes, {
+            outlineMm: wallOutline,
+            bottomY: floorY,
+            height: depthM + lip,
+            thicknessMm: wallT,
+            material: "poolShell",
+            select,
+            idPrefix: `pool_wall_${body.id}`,
+            inward: true,
+            // Drop pool walls on spa-facing edges; spa draws the spillover.
+            openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
+          });
+        }
 
         const floorOutlineClosed = closeOutline(
           floorOutline.length >= 3 ? floorOutline : wallOutline,
@@ -2567,6 +2726,7 @@ export function buildSceneModel(
           idPrefix: `pool_coping_${body.id}`,
           inward: true,
           openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
+          edgeOmits: spaOutlines.length === 0 ? infinityOmits : undefined,
         });
 
         // Waterline tile band just below the freeboard.
@@ -2582,6 +2742,15 @@ export function buildSceneModel(
           idPrefix: `pool_tile_${body.id}`,
           inward: true,
           openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
+          edgeOmits: spaOutlines.length === 0 ? infinityOmits : undefined,
+        });
+
+        // Catch trough + fall sheets for infinity edges.
+        pushInfinityEdgeMeshes(meshes, {
+          poolId: body.id,
+          edges: infinityEdges,
+          crestY,
+          select,
         });
 
         // Solid sunshelves punch out of the deep water mass (filled with shell).

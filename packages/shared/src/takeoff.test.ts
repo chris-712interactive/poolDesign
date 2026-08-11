@@ -159,4 +159,30 @@ describe("buildTakeoff", () => {
     assert.ok(leds);
     assert.equal(leds!.quantity, 1);
   });
+
+  it("adds infinity trough LF and edge pump for vanishing-edge pools", () => {
+    const design = emptyDesignDocument("residential");
+    design.poolBodies = [
+      {
+        id: "p1",
+        name: "Pool",
+        outline: rect(20 * FT, 40 * FT),
+        depthShallowMm: 3 * FT,
+        depthDeepMm: 8 * FT,
+        kind: "pool",
+        infinityEdge: {
+          enabled: true,
+          weirs: [{ edgeIndex: 0, enabled: true, widthMm: 20 * FT }],
+        },
+      },
+    ];
+
+    const takeoff = buildTakeoff(design, "imperial");
+    const trough = takeoff.lines.find((l) => l.catalogItemId === "infinity_trough");
+    assert.ok(trough);
+    assert.ok(Math.abs(trough!.quantity - 20) < 0.5);
+    const pump = takeoff.lines.find((l) => l.catalogItemId === "equip_edge_pump");
+    assert.ok(pump);
+    assert.equal(pump!.quantity, 1);
+  });
 });
