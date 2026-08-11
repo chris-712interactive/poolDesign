@@ -8,6 +8,7 @@ import type {
   PoolFeature,
 } from "./design-model";
 import {
+  DEFAULT_POOL_WALL_THICKNESS_MM,
   DEFAULT_SPA_DEPTH_MM,
   DEFAULT_SPA_SHELL_HEIGHT_MM,
   DEFAULT_SPA_WALL_THICKNESS_MM,
@@ -248,6 +249,17 @@ export function resizeRectangleOutline(
 
 export function spaWallThicknessMm(body: PoolBody): number {
   return body.wallThicknessMm ?? DEFAULT_SPA_WALL_THICKNESS_MM;
+}
+
+export function poolWallThicknessMm(body: PoolBody): number {
+  return body.wallThicknessMm ?? DEFAULT_POOL_WALL_THICKNESS_MM;
+}
+
+/** Wall thickness for either water body kind. */
+export function bodyWallThicknessMm(body: PoolBody): number {
+  return (body.kind ?? "pool") === "spa"
+    ? spaWallThicknessMm(body)
+    : poolWallThicknessMm(body);
 }
 
 export function spaShellHeightMm(body: PoolBody): number {

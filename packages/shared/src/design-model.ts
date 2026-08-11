@@ -27,7 +27,7 @@ export type PoolBody = {
   name: string;
   /**
    * Closed polygon in mm.
-   * For spas this is the outside/shell dimension; inside waterline is
+   * Outside/shell dimension for pools and spas; inside waterline is
    * derived via wallThicknessMm.
    */
   outline: PointMm[];
@@ -35,7 +35,10 @@ export type PoolBody = {
   depthDeepMm: number;
   /** Defaults to pool when missing (older documents) */
   kind?: WaterBodyKind;
-  /** Spa shell / wall thickness (mm). Outside outline insets by this for waterline. */
+  /**
+   * Shell / wall thickness (mm). Outside outline insets by this for the
+   * waterline (pools and spas).
+   */
   wallThicknessMm?: number;
   /**
    * Spa shell height above the finished patio/deck surface (mm).
@@ -864,6 +867,8 @@ export function approximateIntersectionAreaMm2(
 /** Default residential-ish depths: 3' shallow / 8' deep */
 export const DEFAULT_POOL_SHALLOW_MM = 914.4;
 export const DEFAULT_POOL_DEEP_MM = 2438.4;
+/** Typical gunite pool wall ~8" */
+export const DEFAULT_POOL_WALL_THICKNESS_MM = 200;
 /** Typical spa sitting depth ~3'6" */
 export const DEFAULT_SPA_DEPTH_MM = 1066.8;
 /** Typical gunite/shell wall thickness ~6" */

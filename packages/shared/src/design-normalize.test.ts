@@ -91,6 +91,40 @@ describe("normalizeDesignDocument", () => {
     assert.equal(next.buildings[0].ceilingHeightMm, 2438.4);
   });
 
+  it("defaults pool wall thickness", () => {
+    const raw = {
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [],
+      poolBodies: [
+        {
+          id: "pool1",
+          name: "Pool 1",
+          kind: "pool",
+          outline: [
+            { x: 0, y: 0 },
+            { x: 10000, y: 0 },
+            { x: 10000, y: 5000 },
+            { x: 0, y: 5000 },
+          ],
+          depthShallowMm: 900,
+          depthDeepMm: 2400,
+        },
+      ],
+      patios: [],
+      buildings: [],
+      patioCovers: [],
+      features: [],
+      objects: [],
+      plumbingRuns: [],
+    } as unknown as DesignDocument;
+
+    const next = normalizeDesignDocument(raw);
+    const pool = next.poolBodies[0];
+    assert.equal(pool.wallThicknessMm, 200);
+  });
+
   it("clamps spa spillover fields", () => {
     const raw = {
       version: 1,

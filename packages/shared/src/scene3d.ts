@@ -1,6 +1,7 @@
 import {
   DEFAULT_PATIO_ROOF_HEIGHT_MM,
   DEFAULT_PERGOLA_HEIGHT_MM,
+  DEFAULT_POOL_WALL_THICKNESS_MM,
   DEFAULT_SPA_SHELL_HEIGHT_MM,
   DEFAULT_SUNSHELF_DEPTH_MM,
   type BuildingOpeningKind,
@@ -33,8 +34,8 @@ export const STORY_HEIGHT_MM = DEFAULT_CEILING_HEIGHT_MM;
 export const PATIO_SLAB_THICKNESS_MM = 100;
 /** Pool shell lip thickness above grade */
 export const POOL_LIP_THICKNESS_MM = 150;
-/** Structural pool wall thickness for hollow 3D shell */
-export const POOL_WALL_THICKNESS_MM = 200;
+/** Default structural pool wall thickness for hollow 3D shell */
+export const POOL_WALL_THICKNESS_MM = DEFAULT_POOL_WALL_THICKNESS_MM;
 /** Cover roof slab thickness */
 export const COVER_SLAB_THICKNESS_MM = 150;
 

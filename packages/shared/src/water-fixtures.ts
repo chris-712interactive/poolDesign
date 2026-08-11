@@ -1,9 +1,9 @@
 import { segmentLengthMm, type PointMm, type PoolBody } from "./design-model";
-import { outlineBounds, spaWallThicknessMm } from "./spa-defaults";
+import {
+  bodyWallThicknessMm,
+  outlineBounds,
+} from "./spa-defaults";
 import { isBubblerId } from "./object-library";
-
-/** Match scene3d POOL_WALL_THICKNESS_MM — kept local to avoid a circular import. */
-const POOL_WALL_THICKNESS_MM = 200;
 
 /** Wall-mounted in-water fixtures (jets, niche lights) — snap to shell. */
 export function isWallWaterFixtureId(id: string): boolean {
@@ -37,10 +37,7 @@ export function snapWaterWallFixture(
   for (const body of bodies) {
     const outline = body.outline;
     if (!outline || outline.length < 3) continue;
-    const wallMm =
-      (body.kind ?? "pool") === "spa"
-        ? spaWallThicknessMm(body)
-        : (body.wallThicknessMm ?? POOL_WALL_THICKNESS_MM);
+    const wallMm = bodyWallThicknessMm(body);
     // Sit just proud of the interior plaster face.
     const insetMm = wallMm + 35;
     const { cx, cy } = outlineBounds(outline);

@@ -2,7 +2,6 @@ import {
   COVER_SLAB_THICKNESS_MM,
   PATIO_SLAB_THICKNESS_MM,
   POOL_LIP_THICKNESS_MM,
-  POOL_WALL_THICKNESS_MM,
   POOL_WATER_FREEBOARD_MM,
   analyzePatioGrade,
   approximateIntersectionAreaMm2,
@@ -31,6 +30,7 @@ import {
   houseExteriorHex,
   mmToMeters,
   openingSillMm,
+  poolWallThicknessMm,
   resolveCeilingHeightMm,
   resolveFenceFinish,
   resolveHouseExteriorColor,
@@ -2473,20 +2473,15 @@ export function buildSceneModel(
         );
         const spaOutlines = attachedSpas.map((s) => s.outline);
         const outer = body.outline;
+        const wallT = poolWallThicknessMm(body);
         // Pool shell wraps the spa (L/U); spa owns the shared spillover wall.
         const wallOutline =
           spaOutlines.length > 0
             ? clipOutlineByAabbs(outer, spaOutlines)
             : outer;
-        const waterInner = insideOutlineFromOutside(
-          outer,
-          POOL_WALL_THICKNESS_MM,
-        );
+        const waterInner = insideOutlineFromOutside(outer, wallT);
         // Floor extends under the wall thickness so the shell seals (no light leaks).
-        const floorInner = insideOutlineFromOutside(
-          outer,
-          POOL_WALL_THICKNESS_MM * 0.35,
-        );
+        const floorInner = insideOutlineFromOutside(outer, wallT * 0.35);
         const floorOutline =
           spaOutlines.length > 0
             ? clipOutlineByAabbs(floorInner, spaOutlines)
@@ -2502,7 +2497,7 @@ export function buildSceneModel(
           outlineMm: wallOutline,
           bottomY: floorY,
           height: depthM + lip,
-          thicknessMm: POOL_WALL_THICKNESS_MM,
+          thicknessMm: wallT,
           material: "poolShell",
           select,
           idPrefix: `pool_wall_${body.id}`,
@@ -2545,7 +2540,7 @@ export function buildSceneModel(
           outlineMm: wallOutline,
           bottomY: lip * 0.15,
           height: lip * 0.85,
-          thicknessMm: POOL_WALL_THICKNESS_MM * 1.15,
+          thicknessMm: wallT * 1.15,
           material: "coping",
           select,
           idPrefix: `pool_coping_${body.id}`,
@@ -2559,7 +2554,7 @@ export function buildSceneModel(
           outlineMm: wallOutline,
           bottomY: waterTopY - tileH * 0.85,
           height: tileH,
-          thicknessMm: POOL_WALL_THICKNESS_MM * 0.55,
+          thicknessMm: wallT * 0.55,
           material: "waterline",
           select,
           idPrefix: `pool_tile_${body.id}`,

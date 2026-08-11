@@ -7,6 +7,7 @@ import {
   DEFAULT_PERGOLA_HEIGHT_MM,
   DEFAULT_POOL_DEEP_MM,
   DEFAULT_POOL_SHALLOW_MM,
+  DEFAULT_POOL_WALL_THICKNESS_MM,
   DEFAULT_SPA_DEPTH_MM,
   DEFAULT_SPA_SHELL_HEIGHT_MM,
   DEFAULT_SPA_WALL_THICKNESS_MM,
@@ -92,6 +93,7 @@ import {
   spaCount,
   spaShellHeightMm,
   spaWallThicknessMm,
+  poolWallThicknessMm,
   stripBodyChildren,
   COVER_FOOTING_SIZE_MM,
   COVER_MAX_POST_SPACING_MM,
@@ -835,22 +837,22 @@ export function CadWorkspace({
           true,
           selected,
         );
+        const wallMm = isSpa
+          ? spaWallThicknessMm(pool)
+          : poolWallThicknessMm(pool);
+        const inside = insideOutlineFromOutside(pool.outline, wallMm);
+        drawPolygon(
+          ctx,
+          vp,
+          inside,
+          false,
+          isSpa ? "#0d4f66" : "#0f5c4a",
+          isSpa ? "rgba(26,107,138,0.2)" : "rgba(31,138,112,0.18)",
+          unitSystem,
+          false,
+          false,
+        );
         if (isSpa) {
-          const inside = insideOutlineFromOutside(
-            pool.outline,
-            spaWallThicknessMm(pool),
-          );
-          drawPolygon(
-            ctx,
-            vp,
-            inside,
-            false,
-            "#0d4f66",
-            "rgba(26,107,138,0.2)",
-            unitSystem,
-            false,
-            false,
-          );
           drawSpaSpillover(
             ctx,
             vp,
@@ -1164,6 +1166,7 @@ export function CadWorkspace({
         outline,
         depthShallowMm: DEFAULT_POOL_SHALLOW_MM,
         depthDeepMm: DEFAULT_POOL_DEEP_MM,
+        wallThicknessMm: DEFAULT_POOL_WALL_THICKNESS_MM,
       };
       let next: DesignDocument = {
         ...design,
@@ -3083,6 +3086,9 @@ export function CadWorkspace({
                                   : selectedPool.name,
                                 depthShallowMm: DEFAULT_POOL_SHALLOW_MM,
                                 depthDeepMm: DEFAULT_POOL_DEEP_MM,
+                                wallThicknessMm:
+                                  selectedPool.wallThicknessMm ??
+                                  DEFAULT_POOL_WALL_THICKNESS_MM,
                               };
                               const stripped = stripBodyChildren(
                                 design,
@@ -3106,16 +3112,8 @@ export function CadWorkspace({
                       key={`pool-rect-${selectedPool.id}-${selectedPool.outline.map((p) => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join("|")}`}
                       outline={selectedPool.outline}
                       unitSystem={unitSystem}
-                      widthLabel={
-                        waterBodyKind(selectedPool) === "spa"
-                          ? "Outside width"
-                          : "Width"
-                      }
-                      lengthLabel={
-                        waterBodyKind(selectedPool) === "spa"
-                          ? "Outside length"
-                          : "Length"
-                      }
+                      widthLabel="Outside width"
+                      lengthLabel="Outside length"
                       onResize={(widthMm, lengthMm) => {
                         const outline = resizeRectangleOutline(
                           selectedPool.outline,
@@ -3159,6 +3157,23 @@ export function CadWorkspace({
                         })
                       }
                     />
+                    {waterBodyKind(selectedPool) === "pool" && (
+                      <PoolWallFields
+                        key={`pool-wall-${selectedPool.id}-${poolWallThicknessMm(selectedPool)}`}
+                        body={selectedPool}
+                        unitSystem={unitSystem}
+                        onWallThickness={(wallThicknessMm) =>
+                          commitDesign({
+                            ...design,
+                            poolBodies: design.poolBodies.map((p) =>
+                              p.id === selectedPool.id
+                                ? { ...p, wallThicknessMm }
+                                : p,
+                            ),
+                          })
+                        }
+                      />
+                    )}
                     {waterBodyKind(selectedPool) === "spa" && (
                       <SpaShellFields
                         key={`spa-shell-${selectedPool.id}-${spaWallThicknessMm(selectedPool)}-${spaShellHeightMm(selectedPool)}-${JSON.stringify(selectedPool.spillover ?? null)}`}
@@ -5004,6 +5019,42 @@ function RectDimensionFields({
             if (mm != null && mm > 50) onResize(frame.widthMm, mm);
           }}
         />
+      </div>
+    </div>
+  );
+}
+
+function PoolWallFields({
+  body,
+  unitSystem,
+  onWallThickness,
+}: {
+  body: PoolBody;
+  unitSystem: UnitSystem;
+  onWallThickness: (wallThicknessMm: number) => void;
+}) {
+  const wall = poolWallThicknessMm(body);
+  const inside = insideBoundsFromOutside(body.outline, wall);
+  return (
+    <div className="stack" style={{ gap: "0.55rem" }}>
+      <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
+        Outer line = shell outside. Inner line = waterline (outside − wall
+        thickness on each side).
+      </p>
+      <div className="field">
+        <label htmlFor="pool-wall">Wall thickness</label>
+        <input
+          id="pool-wall"
+          defaultValue={formatLength(wall, unitSystem)}
+          onBlur={(e) => {
+            const mm = parseLengthToMm(e.target.value, unitSystem);
+            if (mm != null && mm >= 0) onWallThickness(mm);
+          }}
+        />
+      </div>
+      <div className="muted" style={{ fontSize: "0.8rem" }}>
+        Inside waterline: {formatLength(inside.width, unitSystem)} ×{" "}
+        {formatLength(inside.height, unitSystem)}
       </div>
     </div>
   );

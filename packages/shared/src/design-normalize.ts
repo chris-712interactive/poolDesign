@@ -6,6 +6,7 @@ import {
   DEFAULT_PERGOLA_HEIGHT_MM,
   DEFAULT_SPA_SHELL_HEIGHT_MM,
   DEFAULT_SPA_WALL_THICKNESS_MM,
+  DEFAULT_POOL_WALL_THICKNESS_MM,
   defaultFenceHeightMm,
   defaultGateSize,
   defaultOpeningSize,
@@ -350,7 +351,7 @@ export function normalizeDesignDocument(
           wallThicknessMm:
             kind === "spa"
               ? (p.wallThicknessMm ?? DEFAULT_SPA_WALL_THICKNESS_MM)
-              : p.wallThicknessMm,
+              : (p.wallThicknessMm ?? DEFAULT_POOL_WALL_THICKNESS_MM),
           shellHeightMm:
             kind === "spa"
               ? (p.shellHeightMm ?? DEFAULT_SPA_SHELL_HEIGHT_MM)

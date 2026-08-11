@@ -21,6 +21,7 @@ import {
 } from "./site-grade";
 import {
   insideOutlineFromOutside,
+  poolWallThicknessMm,
   spaShellHeightMm,
   spaWallThicknessMm,
 } from "./spa-defaults";
@@ -105,20 +106,23 @@ export function buildTakeoff(
   const spaInsides: PointMm[][] = spas.map((p) =>
     insideOutlineFromOutside(p.outline, spaWallThicknessMm(p)),
   );
-  let poolAreaMm2 = pools.reduce(
-    (sum, p) => sum + polygonAreaMm2(p.outline),
+  const poolInsides: PointMm[][] = pools.map((p) =>
+    insideOutlineFromOutside(p.outline, poolWallThicknessMm(p)),
+  );
+  let poolAreaMm2 = poolInsides.reduce(
+    (sum, outline) => sum + polygonAreaMm2(outline),
     0,
   );
   let spaAreaMm2 = spaInsides.reduce(
     (sum, outline) => sum + polygonAreaMm2(outline),
     0,
   );
-  // When a spa waterline overlaps a pool footprint, don't double-count plaster.
+  // When a spa waterline overlaps a pool waterline, don't double-count plaster.
   let plasterOverlapMm2 = 0;
-  for (const pool of pools) {
+  for (const poolInside of poolInsides) {
     for (const spaInside of spaInsides) {
       plasterOverlapMm2 += approximateIntersectionAreaMm2(
-        pool.outline,
+        poolInside,
         spaInside,
       );
     }
