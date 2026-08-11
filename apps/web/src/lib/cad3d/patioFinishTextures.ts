@@ -5,6 +5,44 @@ import {
   type PatioFinishPattern,
 } from "@pool-design/shared";
 
+/** Inches → meters (plan UVs on patio extrudes are world meters). */
+const IN = 0.0254;
+
+/**
+ * Industry sizes used for patio hardscape (US residential):
+ * - Brick / concrete paver: nominal 4″ × 8″ (≈100 × 200 mm)
+ * - French / Versailles / ashlar set: 8×8, 8×16, 16×16, 16×24 on a 16″ module
+ * - Large-format porcelain: commonly 24″ × 24″
+ * - Bluestone / cut stone: often ~18–24″ squares
+ * Joints: ~⅛″–³⁄₁₆″ tumbled stone; ~⅛″ brick with sand
+ */
+const BRICK_W_IN = 8;
+const BRICK_H_IN = 4;
+const FRENCH_MODULE_IN = 48; // 48″ × 48″ = 16 sf (two standard 8 sf sets)
+const PORCELAIN_IN = 24;
+const BLUESTONE_IN = 24;
+const JOINT_IN = 0.15; // ~⅛″+
+
+/**
+ * Gap-free French / Versailles layout for a 48″ × 48″ tileable module.
+ * Matches the common 16 sf kit: 4×8×8, 2×8×16, 4×16×16, 2×16×24.
+ * Coords in inches [x, y, w, h].
+ */
+const FRENCH_48_IN: ReadonlyArray<readonly [number, number, number, number]> = [
+  [0, 0, 16, 16],
+  [16, 0, 16, 16],
+  [32, 0, 8, 16],
+  [40, 0, 8, 8],
+  [40, 8, 8, 8],
+  [0, 16, 16, 16],
+  [16, 16, 24, 16], // 16×24 turned
+  [40, 16, 8, 16],
+  [0, 32, 24, 16], // 16×24 turned
+  [24, 32, 16, 16],
+  [40, 32, 8, 8],
+  [40, 40, 8, 8],
+];
+
 function mulberry32(seed: number) {
   let a = seed >>> 0;
   return () => {
@@ -57,6 +95,24 @@ function tint(
   return `rgb(${clamp(base.r + delta)},${clamp(base.g + delta)},${clamp(base.b + delta)})`;
 }
 
+function mixRgb(
+  a: { r: number; g: number; b: number },
+  b: { r: number; g: number; b: number },
+  t: number,
+): { r: number; g: number; b: number } {
+  return {
+    r: a.r + (b.r - a.r) * t,
+    g: a.g + (b.g - a.g) * t,
+    b: a.b + (b.b - a.b) * t,
+  };
+}
+
+/** UV is meters → one texture spans `coverageM` meters on each axis. */
+function repeatForMeters(coverageM: number): [number, number] {
+  const r = 1 / Math.max(0.05, coverageM);
+  return [r, r];
+}
+
 export type PatioTexPair = {
   color: THREE.CanvasTexture;
   roughness: THREE.CanvasTexture;
@@ -69,7 +125,7 @@ function makePair(
     r: CanvasRenderingContext2D,
     size: number,
   ) => void,
-  repeat: [number, number],
+  coverageM: number,
 ): PatioTexPair {
   const cc = document.createElement("canvas");
   const rc = document.createElement("canvas");
@@ -82,6 +138,7 @@ function makePair(
   draw(cctx, rctx, size);
   const color = new THREE.CanvasTexture(cc);
   const roughness = new THREE.CanvasTexture(rc);
+  const repeat = repeatForMeters(coverageM);
   for (const t of [color, roughness]) {
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat[0], repeat[1]);
@@ -93,7 +150,75 @@ function makePair(
   return { color, roughness };
 }
 
+function pxPerInch(canvasSize: number, moduleIn: number): number {
+  return canvasSize / moduleIn;
+}
+
+function fillStone(
+  c: CanvasRenderingContext2D,
+  r: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  finish: PatioFinish,
+  n: number,
+  opts?: { mottled?: boolean; cooler?: boolean },
+) {
+  // Variegation like silver/grey travertine: light silver, mid grey, cool blue-grey.
+  const light = mixRgb(finish.color, { r: 232, g: 234, b: 236 }, 0.55);
+  const mid = finish.color;
+  const cool = mixRgb(finish.color, { r: 140, g: 150, b: 160 }, 0.4);
+  const dark = mixRgb(finish.color, finish.accent, 0.45);
+  const pick =
+    n < 0.28 ? light : n < 0.55 ? mid : n < 0.78 ? cool : dark;
+  const delta = opts?.mottled ? (n - 0.5) * 28 : (n - 0.5) * 18;
+  c.fillStyle = tint(pick, delta);
+  c.fillRect(x, y, w, h);
+  if (opts?.mottled) {
+    const vein = fbm(x * 0.02, y * 0.015, 63, 3);
+    c.fillStyle = tint(cool, -12 + vein * 20);
+    c.globalAlpha = 0.18;
+    c.fillRect(x, y, w, h * 0.35);
+    c.globalAlpha = 1;
+  }
+  const rv = 70 + n * 55;
+  r.fillStyle = `rgb(${rv},${rv},${rv})`;
+  r.fillRect(x, y, w, h);
+}
+
+function drawFrenchPattern(
+  finish: PatioFinish,
+  size: number,
+  mottled: boolean,
+): PatioTexPair {
+  const moduleIn = FRENCH_MODULE_IN;
+  const coverageM = moduleIn * IN;
+  return makePair(
+    size,
+    (c, r, s) => {
+      const ppi = pxPerInch(s, moduleIn);
+      const joint = Math.max(1.2, JOINT_IN * ppi);
+      c.fillStyle = tint(finish.accent, -8);
+      c.fillRect(0, 0, s, s);
+      r.fillStyle = "#d4d4d4";
+      r.fillRect(0, 0, s, s);
+      for (const [ix, iy, iw, ih] of FRENCH_48_IN) {
+        const n = fbm(ix * 0.07, iy * 0.07, 41, 3);
+        const x = ix * ppi + joint * 0.5;
+        const y = iy * ppi + joint * 0.5;
+        const w = iw * ppi - joint;
+        const h = ih * ppi - joint;
+        fillStone(c, r, x, y, w, h, finish, n, { mottled });
+      }
+    },
+    coverageM,
+  );
+}
+
 function drawBroomed(finish: PatioFinish, size: number): PatioTexPair {
+  // Control joints ~8–10′ — texture covers 10′ × 10′.
+  const coverageM = 10 * 12 * IN;
   return makePair(
     size,
     (c, r, s) => {
@@ -115,11 +240,10 @@ function drawBroomed(finish: PatioFinish, size: number): PatioTexPair {
       }
       c.putImageData(img, 0, 0);
       r.putImageData(rimg, 0, 0);
-      // Control joints
       c.strokeStyle = `rgba(${finish.accent.r},${finish.accent.g},${finish.accent.b},0.45)`;
       c.lineWidth = 3;
-      const step = s / 4;
-      for (let i = 1; i < 4; i++) {
+      const step = s / 2;
+      for (let i = 1; i < 2; i++) {
         c.beginPath();
         c.moveTo(i * step, 0);
         c.lineTo(i * step, s);
@@ -130,7 +254,7 @@ function drawBroomed(finish: PatioFinish, size: number): PatioTexPair {
         c.stroke();
       }
     },
-    [5, 5],
+    coverageM,
   );
 }
 
@@ -156,7 +280,7 @@ function drawSmooth(finish: PatioFinish, size: number): PatioTexPair {
       c.putImageData(img, 0, 0);
       r.putImageData(rimg, 0, 0);
     },
-    [3, 3],
+    8 * 12 * IN,
   );
 }
 
@@ -185,39 +309,17 @@ function drawExposedAggregate(finish: PatioFinish, size: number): PatioTexPair {
         r.fill();
       }
     },
-    [4, 4],
+    4 * 12 * IN,
   );
 }
 
 function drawStampedAshlar(finish: PatioFinish, size: number): PatioTexPair {
-  return makePair(
-    size,
-    (c, r, s) => {
-      c.fillStyle = tint(finish.accent, 0);
-      c.fillRect(0, 0, s, s);
-      r.fillStyle = "#d0d0d0";
-      r.fillRect(0, 0, s, s);
-      const rows = 6;
-      const cols = 5;
-      const tw = s / cols;
-      const th = s / rows;
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-          const ox = (row % 2) * (tw * 0.35);
-          const n = fbm(col, row, 44, 2);
-          const pad = 2;
-          c.fillStyle = tint(finish.color, (n - 0.5) * 30);
-          c.fillRect(col * tw + ox + pad, row * th + pad, tw - pad * 2, th - pad * 2);
-          r.fillStyle = `rgb(${90 + n * 50},${90 + n * 50},${90 + n * 50})`;
-          r.fillRect(col * tw + ox + pad, row * th + pad, tw - pad * 2, th - pad * 2);
-        }
-      }
-    },
-    [3, 3],
-  );
+  return drawFrenchPattern(finish, size, false);
 }
 
 function drawStampedCobble(finish: PatioFinish, size: number): PatioTexPair {
+  // Cobbles ~4–6″ across — module 24″.
+  const coverageM = 24 * IN;
   return makePair(
     size,
     (c, r, s) => {
@@ -226,11 +328,12 @@ function drawStampedCobble(finish: PatioFinish, size: number): PatioTexPair {
       c.fillRect(0, 0, s, s);
       r.fillStyle = "#d8d8d8";
       r.fillRect(0, 0, s, s);
-      for (let i = 0; i < 220; i++) {
+      const ppi = pxPerInch(s, 24);
+      for (let i = 0; i < 55; i++) {
         const x = rand() * s;
         const y = rand() * s;
-        const rx = 8 + rand() * 16;
-        const ry = 7 + rand() * 14;
+        const rx = (2 + rand() * 2) * ppi;
+        const ry = (1.8 + rand() * 2) * ppi;
         c.beginPath();
         c.fillStyle = tint(finish.color, (rand() - 0.5) * 35);
         c.ellipse(x, y, rx, ry, rand() * Math.PI, 0, Math.PI * 2);
@@ -240,22 +343,25 @@ function drawStampedCobble(finish: PatioFinish, size: number): PatioTexPair {
         c.stroke();
       }
     },
-    [2.5, 2.5],
+    coverageM,
   );
 }
 
 function drawStampedPlank(finish: PatioFinish, size: number): PatioTexPair {
+  // Stamped plank ~6″ wide boards.
+  const plankIn = 6;
+  const cols = 8;
+  const coverageM = cols * plankIn * IN;
   return makePair(
     size,
     (c, r, s) => {
-      const plankH = s / 8;
-      for (let row = 0; row < 8; row++) {
+      const plankH = s / cols;
+      for (let row = 0; row < cols; row++) {
         const n = fbm(row, 0, 66, 2);
         c.fillStyle = tint(finish.color, (n - 0.5) * 28);
         c.fillRect(0, row * plankH, s, plankH - 2);
         r.fillStyle = `rgb(${120 + n * 40},${120 + n * 40},${120 + n * 40})`;
         r.fillRect(0, row * plankH, s, plankH - 2);
-        // Grain
         c.strokeStyle = `rgba(${finish.accent.r},${finish.accent.g},${finish.accent.b},0.25)`;
         c.lineWidth = 1;
         for (let k = 0; k < 5; k++) {
@@ -269,11 +375,15 @@ function drawStampedPlank(finish: PatioFinish, size: number): PatioTexPair {
         }
       }
     },
-    [2, 3],
+    coverageM,
   );
 }
 
 function drawRunningBond(finish: PatioFinish, size: number): PatioTexPair {
+  // Nominal 4″ × 8″ brick; module 8 bricks × 16 courses = 64″ × 64″.
+  const cols = 8;
+  const rows = 16;
+  const coverageM = cols * BRICK_W_IN * IN;
   return makePair(
     size,
     (c, r, s) => {
@@ -281,29 +391,29 @@ function drawRunningBond(finish: PatioFinish, size: number): PatioTexPair {
       c.fillRect(0, 0, s, s);
       r.fillStyle = "#c8c8c8";
       r.fillRect(0, 0, s, s);
-      const rows = 10;
-      const cols = 6;
-      const th = s / rows;
       const tw = s / cols;
+      const th = s / rows;
+      const joint = Math.max(1, (JOINT_IN / BRICK_W_IN) * tw);
       for (let row = 0; row < rows; row++) {
         const offset = (row % 2) * (tw * 0.5);
         for (let col = -1; col <= cols; col++) {
           const n = fbm(col * 0.4, row * 0.4, 71, 2);
-          const pad = 1.8;
-          const x = col * tw + offset + pad;
-          const y = row * th + pad;
+          const x = col * tw + offset + joint * 0.5;
+          const y = row * th + joint * 0.5;
           c.fillStyle = tint(finish.color, (n - 0.5) * 22);
-          c.fillRect(x, y, tw - pad * 2, th - pad * 2);
+          c.fillRect(x, y, tw - joint, th - joint);
           r.fillStyle = `rgb(${55 + n * 40},${55 + n * 40},${55 + n * 40})`;
-          r.fillRect(x, y, tw - pad * 2, th - pad * 2);
+          r.fillRect(x, y, tw - joint, th - joint);
         }
       }
     },
-    [4, 4],
+    coverageM,
   );
 }
 
 function drawHerringbone(finish: PatioFinish, size: number): PatioTexPair {
+  // 4×8 brick herringbone; module ~36″.
+  const coverageM = 36 * IN;
   return makePair(
     size,
     (c, r, s) => {
@@ -311,227 +421,173 @@ function drawHerringbone(finish: PatioFinish, size: number): PatioTexPair {
       c.fillRect(0, 0, s, s);
       r.fillStyle = "#c0c0c0";
       r.fillRect(0, 0, s, s);
-      const unit = s / 10;
-      for (let row = -1; row < 12; row++) {
-        for (let col = -1; col < 12; col++) {
+      const ppi = pxPerInch(s, 36);
+      const bw = BRICK_W_IN * ppi;
+      const bh = BRICK_H_IN * ppi;
+      const step = (BRICK_W_IN / Math.SQRT2) * ppi;
+      for (let row = -2; row < 20; row++) {
+        for (let col = -2; col < 20; col++) {
           const n = fbm(col, row, 88, 2);
           c.save();
-          c.translate(col * unit * 1.4, row * unit * 1.4);
+          c.translate(col * step * 2, row * step * 2);
           c.rotate(((col + row) % 2 === 0 ? 1 : -1) * (Math.PI / 4));
           c.fillStyle = tint(finish.color, (n - 0.5) * 24);
-          c.fillRect(-unit * 0.9, -unit * 0.28, unit * 1.8, unit * 0.5);
+          c.fillRect(-bw * 0.5, -bh * 0.5, bw, bh);
           r.fillStyle = `rgb(${60 + n * 45},${60 + n * 45},${60 + n * 45})`;
-          r.fillRect(-unit * 0.9, -unit * 0.28, unit * 1.8, unit * 0.5);
+          r.fillRect(-bw * 0.5, -bh * 0.5, bw, bh);
           c.restore();
         }
       }
     },
-    [3.5, 3.5],
+    coverageM,
   );
 }
 
 function drawBasketweave(finish: PatioFinish, size: number): PatioTexPair {
+  // Two 4×8 bricks per 8″ × 8″ cell → module 4×4 cells = 32″.
+  const cells = 4;
+  const coverageM = cells * BRICK_W_IN * IN;
   return makePair(
     size,
     (c, r, s) => {
       c.fillStyle = tint(finish.accent, 0);
       c.fillRect(0, 0, s, s);
-      const cell = s / 6;
-      for (let row = 0; row < 6; row++) {
-        for (let col = 0; col < 6; col++) {
+      const cell = s / cells;
+      const joint = Math.max(1, (JOINT_IN / BRICK_W_IN) * (cell / 2));
+      for (let row = 0; row < cells; row++) {
+        for (let col = 0; col < cells; col++) {
           const horiz = (row + col) % 2 === 0;
           const n = fbm(col, row, 99, 2);
           const x0 = col * cell;
           const y0 = row * cell;
-          const pad = 2;
           if (horiz) {
             for (let k = 0; k < 2; k++) {
               c.fillStyle = tint(finish.color, (n - 0.5) * 20 + k * 4);
               c.fillRect(
-                x0 + pad,
-                y0 + pad + k * (cell / 2),
-                cell - pad * 2,
-                cell / 2 - pad,
+                x0 + joint,
+                y0 + joint + k * (cell / 2),
+                cell - joint * 2,
+                cell / 2 - joint,
               );
             }
           } else {
             for (let k = 0; k < 2; k++) {
               c.fillStyle = tint(finish.color, (n - 0.5) * 20 + k * 4);
               c.fillRect(
-                x0 + pad + k * (cell / 2),
-                y0 + pad,
-                cell / 2 - pad,
-                cell - pad * 2,
+                x0 + joint + k * (cell / 2),
+                y0 + joint,
+                cell / 2 - joint,
+                cell - joint * 2,
               );
             }
           }
         }
       }
     },
-    [3, 3],
+    coverageM,
   );
 }
 
 function drawStackBond(finish: PatioFinish, size: number): PatioTexPair {
+  // 16″ × 16″ stack-bond patio pavers; 3×3 module = 48″.
+  const tileIn = 16;
+  const count = 3;
+  const coverageM = count * tileIn * IN;
   return makePair(
     size,
     (c, r, s) => {
       c.fillStyle = tint(finish.accent, 0);
       c.fillRect(0, 0, s, s);
-      const rows = 8;
-      const cols = 8;
-      const tw = s / cols;
-      const th = s / rows;
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
+      const tw = s / count;
+      const joint = Math.max(1.5, (JOINT_IN / tileIn) * tw);
+      for (let row = 0; row < count; row++) {
+        for (let col = 0; col < count; col++) {
           const n = fbm(col * 0.5, row * 0.5, 12, 2);
-          const pad = 2;
-          c.fillStyle = tint(finish.color, (n - 0.5) * 18);
-          c.fillRect(col * tw + pad, row * th + pad, tw - pad * 2, th - pad * 2);
-          r.fillStyle = `rgb(${50 + n * 35},${50 + n * 35},${50 + n * 35})`;
-          r.fillRect(col * tw + pad, row * th + pad, tw - pad * 2, th - pad * 2);
+          fillStone(
+            c,
+            r,
+            col * tw + joint * 0.5,
+            row * tw + joint * 0.5,
+            tw - joint,
+            tw - joint,
+            finish,
+            n,
+          );
         }
       }
     },
-    [4, 4],
+    coverageM,
   );
 }
 
 function drawModular(finish: PatioFinish, size: number): PatioTexPair {
+  return drawFrenchPattern(finish, size, true);
+}
+
+function drawTravertine(finish: PatioFinish, size: number): PatioTexPair {
+  return drawFrenchPattern(finish, size, true);
+}
+
+function drawBluestone(finish: PatioFinish, size: number): PatioTexPair {
+  const tileIn = BLUESTONE_IN;
+  const count = 2;
+  const coverageM = count * tileIn * IN;
   return makePair(
     size,
     (c, r, s) => {
       c.fillStyle = tint(finish.accent, 0);
       c.fillRect(0, 0, s, s);
-      const layouts = [
-        [0, 0, 0.5, 0.5],
-        [0.5, 0, 0.5, 0.5],
-        [0, 0.5, 0.33, 0.5],
-        [0.33, 0.5, 0.67, 0.5],
-      ];
-      const cell = s / 3;
-      for (let gy = 0; gy < 3; gy++) {
-        for (let gx = 0; gx < 3; gx++) {
-          for (const [u, v, w, h] of layouts) {
-            const n = fbm(gx + u, gy + v, 33, 2);
-            c.fillStyle = tint(finish.color, (n - 0.5) * 26);
-            c.fillRect(
-              gx * cell + u * cell + 2,
-              gy * cell + v * cell + 2,
-              w * cell - 4,
-              h * cell - 4,
-            );
-          }
-        }
-      }
-    },
-    [2.5, 2.5],
-  );
-}
-
-function drawTravertine(finish: PatioFinish, size: number): PatioTexPair {
-  return makePair(
-    size,
-    (c, r, s) => {
-      const img = c.createImageData(s, s);
-      const rimg = r.createImageData(s, s);
-      for (let y = 0; y < s; y++) {
-        for (let x = 0; x < s; x++) {
-          const n = fbm(x / 65, y / 30, 63, 5);
-          const vein = Math.pow(
-            Math.abs(Math.sin((x + n * 40) * 0.035 + y * 0.012)),
-            10,
-          );
-          const pit = hash2(x >> 1, y >> 1, 91) > 0.993 ? 20 : 0;
-          const i = (y * s + x) * 4;
-          img.data[i] = finish.color.r + n * 22 - vein * 30 - pit;
-          img.data[i + 1] = finish.color.g + n * 18 - vein * 28 - pit;
-          img.data[i + 2] = finish.color.b + n * 12 - vein * 22 - pit;
-          img.data[i + 3] = 255;
-          const rv = 95 + n * 60 + vein * 40;
-          rimg.data[i] = rimg.data[i + 1] = rimg.data[i + 2] = rv;
-          rimg.data[i + 3] = 255;
-        }
-      }
-      c.putImageData(img, 0, 0);
-      r.putImageData(rimg, 0, 0);
-      // Large format joints
-      c.strokeStyle = `rgba(${finish.accent.r},${finish.accent.g},${finish.accent.b},0.35)`;
-      c.lineWidth = 3;
-      c.strokeRect(s * 0.02, s * 0.02, s * 0.96, s * 0.96);
-      c.beginPath();
-      c.moveTo(s / 2, 0);
-      c.lineTo(s / 2, s);
-      c.moveTo(0, s / 2);
-      c.lineTo(s, s / 2);
-      c.stroke();
-    },
-    [2.2, 2.2],
-  );
-}
-
-function drawBluestone(finish: PatioFinish, size: number): PatioTexPair {
-  return makePair(
-    size,
-    (c, r, s) => {
-      const img = c.createImageData(s, s);
-      for (let y = 0; y < s; y++) {
-        for (let x = 0; x < s; x++) {
-          const n = fbm(x / 45, y / 45, 19, 5);
-          const cleft = fbm(x / 12, y / 12, 27, 2);
-          const i = (y * s + x) * 4;
-          img.data[i] = finish.color.r + n * 20 + cleft * 10;
-          img.data[i + 1] = finish.color.g + n * 22 + cleft * 12;
-          img.data[i + 2] = finish.color.b + n * 26 + cleft * 14;
-          img.data[i + 3] = 255;
-        }
-      }
-      c.putImageData(img, 0, 0);
-      c.strokeStyle = `rgba(${finish.accent.r},${finish.accent.g},${finish.accent.b},0.4)`;
-      c.lineWidth = 4;
-      const rows = 3;
-      const cols = 3;
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-          c.strokeRect(
-            (col / cols) * s + 3,
-            (row / rows) * s + 3,
-            s / cols - 6,
-            s / rows - 6,
+      const tw = s / count;
+      const joint = Math.max(2, (0.25 / tileIn) * tw); // ~¼″ cleft joint look
+      for (let row = 0; row < count; row++) {
+        for (let col = 0; col < count; col++) {
+          const n = fbm(col + 0.2, row + 0.2, 19, 4);
+          fillStone(
+            c,
+            r,
+            col * tw + joint * 0.5,
+            row * tw + joint * 0.5,
+            tw - joint,
+            tw - joint,
+            finish,
+            n,
+            { mottled: true },
           );
         }
       }
     },
-    [2, 2],
+    coverageM,
   );
 }
 
 function drawPorcelain(finish: PatioFinish, size: number): PatioTexPair {
+  const tileIn = PORCELAIN_IN;
+  const count = 2;
+  const coverageM = count * tileIn * IN;
   return makePair(
     size,
     (c, r, s) => {
-      const img = c.createImageData(s, s);
-      const rimg = r.createImageData(s, s);
-      for (let y = 0; y < s; y++) {
-        for (let x = 0; x < s; x++) {
-          const n = fbm(x / 80, y / 80, 5, 3);
-          const i = (y * s + x) * 4;
-          img.data[i] = finish.color.r + n * 10;
-          img.data[i + 1] = finish.color.g + n * 10;
-          img.data[i + 2] = finish.color.b + n * 10;
-          img.data[i + 3] = 255;
-          const rv = 35 + n * 25;
-          rimg.data[i] = rimg.data[i + 1] = rimg.data[i + 2] = rv;
-          rimg.data[i + 3] = 255;
+      c.fillStyle = tint(finish.accent, 0);
+      c.fillRect(0, 0, s, s);
+      const tw = s / count;
+      const joint = Math.max(1.5, (JOINT_IN / tileIn) * tw);
+      for (let row = 0; row < count; row++) {
+        for (let col = 0; col < count; col++) {
+          const n = fbm(col * 0.3, row * 0.3, 5, 3);
+          fillStone(
+            c,
+            r,
+            col * tw + joint * 0.5,
+            row * tw + joint * 0.5,
+            tw - joint,
+            tw - joint,
+            finish,
+            n,
+          );
         }
       }
-      c.putImageData(img, 0, 0);
-      r.putImageData(rimg, 0, 0);
-      c.strokeStyle = `rgba(${finish.accent.r},${finish.accent.g},${finish.accent.b},0.5)`;
-      c.lineWidth = 3;
-      c.strokeRect(4, 4, s - 8, s - 8);
     },
-    [1.6, 1.6],
+    coverageM,
   );
 }
 
@@ -551,7 +607,6 @@ function drawCoral(finish: PatioFinish, size: number): PatioTexPair {
         c.arc(x, y, rad, 0, Math.PI * 2);
         c.fill();
       }
-      // Pits
       for (let i = 0; i < 400; i++) {
         c.beginPath();
         c.fillStyle = tint(finish.accent, -20);
@@ -559,7 +614,7 @@ function drawCoral(finish: PatioFinish, size: number): PatioTexPair {
         c.fill();
       }
     },
-    [3, 3],
+    36 * IN,
   );
 }
 
@@ -588,15 +643,16 @@ const cache = new Map<string, PatioTexPair>();
 
 export function getPatioFinishTexture(finishId: string | undefined): PatioTexPair {
   const finish = getPatioFinish(finishId);
-  const cached = cache.get(finish.id);
+  // Bust stale tiny-pattern caches when generators change.
+  const cacheKey = `${finish.id}@v2-scale`;
+  const cached = cache.get(cacheKey);
   if (cached) return cached;
   if (typeof document === "undefined") {
-    // SSR stub — empty canvases
-    const empty = makePair(4, () => {}, [1, 1]);
+    const empty = makePair(4, () => {}, 1);
     return empty;
   }
-  const pair = generators[finish.pattern](finish, 512);
-  cache.set(finish.id, pair);
+  const pair = generators[finish.pattern](finish, 1024);
+  cache.set(cacheKey, pair);
   return pair;
 }
 

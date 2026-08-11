@@ -216,35 +216,19 @@ function PatternPreview({
         </svg>
       );
     case "modular":
-      return (
-        <svg {...common}>
-          <rect width="44" height="32" fill={accent} />
-          <rect x="1" y="1" width="20" height="14" fill={color} />
-          <rect x="23" y="1" width="20" height="14" fill={color} />
-          <rect x="1" y="17" width="12" height="14" fill={color} />
-          <rect x="15" y="17" width="28" height="14" fill={color} />
-        </svg>
-      );
     case "travertine":
       return (
         <svg {...common}>
-          <rect width="44" height="32" fill={color} />
-          <path
-            d="M2 10 Q12 6 22 12 T42 10"
-            stroke={accent}
-            strokeWidth="1.2"
-            fill="none"
-            opacity="0.55"
-          />
-          <path
-            d="M2 20 Q14 16 24 22 T42 18"
-            stroke={accent}
-            strokeWidth="1"
-            fill="none"
-            opacity="0.4"
-          />
-          <line x1="22" y1="1" x2="22" y2="31" stroke={accent} strokeWidth="1.5" />
-          <line x1="1" y1="16" x2="43" y2="16" stroke={accent} strokeWidth="1.5" />
+          <rect width="44" height="32" fill={accent} />
+          <rect x="1" y="1" width="14" height="18" fill={color} />
+          <rect x="16" y="1" width="14" height="14" fill={color} />
+          <rect x="31" y="1" width="12" height="14" fill={color} />
+          <rect x="16" y="16" width="7" height="7" fill={color} />
+          <rect x="24" y="16" width="7" height="7" fill={color} />
+          <rect x="31" y="16" width="6" height="14" fill={color} />
+          <rect x="38" y="16" width="5" height="7" fill={color} />
+          <rect x="38" y="24" width="5" height="7" fill={color} />
+          <rect x="1" y="20" width="14" height="11" fill={color} />
         </svg>
       );
     case "bluestone":
