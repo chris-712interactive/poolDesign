@@ -18,6 +18,7 @@ import {
   depthTAtPlanPoint,
   mmToMeters,
   planToWorldXZ,
+  pointInPolygon,
 } from "@pool-design/shared";
 import {
   basinCutPlaneConstant,
@@ -1240,6 +1241,198 @@ function depthSampler(desc: {
   };
 }
 
+function unit2(v: PointMm): PointMm {
+  const len = Math.hypot(v.x, v.y);
+  if (len < 1e-9) return { x: 1, y: 0 };
+  return { x: v.x / len, y: v.y / len };
+}
+
+/**
+ * Sample parameters along the depth axis, densified at authored stations
+ * (especially drop-offs) so floor breaks appear in 3D.
+ */
+function depthAxisTSamples(
+  stations: FloorDescriptor["depthStations"],
+  axisLengthMm: number,
+): number[] {
+  const maxStep = Math.min(0.035, 220 / Math.max(1, axisLengthMm));
+  const marks = new Set<number>([0, 1]);
+  for (const s of stations) {
+    const t = Math.min(1, Math.max(0, s.t));
+    marks.add(t);
+    if (s.transition === "dropoff") {
+      marks.add(Math.max(0, t - 2e-4));
+      marks.add(Math.min(1, t + 2e-4));
+    }
+  }
+  const sorted = [...marks].sort((a, b) => a - b);
+  const out: number[] = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i];
+    const b = sorted[i + 1];
+    out.push(a);
+    const gap = b - a;
+    const n = Math.max(1, Math.ceil(gap / maxStep));
+    for (let k = 1; k < n; k++) out.push(a + (gap * k) / n);
+  }
+  out.push(1);
+  return out;
+}
+
+/**
+ * Build a basin floor (or water bottom) that follows the depth profile,
+ * including mid-pool breaks. ShapeGeometry alone only has outline verts, so
+ * depth stations never showed up in the interior.
+ */
+function buildProfiledBasinSurface(opts: {
+  outlineMm: PointMm[];
+  depthStations: FloorDescriptor["depthStations"];
+  axisOriginMm: PointMm;
+  depthAxis: PointMm;
+  axisLengthMm: number;
+  /** y = -depth + yBias (floor) or water bottom with clearance */
+  yAtDepth: (depthM: number) => number;
+  uvScale?: number;
+}): {
+  positions: number[];
+  uvs: number[];
+  indices: number[];
+} {
+  const open = ringPts(opts.outlineMm);
+  const empty = { positions: [] as number[], uvs: [] as number[], indices: [] as number[] };
+  if (open.length < 3) return empty;
+
+  const axis = unit2(opts.depthAxis);
+  const perp = { x: -axis.y, y: axis.x };
+  const origin = opts.axisOriginMm;
+  const axisLen = Math.max(1, opts.axisLengthMm);
+
+  let sMin = Infinity;
+  let sMax = -Infinity;
+  for (const p of open) {
+    const s =
+      (p.x - origin.x) * perp.x + (p.y - origin.y) * perp.y;
+    sMin = Math.min(sMin, s);
+    sMax = Math.max(sMax, s);
+  }
+  // Pad slightly so edge quads reach the shell.
+  const pad = 40;
+  sMin -= pad;
+  sMax += pad;
+
+  const tSamples = depthAxisTSamples(opts.depthStations, axisLen);
+  const sStep = Math.min(280, Math.max(120, (sMax - sMin) / 24));
+  const sCount = Math.max(2, Math.ceil((sMax - sMin) / sStep) + 1);
+  const sSamples: number[] = [];
+  for (let i = 0; i < sCount; i++) {
+    sSamples.push(sMin + ((sMax - sMin) * i) / (sCount - 1));
+  }
+
+  const depthAt = depthSampler({
+    depthStations: opts.depthStations,
+    axisOriginMm: opts.axisOriginMm,
+    depthAxis: opts.depthAxis,
+    axisLengthMm: opts.axisLengthMm,
+  });
+  const uvScale = opts.uvScale ?? 0.45;
+
+  const nt = tSamples.length;
+  const ns = sSamples.length;
+  const idxOf = (ti: number, si: number) => ti * ns + si;
+  const inside: boolean[] = new Array(nt * ns);
+  const positions: number[] = new Array(nt * ns * 3);
+  const uvs: number[] = new Array(nt * ns * 2);
+
+  for (let ti = 0; ti < nt; ti++) {
+    const t = tSamples[ti];
+    for (let si = 0; si < ns; si++) {
+      const s = sSamples[si];
+      const plan = {
+        x: origin.x + axis.x * axisLen * t + perp.x * s,
+        y: origin.y + axis.y * axisLen * t + perp.y * s,
+      };
+      const i = idxOf(ti, si);
+      // Keep a thin band outside so edge cells still form; depth still valid.
+      inside[i] =
+        pointInPolygon(plan, open) ||
+        pointInPolygon(
+          {
+            x: plan.x + perp.x * 30,
+            y: plan.y + perp.y * 30,
+          },
+          open,
+        ) ||
+        pointInPolygon(
+          {
+            x: plan.x - perp.x * 30,
+            y: plan.y - perp.y * 30,
+          },
+          open,
+        );
+      const sx = mmToMeters(-plan.x);
+      const sy = mmToMeters(plan.y);
+      const d = depthAt(sx, sy);
+      const y = opts.yAtDepth(d);
+      positions[i * 3] = sx;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = -sy;
+      uvs[i * 2] = sx * uvScale;
+      uvs[i * 2 + 1] = sy * uvScale;
+    }
+  }
+
+  const indices: number[] = [];
+  const emitTri = (a: number, b: number, c: number) => {
+    if (!inside[a] || !inside[b] || !inside[c]) return;
+    indices.push(a, b, c);
+  };
+
+  for (let ti = 0; ti < nt - 1; ti++) {
+    for (let si = 0; si < ns - 1; si++) {
+      const a = idxOf(ti, si);
+      const b = idxOf(ti, si + 1);
+      const c = idxOf(ti + 1, si);
+      const d = idxOf(ti + 1, si + 1);
+      const count =
+        (inside[a] ? 1 : 0) +
+        (inside[b] ? 1 : 0) +
+        (inside[c] ? 1 : 0) +
+        (inside[d] ? 1 : 0);
+      if (count === 4) {
+        emitTri(a, b, d);
+        emitTri(a, d, c);
+      } else if (count === 3) {
+        if (!inside[a]) emitTri(b, d, c);
+        else if (!inside[b]) emitTri(a, d, c);
+        else if (!inside[c]) emitTri(a, b, d);
+        else emitTri(a, b, c);
+      }
+    }
+  }
+
+  // Compact unused vertices so BufferGeometry stays lean.
+  if (!indices.length) return empty;
+  const used = new Set(indices);
+  const remap = new Map<number, number>();
+  const posOut: number[] = [];
+  const uvOut: number[] = [];
+  let next = 0;
+  for (const i of [...used].sort((a, b) => a - b)) {
+    remap.set(i, next++);
+    posOut.push(
+      positions[i * 3],
+      positions[i * 3 + 1],
+      positions[i * 3 + 2],
+    );
+    uvOut.push(uvs[i * 2], uvs[i * 2 + 1]);
+  }
+  return {
+    positions: posOut,
+    uvs: uvOut,
+    indices: indices.map((i) => remap.get(i)!),
+  };
+}
+
 function FloorMesh({
   desc,
   selected,
@@ -1254,42 +1447,40 @@ function FloorMesh({
     if (open.length < 3) return new THREE.BufferGeometry();
     const thick = Math.max(0.06, desc.thicknessM ?? 0.14);
     const depthAtShape = depthSampler(desc);
-
-    const shape = outlineToShape(desc.outlineMm, false);
-    const shapeGeo = new THREE.ShapeGeometry(shape);
-    const src = shapeGeo.attributes.position;
-    const srcIndex = shapeGeo.index;
-    const n = src.count;
-    const verts: number[] = [];
-    const uvs: number[] = [];
-    const indices: number[] = [];
     const uvScale = 0.45;
 
-    for (let i = 0; i < n; i++) {
-      const sx = src.getX(i);
-      const sy = src.getY(i);
-      const d = depthAtShape(sx, sy);
-      verts.push(sx, -d, -sy);
-      uvs.push(sx * uvScale, sy * uvScale);
+    const top = buildProfiledBasinSurface({
+      outlineMm: desc.outlineMm,
+      depthStations: desc.depthStations,
+      axisOriginMm: desc.axisOriginMm,
+      depthAxis: desc.depthAxis,
+      axisLengthMm: desc.axisLengthMm,
+      yAtDepth: (d) => -d,
+      uvScale,
+    });
+
+    const verts: number[] = [...top.positions];
+    const uvs: number[] = [...top.uvs];
+    const indices: number[] = [...top.indices];
+    const nTop = top.positions.length / 3;
+
+    // Bottom slab face (offset down by thickness)
+    for (let i = 0; i < nTop; i++) {
+      verts.push(
+        top.positions[i * 3],
+        top.positions[i * 3 + 1] - thick,
+        top.positions[i * 3 + 2],
+      );
+      uvs.push(top.uvs[i * 2], top.uvs[i * 2 + 1]);
     }
-    for (let i = 0; i < n; i++) {
-      const sx = src.getX(i);
-      const sy = src.getY(i);
-      const d = depthAtShape(sx, sy);
-      verts.push(sx, -d - thick, -sy);
-      uvs.push(sx * uvScale, sy * uvScale);
+    for (let i = 0; i < top.indices.length; i += 3) {
+      const a = top.indices[i];
+      const b = top.indices[i + 1];
+      const c = top.indices[i + 2];
+      indices.push(nTop + a, nTop + c, nTop + b);
     }
 
-    if (srcIndex) {
-      for (let i = 0; i < srcIndex.count; i += 3) {
-        const a = srcIndex.getX(i);
-        const bi = srcIndex.getX(i + 1);
-        const c = srcIndex.getX(i + 2);
-        indices.push(a, bi, c);
-        indices.push(n + a, n + c, n + bi);
-      }
-    }
-
+    // Perimeter walls between top and bottom
     for (let i = 0; i < open.length; i++) {
       const p0 = open[i];
       const p1 = open[(i + 1) % open.length];
@@ -1332,7 +1523,6 @@ function FloorMesh({
     geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
     geo.setIndex(indices);
     geo.computeVertexNormals();
-    shapeGeo.dispose();
     return geo;
   }, [desc]);
 
@@ -1443,16 +1633,26 @@ function WaterBodyMesh({
       }
     }
 
-    // Volume: bottom + sides only (no top — surface mesh owns the waterline)
-    for (let i = 0; i < n; i++) {
-      const sx = src.getX(i);
-      const sy = src.getY(i);
-      const d = depthAtShape(sx, sy);
-      const bottomY = Math.min(waterTop - 0.12, -d + floorClearance);
-      volVerts.push(sx, bottomY, -sy);
+    // Profiled basin bottom (follows depth breaks) + side walls
+    const bottom = buildProfiledBasinSurface({
+      outlineMm: desc.outlineMm,
+      depthStations: desc.depthStations,
+      axisOriginMm: desc.axisOriginMm,
+      depthAxis: desc.depthAxis,
+      axisLengthMm: desc.axisLengthMm,
+      yAtDepth: (d) => Math.min(waterTop - 0.12, -d + floorClearance),
+      uvScale: 0.55,
+    });
+    const bottomBase = volVerts.length / 3;
+    volVerts.push(...bottom.positions);
+    for (let i = 0; i < bottom.indices.length; i += 3) {
+      const a = bottomBase + bottom.indices[i];
+      const b = bottomBase + bottom.indices[i + 1];
+      const c = bottomBase + bottom.indices[i + 2];
+      // Flip so FrontSide faces upward into the water column
+      volIdx.push(a, c, b);
     }
-    // Degenerate thin top ring for side attachment reference (not rendered as face)
-    // Sides connect waterTop → bottom
+
     pushWaterSideRing(
       volVerts,
       volIdx,
@@ -1470,17 +1670,6 @@ function WaterBodyMesh({
         depthAtShape,
         floorClearance,
       );
-    }
-    // Soft bottom fill (facing up into the basin — reverse winding vs top)
-    if (srcIndex) {
-      const base = 0;
-      for (let i = 0; i < srcIndex.count; i += 3) {
-        const a = srcIndex.getX(i);
-        const bi = srcIndex.getX(i + 1);
-        const c = srcIndex.getX(i + 2);
-        // Flip so FrontSide faces upward into the water column
-        volIdx.push(base + a, base + c, base + bi);
-      }
     }
 
     const surface = new THREE.BufferGeometry();

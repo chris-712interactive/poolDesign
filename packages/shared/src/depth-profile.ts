@@ -299,7 +299,7 @@ export function addDepthBreak(body: PoolBody, afterIndex = 0): PoolBody {
       id: newStationId(),
       t,
       depthMm,
-      transition: "smooth" as const,
+      transition: "dropoff" as const,
     },
     ...stations.slice(i + 1),
   ];
