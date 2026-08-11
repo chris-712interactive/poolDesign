@@ -777,6 +777,7 @@ function SpilloverRibbonMesh({
     const botY = desc.poolWaterY;
     const h = Math.max(0.04, topY - botY);
     const flare = Math.max(0.08, desc.flareM);
+    const lipTuckMm = Math.max(0, (desc.lipTuckM ?? 0.028) * 1000);
     const uCount = crest.length;
     const vCount = segsV + 1;
 
@@ -788,7 +789,9 @@ function SpilloverRibbonMesh({
         const v = iv / segsV; // 0 crest → 1 pool
         const fall = v;
         const pour = Math.sqrt(Math.min(1, Math.max(0, fall * (2 - fall))));
-        const throwMm = pour * flare * flareScale * 1000;
+        // Start tucked onto the spa lip, then flare out as it falls.
+        const throwMm =
+          -lipTuckMm * (1 - pour) + pour * flare * flareScale * 1000;
         const y = topY - v * h * heightScale;
         for (let iu = 0; iu < uCount; iu++) {
           const s = crest[iu];
@@ -824,7 +827,7 @@ function SpilloverRibbonMesh({
     const sheet = build(1, 1);
     const veil = build(1.04, 0.98);
 
-    // Thin foam strip along the crest lip
+    // Thin foam strip along the crest lip (tucked onto coping)
     const foamPos: number[] = [];
     const foamUv: number[] = [];
     const foamIdx: number[] = [];
@@ -836,8 +839,8 @@ function SpilloverRibbonMesh({
       for (let iu = 0; iu < uCount; iu++) {
         const s = crest[iu];
         const xz = planToWorldXZ({
-          x: s.x + s.nx * 4,
-          y: s.y + s.ny * 4,
+          x: s.x + s.nx * (-lipTuckMm + 2),
+          y: s.y + s.ny * (-lipTuckMm + 2),
         });
         foamPos.push(xz.x, y, xz.z);
         foamUv.push(iu / Math.max(1, uCount - 1), 1 - v);

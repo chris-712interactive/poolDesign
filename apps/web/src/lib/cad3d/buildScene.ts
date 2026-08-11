@@ -196,6 +196,8 @@ export type SpilloverRibbonDescriptor = {
   poolWaterY: number;
   /** Extra radial throw at the pool (m). */
   flareM: number;
+  /** How far the crest tucks back onto the spa lip (m). */
+  lipTuckM?: number;
   opacity?: number;
 } & Selectable;
 
@@ -734,9 +736,11 @@ function pushSpaSpilloverWater(
   const n = pts.length;
   if (n < 3) return;
 
-  const lipOffsetMm = Math.max(12, opts.wallThicknessMm * 0.52);
+  // `spaOutline` is the outer shell face. Keep the crest on that lip (slight
+  // tuck inward so the sheet overlaps the coping) instead of floating out.
+  const lipOffsetMm = Math.max(2, Math.min(8, opts.wallThicknessMm * 0.04));
   const spacingMm = 55;
-  const topY = opts.crestY - 0.008;
+  const topY = opts.crestY - 0.004;
   const bottomY = opts.poolWaterTopY + 0.004;
   const drop = Math.max(0.05, topY - bottomY);
   const flareM = Math.max(0.1, Math.min(0.34, drop * 0.95));
@@ -878,6 +882,7 @@ function pushSpaSpilloverWater(
       crestY: topY,
       poolWaterY: bottomY,
       flareM,
+      lipTuckM: 0.028,
       opacity: sheetOpacity,
       select: opts.select,
     });
