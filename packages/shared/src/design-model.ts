@@ -161,6 +161,29 @@ export type InfinityEdge = {
   scupperCount?: number;
   /** Scuppers only: clear gap between openings (mm). */
   scupperGapMm?: number;
+  /**
+   * Design nappe / head over the weir crest (inches).
+   * Drives Francis weir flow. Defaults by style (sheet ¼″, scuppers ½″, sheer 1″).
+   */
+  designHeadIn?: number;
+  /**
+   * Francis end contractions. Vanishing edges typically use 2; suppressed /
+   * slot-style full-width weirs use 0.
+   */
+  endContractions?: number;
+  /**
+   * Surge displacement depth over the main pool surface (inches).
+   * Phillips/Gutai water-in-transit protocol defaults to 2″.
+   */
+  surgeDisplacementIn?: number;
+  /** Static lift from trough water surface to pool returns (mm). */
+  staticLiftMm?: number;
+  /** One-way equivalent pipe run for friction estimate (mm). */
+  pipeRunMm?: number;
+  /** Authorable suction pipe nominal ID (inches). */
+  suctionPipeIdIn?: number;
+  /** Authorable return pipe nominal ID (inches). */
+  returnPipeIdIn?: number;
   /** Optional override for edge flow readout (GPM). */
   flowGpmOverride?: number;
   /** Optional override for recommended surge volume (gal). */

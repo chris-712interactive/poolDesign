@@ -5258,8 +5258,9 @@ function InfinityEdgeFields({
         Infinity edge
       </strong>
       <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
-        Vanishing weir into a catch trough. Enable edges below, then drag weir
-        handles on the 2D plan. Sizing is a design aid — verify with your PE.
+        Vanishing weir into a catch trough. Flow uses the Francis weir formula;
+        surge follows the Phillips/Gutai 2″ surface protocol. A licensed PE must
+        still stamp site elevations and the final pump curve.
       </p>
       <label
         className="field"
@@ -5352,6 +5353,48 @@ function InfinityEdgeFields({
               }}
             />
           </div>
+          <div className="field">
+            <label htmlFor="inf-head">Design nappe (head over crest)</label>
+            <input
+              id="inf-head"
+              key={`inf-head-${body.id}-${cfg.designHeadIn ?? cfg.style ?? "sheet"}`}
+              type="number"
+              min={0.0625}
+              max={6}
+              step={0.0625}
+              defaultValue={
+                cfg.designHeadIn ??
+                (cfg.style === "sheer"
+                  ? 1
+                  : cfg.style === "scuppers"
+                    ? 0.5
+                    : 0.25)
+              }
+              onBlur={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isFinite(n) && n > 0) {
+                  patch({ designHeadIn: Math.min(6, Math.max(0.0625, n)) });
+                }
+              }}
+            />
+            <div className="muted" style={{ fontSize: "0.72rem" }}>
+              Inches of water over the weir crest (Francis h). Sheet default
+              ¼″ · scuppers ½″ · sheer 1″.
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="inf-n">End contractions (n)</label>
+            <select
+              id="inf-n"
+              value={cfg.endContractions ?? 2}
+              onChange={(e) =>
+                patch({ endContractions: Number(e.target.value) })
+              }
+            >
+              <option value={2}>2 — vanishing / contracted weir</option>
+              <option value={0}>0 — suppressed / full-width slot</option>
+            </select>
+          </div>
           {(cfg.style ?? "sheet") === "scuppers" && (
             <>
               <div className="field">
@@ -5443,6 +5486,68 @@ function InfinityEdgeFields({
               }}
             />
           </div>
+          <strong style={{ fontSize: "0.85rem" }}>Hydraulic design</strong>
+          <div className="field">
+            <label htmlFor="inf-surge-in">Surge displacement</label>
+            <input
+              id="inf-surge-in"
+              type="number"
+              min={0.5}
+              max={12}
+              step={0.5}
+              defaultValue={cfg.surgeDisplacementIn ?? 2}
+              onBlur={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isFinite(n) && n > 0) {
+                  patch({
+                    surgeDisplacementIn: Math.min(12, Math.max(0.5, n)),
+                  });
+                }
+              }}
+            />
+            <div className="muted" style={{ fontSize: "0.72rem" }}>
+              Inches of main-pool surface held in the catch basin (Phillips /
+              Gutai default 2″).
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="inf-lift">Static lift</label>
+            <input
+              id="inf-lift"
+              key={`inf-lift-${body.id}-${cfg.staticLiftMm ?? 0}`}
+              defaultValue={formatLength(
+                cfg.staticLiftMm ??
+                  Math.max(
+                    50,
+                    (trough.depthMm ?? 30 * 25.4) -
+                      (trough.waterDepthMm ?? 18 * 25.4),
+                  ) + 150,
+                unitSystem,
+              )}
+              onBlur={(e) => {
+                const mm = parseLengthToMm(e.target.value, unitSystem);
+                if (mm != null && mm >= 0) patch({ staticLiftMm: mm });
+              }}
+            />
+            <div className="muted" style={{ fontSize: "0.72rem" }}>
+              Vertical distance from trough water surface up to pool returns.
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="inf-pipe-run">Pipe run (one-way equiv.)</label>
+            <input
+              id="inf-pipe-run"
+              key={`inf-run-${body.id}-${cfg.pipeRunMm ?? 0}`}
+              defaultValue={formatLength(
+                cfg.pipeRunMm ?? 60 * 304.8,
+                unitSystem,
+              )}
+              onBlur={(e) => {
+                const mm = parseLengthToMm(e.target.value, unitSystem);
+                if (mm != null && mm >= 1000) patch({ pipeRunMm: mm });
+              }}
+            />
+          </div>
           {hydro && (
             <div
               className="stack"
@@ -5454,19 +5559,25 @@ function InfinityEdgeFields({
                 fontSize: "0.8rem",
               }}
             >
-              <strong style={{ fontSize: "0.82rem" }}>Hydraulic sizing</strong>
+              <strong style={{ fontSize: "0.82rem" }}>
+                PE hydraulic sizing
+              </strong>
               <div>
-                Weir length: {hydro.weirLf.toFixed(1)} lf · style {hydro.style}
+                Weir {hydro.weirLf.toFixed(1)} lf · nappe {hydro.designHeadIn}
+                ″ · n={hydro.endContractions} · {hydro.style}
               </div>
               <div>
-                Edge flow: {hydro.edgeFlowGpm.toFixed(0)} GPM
-                {hydro.flowOverridden ? " (override)" : ""}
+                Francis edge flow: {hydro.edgeFlowGpm.toFixed(0)} GPM (
+                {hydro.gpmPerLf.toFixed(1)} GPM/lf)
+                {hydro.flowOverridden ? " · override applied" : ""}
               </div>
               <div>
-                Trough volume: {hydro.troughVolumeGal.toFixed(0)} gal
+                Trough operating: {hydro.troughVolumeGal.toFixed(0)} gal · shell{" "}
+                {hydro.troughShellCapacityGal.toFixed(0)} gal
               </div>
               <div>
-                Displacement surge (~1″):{" "}
+                Surge demand ({hydro.surgeDisplacementIn}″ ×{" "}
+                {hydro.poolSurfaceSf.toFixed(0)} sf):{" "}
                 {hydro.displacementSurgeGal.toFixed(0)} gal
               </div>
               <div>
@@ -5474,14 +5585,48 @@ function InfinityEdgeFields({
                 {hydro.recommendedSurgeGal.toFixed(0)} gal
                 {hydro.surgeOverridden ? " (override)" : ""}
               </div>
+              {hydro.troughShortfall && (
+                <div style={{ color: "#8a3b12" }}>
+                  Trough shortfall: enlarge operating volume by ~
+                  {hydro.troughShortfallGal.toFixed(0)} gal (or deepen /
+                  widen trough).
+                </div>
+              )}
               <div>
-                Edge pump: {hydro.edgePumpGpm} GPM (incl. 15% margin)
+                Edge pump: ≥ {hydro.edgePumpGpm} GPM @ ~
+                {hydro.estimatedTdhFt.toFixed(1)} ft TDH
               </div>
+              <div>
+                TDH breakdown: static {hydro.staticLiftFt.toFixed(1)} ft +
+                friction/fittings {hydro.frictionHeadFt.toFixed(1)} ft
+              </div>
+              <div>
+                Pipe: suction {hydro.suctionPipeIdIn}&quot; (
+                {hydro.suctionVelocityFps.toFixed(1)} fps) · return{" "}
+                {hydro.returnPipeIdIn}&quot; (
+                {hydro.returnVelocityFps.toFixed(1)} fps) · run{" "}
+                {hydro.pipeRunFt.toFixed(0)} ft
+              </div>
+              <details style={{ marginTop: "0.2rem" }}>
+                <summary style={{ cursor: "pointer" }}>Method notes</summary>
+                <ul
+                  style={{
+                    margin: "0.35rem 0 0",
+                    paddingLeft: "1.1rem",
+                    fontSize: "0.72rem",
+                  }}
+                >
+                  {hydro.methodNotes.map((n) => (
+                    <li key={n}>{n}</li>
+                  ))}
+                </ul>
+              </details>
             </div>
           )}
           {!hydro && (
             <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
-              Enable at least one edge to see flow, trough, and pump sizing.
+              Enable at least one edge to see Francis flow, surge, TDH, and
+              pump sizing.
             </p>
           )}
         </>

@@ -529,6 +529,32 @@ function normalizeInfinityEdge(
     }
     if (Object.keys(trough).length) out.trough = trough;
   }
+  if (raw.designHeadIn != null) {
+    out.designHeadIn = clampFinite(raw.designHeadIn, 0.25, 0.0625, 6);
+  }
+  if (raw.endContractions != null) {
+    out.endContractions = Math.round(clampFinite(raw.endContractions, 2, 0, 8));
+  }
+  if (raw.surgeDisplacementIn != null) {
+    out.surgeDisplacementIn = clampFinite(
+      raw.surgeDisplacementIn,
+      2,
+      0.5,
+      12,
+    );
+  }
+  if (raw.staticLiftMm != null) {
+    out.staticLiftMm = clampFinite(raw.staticLiftMm, 600, 0, 20_000);
+  }
+  if (raw.pipeRunMm != null) {
+    out.pipeRunMm = clampFinite(raw.pipeRunMm, 60 * 304.8, 1000, 200_000);
+  }
+  if (raw.suctionPipeIdIn != null) {
+    out.suctionPipeIdIn = clampFinite(raw.suctionPipeIdIn, 2, 1, 12);
+  }
+  if (raw.returnPipeIdIn != null) {
+    out.returnPipeIdIn = clampFinite(raw.returnPipeIdIn, 2, 1, 12);
+  }
   if (raw.flowGpmOverride != null) {
     out.flowGpmOverride = clampFinite(raw.flowGpmOverride, 0, 0, 5000);
   }

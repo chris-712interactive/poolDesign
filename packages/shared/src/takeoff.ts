@@ -400,7 +400,7 @@ export function buildTakeoff(
         "infinity_trough",
         infinityTroughLf(pool),
         "lf",
-        `${pool.name}: ~${Math.round(hydro.edgePumpGpm)} GPM edge pump · ${Math.round(hydro.recommendedSurgeGal)} gal surge`,
+        `${pool.name}: Francis ${Math.round(hydro.edgeFlowGpm)} GPM · pump ≥${Math.round(hydro.edgePumpGpm)} GPM @ ~${Math.round(hydro.estimatedTdhFt)} ft TDH · surge ${Math.round(hydro.recommendedSurgeGal)} gal`,
       );
     } else {
       push("infinity_trough", infinityTroughLf(pool), "lf", pool.name);
