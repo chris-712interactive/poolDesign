@@ -34,7 +34,7 @@ import {
   type MeshDescriptor,
   type SceneMaterialKey,
   type SceneSelection,
-  type SpilloverCornerDescriptor,
+  type SpilloverRibbonDescriptor,
   type TerrainDescriptor,
   type TubeDescriptor,
   type WallPanelDescriptor,
@@ -748,75 +748,61 @@ function SpilloverCascadeMesh({
 }
 
 /**
- * Quarter-turn (or exterior) curved spillover curtain joining two weirs.
- * Sweeps between the weir outward normals with the same free-fall pour profile.
+ * Continuous spillover curtain along a crest polyline (straight runs + corner arcs).
+ * One mesh so adjacent weirs read as a single flowing sheet.
  */
-function SpilloverCornerCascadeMesh({
+function SpilloverRibbonMesh({
   desc,
   selected,
   onSelect,
 }: {
-  desc: SpilloverCornerDescriptor;
+  desc: SpilloverRibbonDescriptor;
   selected: boolean;
   onSelect?: (sel: SceneSelection | null) => void;
 }) {
   const handlers = useSelectHandlers(desc.select, onSelect);
 
   const { sheetGeo, veilGeo, foamGeo } = useMemo(() => {
-    const n0 = new THREE.Vector2(desc.normal0.x, desc.normal0.y).normalize();
-    const n1 = new THREE.Vector2(desc.normal1.x, desc.normal1.y).normalize();
-    let ang0 = Math.atan2(n0.y, n0.x);
-    let ang1 = Math.atan2(n1.y, n1.x);
-    let dAng = ang1 - ang0;
-    while (dAng > Math.PI) dAng -= Math.PI * 2;
-    while (dAng < -Math.PI) dAng += Math.PI * 2;
-    // Prefer the exterior turn (≤ 180°). If we somehow got the interior
-    // reflex, flip to the short exterior arc.
-    if (Math.abs(dAng) < 1e-3) dAng = Math.PI / 2;
-    if (Math.abs(dAng) > Math.PI * 0.95) {
-      dAng = dAng > 0 ? dAng - Math.PI * 2 : dAng + Math.PI * 2;
+    const crest = desc.crest;
+    if (crest.length < 2) {
+      return {
+        sheetGeo: new THREE.BufferGeometry(),
+        veilGeo: new THREE.BufferGeometry(),
+        foamGeo: new THREE.BufferGeometry(),
+      };
     }
-    // Overlap slightly into each straight weir so seams disappear.
-    const pad = Math.min(0.22, Math.abs(dAng) * 0.18) * Math.sign(dAng || 1);
-    ang0 -= pad;
-    dAng += pad * 2;
 
-    const segsU = Math.max(10, Math.ceil(Math.abs(dAng) / (Math.PI / 18)));
     const segsV = 36;
-    const lipR = Math.max(0.03, desc.lipRadiusM);
-    const flare = Math.max(0.08, desc.flareM);
     const topY = desc.crestY;
     const botY = desc.poolWaterY;
     const h = Math.max(0.04, topY - botY);
+    const flare = Math.max(0.08, desc.flareM);
+    const uCount = crest.length;
+    const vCount = segsV + 1;
 
-    const build = (radiusScale: number, heightScale: number) => {
+    const build = (flareScale: number, heightScale: number) => {
       const positions: number[] = [];
       const uvs: number[] = [];
       const indices: number[] = [];
-      const uCount = segsU + 1;
-      const vCount = segsV + 1;
       for (let iv = 0; iv < vCount; iv++) {
         const v = iv / segsV; // 0 crest → 1 pool
         const fall = v;
         const pour = Math.sqrt(Math.min(1, Math.max(0, fall * (2 - fall))));
-        const r = (lipR + pour * flare) * radiusScale;
+        const throwMm = pour * flare * flareScale * 1000;
         const y = topY - v * h * heightScale;
         for (let iu = 0; iu < uCount; iu++) {
-          const u = iu / segsU;
-          const ang = ang0 + dAng * u;
-          const dirX = Math.cos(ang);
-          const dirY = Math.sin(ang);
+          const s = crest[iu];
           const plan = {
-            x: desc.cornerMm.x + dirX * r * 1000,
-            y: desc.cornerMm.y + dirY * r * 1000,
+            x: s.x + s.nx * throwMm,
+            y: s.y + s.ny * throwMm,
           };
           const xz = planToWorldXZ(plan);
           positions.push(xz.x, y, xz.z);
-          uvs.push(u, 1 - v);
+          uvs.push(iu / Math.max(1, uCount - 1), 1 - v);
         }
       }
       for (let iv = 0; iv < segsV; iv++) {
-        for (let iu = 0; iu < segsU; iu++) {
+        for (let iu = 0; iu < uCount - 1; iu++) {
           const a = iv * uCount + iu;
           const b = a + 1;
           const c = a + uCount;
@@ -836,36 +822,32 @@ function SpilloverCornerCascadeMesh({
     };
 
     const sheet = build(1, 1);
-    const veil = build(1.03, 0.98);
+    const veil = build(1.04, 0.98);
 
-    // Crest foam arc hugging the lip
+    // Thin foam strip along the crest lip
     const foamPos: number[] = [];
     const foamUv: number[] = [];
     const foamIdx: number[] = [];
     const foamRows = 2;
     const foamH = Math.min(0.035, h * 0.1);
-    const foamU = segsU + 1;
     for (let iv = 0; iv <= foamRows; iv++) {
       const v = iv / foamRows;
       const y = topY - v * foamH;
-      const r = lipR + 0.004;
-      for (let iu = 0; iu < foamU; iu++) {
-        const u = iu / segsU;
-        const ang = ang0 + dAng * u;
-        const plan = {
-          x: desc.cornerMm.x + Math.cos(ang) * r * 1000,
-          y: desc.cornerMm.y + Math.sin(ang) * r * 1000,
-        };
-        const xz = planToWorldXZ(plan);
+      for (let iu = 0; iu < uCount; iu++) {
+        const s = crest[iu];
+        const xz = planToWorldXZ({
+          x: s.x + s.nx * 4,
+          y: s.y + s.ny * 4,
+        });
         foamPos.push(xz.x, y, xz.z);
-        foamUv.push(u, 1 - v);
+        foamUv.push(iu / Math.max(1, uCount - 1), 1 - v);
       }
     }
     for (let iv = 0; iv < foamRows; iv++) {
-      for (let iu = 0; iu < segsU; iu++) {
-        const a = iv * foamU + iu;
+      for (let iu = 0; iu < uCount - 1; iu++) {
+        const a = iv * uCount + iu;
         const b = a + 1;
-        const c = a + foamU;
+        const c = a + uCount;
         const d = c + 1;
         foamIdx.push(a, c, b, b, c, d);
       }
@@ -887,6 +869,8 @@ function SpilloverCornerCascadeMesh({
     },
     [sheetGeo, veilGeo, foamGeo],
   );
+
+  if (!desc.crest.length) return null;
 
   return (
     <group>
@@ -1649,9 +1633,9 @@ function SceneMeshes({
             />
           );
         }
-        if (m.kind === "spilloverCorner") {
+        if (m.kind === "spilloverRibbon") {
           return (
-            <SpilloverCornerCascadeMesh
+            <SpilloverRibbonMesh
               key={m.id}
               desc={m}
               selected={selected}

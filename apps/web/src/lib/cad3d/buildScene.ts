@@ -180,29 +180,27 @@ export type BoxDescriptor = {
 } & Selectable;
 
 /**
- * Curved spa spillover at a corner where two weirs meet.
- * Plan normals point outward (toward the pool); the mesh sweeps the exterior arc.
+ * Continuous spa spillover curtain along a crest polyline (plan mm).
+ * Used for connected weirs so water reads as one flowing sheet around corners.
  */
-export type SpilloverCornerDescriptor = {
-  kind: "spilloverCorner";
+export type SpilloverRibbonDescriptor = {
+  kind: "spilloverRibbon";
   id: string;
   material: "spilloverWater";
-  /** Spa outline corner in plan mm. */
-  cornerMm: PointMm;
-  /** Outward plan normal of the first weir. */
-  normal0: PointMm;
-  /** Outward plan normal of the second weir. */
-  normal1: PointMm;
-  /** World Y of weir crest (top of sheet). */
+  /**
+   * Dense crest samples in plan mm. Each has position on the lip and a unit
+   * outward normal (toward the pool).
+   */
+  crest: Array<{ x: number; y: number; nx: number; ny: number }>;
   crestY: number;
-  /** World Y where the sheet meets the pool water. */
   poolWaterY: number;
-  /** Radius at the lip (m) — typically ~ wall thickness / 2. */
-  lipRadiusM: number;
   /** Extra radial throw at the pool (m). */
   flareM: number;
   opacity?: number;
 } & Selectable;
+
+/** @deprecated Prefer SpilloverRibbonDescriptor — kept for type compatibility. */
+export type SpilloverCornerDescriptor = SpilloverRibbonDescriptor;
 
 /**
  * Racked fence / glass panel: top & bottom follow grade, vertical edges stay plumb.
@@ -368,7 +366,7 @@ export type TerrainDescriptor = {
 export type MeshDescriptor =
   | ExtrudeDescriptor
   | BoxDescriptor
-  | SpilloverCornerDescriptor
+  | SpilloverRibbonDescriptor
   | FloorDescriptor
   | WaterBodyDescriptor
   | TubeDescriptor
@@ -569,6 +567,323 @@ function pushWallRing(
 
 const BASIN_FLOOR_THICKNESS_M = 0.14;
 
+/** Prefer cascade normal pointing toward the pool (outside the spa). */
+function cascadeOutwardNormal(
+  openingA: PointMm,
+  openingB: PointMm,
+  spaOutline: PointMm[],
+): { nx: number; ny: number } {
+  const len = Math.hypot(openingB.x - openingA.x, openingB.y - openingA.y) || 1;
+  const tx = (openingB.x - openingA.x) / len;
+  const ty = (openingB.y - openingA.y) / len;
+  let nx = -ty;
+  let ny = tx;
+  const mid = {
+    x: (openingA.x + openingB.x) / 2,
+    y: (openingA.y + openingB.y) / 2,
+  };
+  const probe = { x: mid.x + nx * 80, y: mid.y + ny * 80 };
+  if (pointInPolygon(probe, spaOutline)) {
+    nx = -nx;
+    ny = -ny;
+  }
+  return { nx, ny };
+}
+
+type CrestSample = { x: number; y: number; nx: number; ny: number };
+
+function pushCrestSample(
+  out: CrestSample[],
+  sample: CrestSample,
+  minDistMm = 8,
+) {
+  const last = out[out.length - 1];
+  if (
+    last &&
+    Math.hypot(sample.x - last.x, sample.y - last.y) < minDistMm
+  ) {
+    // Keep the freshest normal at near-duplicates (important at corners).
+    last.nx = sample.nx;
+    last.ny = sample.ny;
+    last.x = sample.x;
+    last.y = sample.y;
+    return;
+  }
+  out.push(sample);
+}
+
+function pushCrestSegment(
+  out: CrestSample[],
+  a: PointMm,
+  b: PointMm,
+  nx: number,
+  ny: number,
+  lipOffsetMm: number,
+  spacingMm: number,
+) {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (len < 20) return;
+  const n = Math.max(2, Math.ceil(len / spacingMm));
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    pushCrestSample(out, {
+      x: a.x + (b.x - a.x) * t + nx * lipOffsetMm,
+      y: a.y + (b.y - a.y) * t + ny * lipOffsetMm,
+      nx,
+      ny,
+    });
+  }
+}
+
+/** Walk the lip from the current crest tip to a target sample so gaps close. */
+function pushCrestBridge(
+  out: CrestSample[],
+  target: CrestSample,
+  spacingMm: number,
+) {
+  const last = out[out.length - 1];
+  if (!last) {
+    out.push(target);
+    return;
+  }
+  const len = Math.hypot(target.x - last.x, target.y - last.y);
+  if (len < 8) {
+    pushCrestSample(out, target, 0);
+    return;
+  }
+  const steps = Math.max(1, Math.ceil(len / spacingMm));
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const nx = last.nx + (target.nx - last.nx) * t;
+    const ny = last.ny + (target.ny - last.ny) * t;
+    const nLen = Math.hypot(nx, ny) || 1;
+    pushCrestSample(out, {
+      x: last.x + (target.x - last.x) * t,
+      y: last.y + (target.y - last.y) * t,
+      nx: nx / nLen,
+      ny: ny / nLen,
+    });
+  }
+}
+
+function pushCrestCornerArc(
+  out: CrestSample[],
+  vertex: PointMm,
+  n0: { nx: number; ny: number },
+  n1: { nx: number; ny: number },
+  lipOffsetMm: number,
+  spacingMm: number,
+) {
+  let ang0 = Math.atan2(n0.ny, n0.nx);
+  let ang1 = Math.atan2(n1.ny, n1.nx);
+  let dAng = ang1 - ang0;
+  while (dAng > Math.PI) dAng -= Math.PI * 2;
+  while (dAng < -Math.PI) dAng += Math.PI * 2;
+  if (Math.abs(dAng) < 1e-3) dAng = Math.PI / 2;
+  if (Math.abs(dAng) > Math.PI * 0.95) {
+    dAng = dAng > 0 ? dAng - Math.PI * 2 : dAng + Math.PI * 2;
+  }
+
+  // Close any leftover gap from the straight weir into the corner lip.
+  pushCrestBridge(
+    out,
+    {
+      x: vertex.x + n0.nx * lipOffsetMm,
+      y: vertex.y + n0.ny * lipOffsetMm,
+      nx: n0.nx,
+      ny: n0.ny,
+    },
+    spacingMm,
+  );
+
+  const arcLen = Math.abs(dAng) * lipOffsetMm;
+  const steps = Math.max(10, Math.ceil(Math.max(arcLen, 1) / Math.max(40, spacingMm * 0.55)));
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const ang = ang0 + dAng * t;
+    const nx = Math.cos(ang);
+    const ny = Math.sin(ang);
+    pushCrestSample(out, {
+      x: vertex.x + nx * lipOffsetMm,
+      y: vertex.y + ny * lipOffsetMm,
+      nx,
+      ny,
+    });
+  }
+}
+
+/**
+ * Order sheet-style spills into contiguous chains around the spa ring, then
+ * emit one continuous crest ribbon per chain (straight runs + corner arcs).
+ * Scuppers stay as discrete box cascades.
+ */
+function pushSpaSpilloverWater(
+  meshes: MeshDescriptor[],
+  opts: {
+    spills: ResolvedSpaSpillover[];
+    spaOutline: PointMm[];
+    crestY: number;
+    poolWaterTopY: number;
+    wallThicknessMm: number;
+    select: SceneSelection;
+    idPrefix: string;
+  },
+) {
+  if (!opts.spills.length) return;
+  const pts = ringPoints(opts.spaOutline);
+  const n = pts.length;
+  if (n < 3) return;
+
+  const lipOffsetMm = Math.max(12, opts.wallThicknessMm * 0.52);
+  const spacingMm = 55;
+  const topY = opts.crestY - 0.008;
+  const bottomY = opts.poolWaterTopY + 0.004;
+  const drop = Math.max(0.05, topY - bottomY);
+  const flareM = Math.max(0.1, Math.min(0.34, drop * 0.95));
+  const sheetOpacity = opts.spills[0]?.style === "sheer" ? 0.55 : 0.78;
+
+  // Discrete scuppers keep the old per-opening boxes.
+  const scupperSpills = opts.spills.filter((s) => s.style === "scuppers");
+  for (const spill of scupperSpills) {
+    pushSpilloverCascades(meshes, {
+      spill,
+      spaOutline: opts.spaOutline,
+      crestY: opts.crestY,
+      poolWaterTopY: opts.poolWaterTopY,
+      wallThicknessMm: opts.wallThicknessMm,
+      select: opts.select,
+      idPrefix: `${opts.idPrefix}_scup_e${spill.edgeIndex}`,
+    });
+  }
+
+  const sheetSpills = opts.spills.filter((s) => s.style !== "scuppers");
+  if (!sheetSpills.length) return;
+
+  const byEdge = new Map(sheetSpills.map((s) => [s.edgeIndex, s]));
+  const visited = new Set<number>();
+  let ribbonIdx = 0;
+
+  const openingAlongEdge = (
+    spill: ResolvedSpaSpillover,
+  ): { a: PointMm; b: PointMm; nx: number; ny: number } | null => {
+    const opening = spill.openings[0] ?? { a: spill.a, b: spill.b };
+    const len = Math.hypot(opening.b.x - opening.a.x, opening.b.y - opening.a.y);
+    if (len < 40) return null;
+    const { nx, ny } = cascadeOutwardNormal(
+      opening.a,
+      opening.b,
+      opts.spaOutline,
+    );
+    // Orient a→b to match spa ring direction (edgeA → edgeB).
+    const edgeA = pts[spill.edgeIndex];
+    const edgeB = pts[(spill.edgeIndex + 1) % n];
+    const ex = edgeB.x - edgeA.x;
+    const ey = edgeB.y - edgeA.y;
+    const ox = opening.b.x - opening.a.x;
+    const oy = opening.b.y - opening.a.y;
+    if (ex * ox + ey * oy < 0) {
+      return { a: opening.b, b: opening.a, nx, ny };
+    }
+    return { a: opening.a, b: opening.b, nx, ny };
+  };
+
+  for (const start of sheetSpills) {
+    if (visited.has(start.edgeIndex)) continue;
+
+    // Walk backward to chain start.
+    let head = start.edgeIndex;
+    for (;;) {
+      const prev = (head - 1 + n) % n;
+      if (!byEdge.has(prev) || visited.has(prev)) break;
+      head = prev;
+      if (head === start.edgeIndex) break;
+    }
+
+    const chain: ResolvedSpaSpillover[] = [];
+    let cur = head;
+    for (;;) {
+      const spill = byEdge.get(cur);
+      if (!spill || visited.has(cur)) break;
+      visited.add(cur);
+      chain.push(spill);
+      const next = (cur + 1) % n;
+      if (!byEdge.has(next)) break;
+      cur = next;
+      if (cur === head) break;
+    }
+
+    const crest: CrestSample[] = [];
+    for (let i = 0; i < chain.length; i++) {
+      const spill = chain[i];
+      const seg = openingAlongEdge(spill);
+      if (!seg) continue;
+      // After a corner arc, close into this run's start before sampling it.
+      if (crest.length) {
+        pushCrestBridge(
+          crest,
+          {
+            x: seg.a.x + seg.nx * lipOffsetMm,
+            y: seg.a.y + seg.ny * lipOffsetMm,
+            nx: seg.nx,
+            ny: seg.ny,
+          },
+          spacingMm,
+        );
+      }
+      pushCrestSegment(
+        crest,
+        seg.a,
+        seg.b,
+        seg.nx,
+        seg.ny,
+        lipOffsetMm,
+        spacingMm,
+      );
+      const nextSpill = chain[i + 1];
+      if (!nextSpill) continue;
+      const nextSeg = openingAlongEdge(nextSpill);
+      if (!nextSeg) continue;
+      const corner = pts[nextSpill.edgeIndex];
+      pushCrestCornerArc(
+        crest,
+        corner,
+        { nx: seg.nx, ny: seg.ny },
+        { nx: nextSeg.nx, ny: nextSeg.ny },
+        lipOffsetMm,
+        spacingMm,
+      );
+    }
+
+    if (crest.length < 3) {
+      // Fallback: emit per-edge boxes if ribbon failed.
+      for (const spill of chain) {
+        pushSpilloverCascades(meshes, {
+          spill,
+          spaOutline: opts.spaOutline,
+          crestY: opts.crestY,
+          poolWaterTopY: opts.poolWaterTopY,
+          wallThicknessMm: opts.wallThicknessMm,
+          select: opts.select,
+          idPrefix: `${opts.idPrefix}_e${spill.edgeIndex}`,
+        });
+      }
+      continue;
+    }
+
+    meshes.push({
+      kind: "spilloverRibbon",
+      id: `${opts.idPrefix}_ribbon_${ribbonIdx++}`,
+      material: "spilloverWater",
+      crest,
+      crestY: topY,
+      poolWaterY: bottomY,
+      flareM,
+      opacity: sheetOpacity,
+      select: opts.select,
+    });
+  }
+}
+
 /** Thin cascading water sheets / scuppers from spa weir down to pool water. */
 function pushSpilloverCascades(
   meshes: MeshDescriptor[],
@@ -641,191 +956,6 @@ function pushSpilloverCascades(
       opacity: opts.spill.style === "sheer" ? 0.55 : 0.72,
       select: opts.select,
     });
-  }
-}
-
-/** Prefer cascade normal pointing toward the pool (outside the spa). */
-function cascadeOutwardNormal(
-  openingA: PointMm,
-  openingB: PointMm,
-  spaOutline: PointMm[],
-): { nx: number; ny: number } {
-  const len = Math.hypot(openingB.x - openingA.x, openingB.y - openingA.y) || 1;
-  const tx = (openingB.x - openingA.x) / len;
-  const ty = (openingB.y - openingA.y) / len;
-  let nx = -ty;
-  let ny = tx;
-  const mid = {
-    x: (openingA.x + openingB.x) / 2,
-    y: (openingA.y + openingB.y) / 2,
-  };
-  const probe = { x: mid.x + nx * 80, y: mid.y + ny * 80 };
-  if (pointInPolygon(probe, spaOutline)) {
-    nx = -nx;
-    ny = -ny;
-  }
-  return { nx, ny };
-}
-
-/**
- * Pull straight weir openings back from shared corners so the curved corner
- * curtain owns the wrap (avoids a hard vertical sheet edge at the vertex).
- */
-function insetSpillOpeningsAtCorners(
-  spills: ResolvedSpaSpillover[],
-  spaOutline: PointMm[],
-  insetMm: number,
-): ResolvedSpaSpillover[] {
-  if (spills.length < 2 || insetMm < 1) return spills;
-  const pts = ringPoints(spaOutline);
-  const n = pts.length;
-  if (n < 3) return spills;
-
-  const cornerVerts = new Set<string>();
-  const keyOf = (p: PointMm) => `${Math.round(p.x)}:${Math.round(p.y)}`;
-  const byEdge = new Map(spills.map((s) => [s.edgeIndex, s]));
-  for (const s of spills) {
-    const next = (s.edgeIndex + 1) % n;
-    if (byEdge.has(next)) cornerVerts.add(keyOf(pts[next]));
-  }
-
-  const insetEnd = (from: PointMm, to: PointMm, corner: PointMm): PointMm => {
-    // If `to` is at the corner, pull it toward `from`.
-    if (Math.hypot(to.x - corner.x, to.y - corner.y) > 160) return to;
-    const len = Math.hypot(to.x - from.x, to.y - from.y) || 1;
-    const pull = Math.min(insetMm, len * 0.35);
-    const ux = (from.x - to.x) / len;
-    const uy = (from.y - to.y) / len;
-    return { x: to.x + ux * pull, y: to.y + uy * pull };
-  };
-
-  return spills.map((spill) => {
-    const edgeA = pts[spill.edgeIndex];
-    const edgeB = pts[(spill.edgeIndex + 1) % n];
-    const startCorner = cornerVerts.has(keyOf(edgeA)) ? edgeA : null;
-    const endCorner = cornerVerts.has(keyOf(edgeB)) ? edgeB : null;
-    if (!startCorner && !endCorner) return spill;
-
-    const openings = spill.openings.map((o) => {
-      let a = o.a;
-      let b = o.b;
-      if (startCorner) {
-        // Whichever endpoint is nearer the start corner gets inset.
-        if (
-          Math.hypot(a.x - startCorner.x, a.y - startCorner.y) <=
-          Math.hypot(b.x - startCorner.x, b.y - startCorner.y)
-        ) {
-          a = insetEnd(b, a, startCorner);
-        } else {
-          b = insetEnd(a, b, startCorner);
-        }
-      }
-      if (endCorner) {
-        if (
-          Math.hypot(a.x - endCorner.x, a.y - endCorner.y) <=
-          Math.hypot(b.x - endCorner.x, b.y - endCorner.y)
-        ) {
-          a = insetEnd(b, a, endCorner);
-        } else {
-          b = insetEnd(a, b, endCorner);
-        }
-      }
-      return { a, b };
-    });
-    return { ...spill, openings };
-  });
-}
-
-/**
- * Curved spillover curtain where two weirs meet — sweeps the exterior corner
- * arc with the same free-fall pour profile as the straight sheets.
- */
-function pushSpilloverCornerCascades(
-  meshes: MeshDescriptor[],
-  opts: {
-    spills: ResolvedSpaSpillover[];
-    spaOutline: PointMm[];
-    crestY: number;
-    poolWaterTopY: number;
-    wallThicknessMm: number;
-    select: SceneSelection;
-    idPrefix: string;
-  },
-) {
-  if (opts.spills.length < 2) return;
-  const pts = ringPoints(opts.spaOutline);
-  const n = pts.length;
-  if (n < 3) return;
-
-  const byEdge = new Map(opts.spills.map((s) => [s.edgeIndex, s]));
-  const near = (a: PointMm, b: PointMm, tol = 140) =>
-    Math.hypot(a.x - b.x, a.y - b.y) <= tol;
-
-  let cornerIdx = 0;
-  const seen = new Set<string>();
-
-  const emitCorner = (
-    vertex: PointMm,
-    spill: ResolvedSpaSpillover,
-    next: ResolvedSpaSpillover,
-  ) => {
-    const key = `${Math.round(vertex.x)}:${Math.round(vertex.y)}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-
-    const n0 = cascadeOutwardNormal(spill.a, spill.b, opts.spaOutline);
-    const n1 = cascadeOutwardNormal(next.a, next.b, opts.spaOutline);
-    // Ensure both normals point toward the pool / away from spa interior.
-    const n0p = { x: n0.nx, y: n0.ny };
-    const n1p = { x: n1.nx, y: n1.ny };
-
-    const lipRadiusM = Math.max(0.04, mmToMeters(opts.wallThicknessMm) * 0.55);
-    const drop = Math.max(0.05, opts.crestY - opts.poolWaterTopY);
-    const flareM = Math.max(0.1, Math.min(0.34, drop * 0.95));
-
-    meshes.push({
-      kind: "spilloverCorner",
-      id: `${opts.idPrefix}_${cornerIdx++}`,
-      material: "spilloverWater",
-      cornerMm: vertex,
-      normal0: n0p,
-      normal1: n1p,
-      crestY: opts.crestY - 0.008,
-      poolWaterY: opts.poolWaterTopY + 0.004,
-      lipRadiusM,
-      flareM,
-      opacity: spill.style === "sheer" ? 0.55 : 0.78,
-      select: opts.select,
-    });
-  };
-
-  for (const spill of opts.spills) {
-    const nextIdx = (spill.edgeIndex + 1) % n;
-    const next = byEdge.get(nextIdx);
-    if (next) {
-      emitCorner(pts[nextIdx], spill, next);
-      continue;
-    }
-
-    for (const other of opts.spills) {
-      if (other.edgeIndex === spill.edgeIndex) continue;
-      const hits =
-        (near(spill.a, other.a) && spill.a) ||
-        (near(spill.a, other.b) && spill.a) ||
-        (near(spill.b, other.a) && spill.b) ||
-        (near(spill.b, other.b) && spill.b);
-      if (!hits || typeof hits === "boolean") continue;
-      let vertex = hits;
-      let bestD = Infinity;
-      for (const p of pts) {
-        const d = Math.hypot(p.x - hits.x, p.y - hits.y);
-        if (d < bestD) {
-          bestD = d;
-          vertex = p;
-        }
-      }
-      emitCorner(vertex, spill, other);
-    }
   }
 }
 
@@ -2317,30 +2447,14 @@ export function buildSceneModel(
           });
         }
 
-        const cascadeSpills = insetSpillOpeningsAtCorners(
-          spills,
-          outer,
-          Math.max(180, wallT * 0.85),
-        );
-        for (const spill of cascadeSpills) {
-          pushSpilloverCascades(meshes, {
-            spill,
-            spaOutline: outer,
-            crestY: Math.max(crestY, spaWaterTop),
-            poolWaterTopY: waterTopY,
-            wallThicknessMm: wallT,
-            select,
-            idPrefix: `spa_${body.id}_e${spill.edgeIndex}`,
-          });
-        }
-        pushSpilloverCornerCascades(meshes, {
+        pushSpaSpilloverWater(meshes, {
           spills,
           spaOutline: outer,
           crestY: Math.max(crestY, spaWaterTop),
           poolWaterTopY: waterTopY,
           wallThicknessMm: wallT,
           select,
-          idPrefix: `spa_${body.id}_corner`,
+          idPrefix: `spa_${body.id}`,
         });
       } else {
         const profile = depthProfileForBody(body);
