@@ -97,9 +97,50 @@ function spaEdgeOutwardNormal(
 }
 
 /**
- * Interval along a spa edge that intersects the pool: faces into pool water,
- * lies inside the pool footprint, or is colinear with a pool edge.
- * Returns the span from the first to last intersecting sample on that edge.
+ * True when the spa edge's outward side faces into pool water along the
+ * overlap (not merely colinear with the pool outline / coping).
+ * Deck-facing edges that share the pool's outer edge must return false.
+ */
+function spaEdgeFacesPoolWater(
+  edgeA: PointMm,
+  edgeB: PointMm,
+  spaRing: PointMm[],
+  poolOutline: PointMm[],
+  overlapT0: number,
+  overlapT1: number,
+): boolean {
+  const { nx, ny } = spaEdgeOutwardNormal(edgeA, edgeB, spaRing);
+  const span = Math.max(0, overlapT1 - overlapT0);
+  if (span < MIN_OVERLAP_MM) return false;
+
+  const samples = Math.max(3, Math.ceil(span / 80));
+  let hits = 0;
+  for (let s = 0; s <= samples; s++) {
+    const t = overlapT0 + (s / samples) * span;
+    const p = edgePoint(edgeA, edgeB, t);
+    // Prefer a probe just outside the shell; also try a bit farther in case
+    // the sample sits exactly on the pool boundary.
+    const near = {
+      x: p.x + nx * FACE_PROBE_MM,
+      y: p.y + ny * FACE_PROBE_MM,
+    };
+    const far = {
+      x: p.x + nx * FACE_PROBE_MM * 3,
+      y: p.y + ny * FACE_PROBE_MM * 3,
+    };
+    if (pointInPolygon(near, poolOutline) || pointInPolygon(far, poolOutline)) {
+      hits += 1;
+    }
+  }
+  // Majority of the overlap must face pool water (corner samples alone ≠ weir).
+  return hits > samples / 2;
+}
+
+/**
+ * Interval along a spa edge that faces into pool water.
+ * Returns the span from the first to last outward-probe hit on that edge.
+ * Being on/inside the pool footprint without facing water is not enough —
+ * that incorrectly treats deck-facing edges that share the pool coping.
  */
 function spaEdgePoolIntersectInterval(
   edgeA: PointMm,
@@ -122,9 +163,7 @@ function spaEdgePoolIntersectInterval(
       x: p.x + nx * FACE_PROBE_MM,
       y: p.y + ny * FACE_PROBE_MM,
     };
-    const intersects =
-      pointInPolygon(probeOut, poolOutline) || pointInPolygon(p, poolOutline);
-    if (intersects) {
+    if (pointInPolygon(probeOut, poolOutline)) {
       hits += 1;
       tMin = Math.min(tMin, t);
       tMax = Math.max(tMax, t);
@@ -172,7 +211,7 @@ export function sharedSpilloverEdges(
       if (!best || iv[1] - iv[0] > best[1] - best[0]) best = iv;
     }
 
-    // 2) Any spa edge that intersects / faces the pool (inset & overlapping joins).
+    // 2) Any spa edge that faces into the pool (inset & overlapping joins).
     const face = spaEdgePoolIntersectInterval(
       edgeA,
       edgeB,
@@ -186,6 +225,21 @@ export function sharedSpilloverEdges(
     if (!best) continue;
     const overlapLenMm = best[1] - best[0];
     if (overlapLenMm < MIN_OVERLAP_MM) continue;
+
+    // Colinear with the pool coping is not enough — must spill into water.
+    if (
+      !spaEdgeFacesPoolWater(
+        edgeA,
+        edgeB,
+        spaRing,
+        pool.outline,
+        best[0],
+        best[1],
+      )
+    ) {
+      continue;
+    }
+
     out.push({
       poolId: pool.id,
       edgeIndex: i,

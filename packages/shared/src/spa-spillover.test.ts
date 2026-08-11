@@ -164,6 +164,37 @@ describe("spa spillover", () => {
     assert.ok(resolveSpaSpillover(spa, [pool]));
   });
 
+  it("skips deck-facing edges that only share the pool coping", () => {
+    // Spa inset into the pool corner with its right edge colinear with the
+    // pool's outer right edge — that side faces the patio, not water.
+    const pool = poolBody("pool_1", rect(0, 0, 8000, 4000));
+    const spa = spaBody("spa_1", rect(5500, 2500, 8000, 5000));
+    const edges = listSpaSpilloverEdges(spa, [pool]);
+    assert.ok(edges.length >= 1, "expected pool-facing weirs");
+
+    const rightEdge = edges.find((e) => {
+      const midX = (e.edgeA.x + e.edgeB.x) / 2;
+      return Math.abs(midX - 8000) < 1;
+    });
+    assert.equal(
+      rightEdge,
+      undefined,
+      "deck-facing spa edge on pool coping must not get a weir",
+    );
+
+    for (const e of edges) {
+      const mid = {
+        x: (e.edgeA.x + e.edgeB.x) / 2,
+        y: (e.edgeA.y + e.edgeB.y) / 2,
+      };
+      // Remaining candidates should be the inward (left/bottom) faces.
+      assert.ok(
+        mid.x < 8000 - 50 || mid.y < 4000 - 50,
+        `unexpected edge mid ${mid.x},${mid.y}`,
+      );
+    }
+  });
+
   it("splits scuppers into N openings", () => {
     const a = { x: 0, y: 0 };
     const b = { x: 3000, y: 0 };
