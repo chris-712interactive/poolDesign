@@ -25,6 +25,7 @@ import {
   spaShellHeightMm,
   spaWallThicknessMm,
 } from "./spa-defaults";
+import { getWaterlineTile } from "./waterline-tiles";
 import type { UnitSystem } from "./units";
 import { mmToInches } from "./units";
 
@@ -285,7 +286,18 @@ export function buildTakeoff(
     "waterline_tile",
     mmToLf(waterPerimeterMm),
     "lf",
-    "Exposed pool/spa perimeter (shared walls deducted)",
+    (() => {
+      const ids = new Set(
+        design.poolBodies
+          .map((p) => p.waterlineTileId)
+          .filter((id): id is string => !!id),
+      );
+      if (ids.size === 1) {
+        const tile = getWaterlineTile([...ids][0]);
+        return `Exposed perimeter — ${tile.name}`;
+      }
+      return "Exposed pool/spa perimeter (shared walls deducted)";
+    })(),
   );
   push(
     "coping",

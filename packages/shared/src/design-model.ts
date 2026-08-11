@@ -57,6 +57,11 @@ export type PoolBody = {
    * shares a wall with a pool; set enabled: false to disable.
    */
   spillover?: SpaSpillover;
+  /**
+   * Waterline tile finish id from the waterline tile library.
+   * Visual only — takeoff still uses catalog `waterline_tile` LF.
+   */
+  waterlineTileId?: string;
 };
 
 /** Visual style of the spa→pool cascade. */

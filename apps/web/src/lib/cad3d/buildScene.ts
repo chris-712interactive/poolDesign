@@ -155,6 +155,8 @@ export type BoxDescriptor = {
   axisX?: { x: number; z: number };
   axisZ?: { x: number; z: number };
   opacity?: number;
+  /** Waterline tile finish id (when material === "waterline"). */
+  waterlineTileId?: string;
   /** When set, render a stylized catalog stand-in instead of a plain box. */
   catalogItemId?: string;
   /** Door / window variant for OpeningMesh. */
@@ -487,6 +489,8 @@ function pushWallRing(
      * from edge start). Used for spa spillover weir notches.
      */
     edgeOmits?: { edgeIndex: number; intervals: [number, number][] }[];
+    /** Waterline tile finish (material === "waterline"). */
+    waterlineTileId?: string;
   },
 ) {
   const pts = ringPoints(opts.outlineMm);
@@ -561,6 +565,7 @@ function pushWallRing(
         rotationY: 0,
         axisX: planDirToWorldXZ(tx, ty),
         axisZ: planDirToWorldXZ(nx, ny),
+        waterlineTileId: opts.waterlineTileId,
         select: opts.select,
       });
     }
@@ -2452,6 +2457,22 @@ export function buildSceneModel(
           });
         }
 
+        // Waterline tile on the spa inner face (~6″ band at freeboard).
+        {
+          const tileH = mmToMeters(150);
+          pushWallRing(meshes, {
+            outlineMm: outer,
+            bottomY: spaWaterTop - tileH * 0.85,
+            height: tileH,
+            thicknessMm: wallT * 0.45,
+            material: "waterline",
+            waterlineTileId: body.waterlineTileId,
+            select,
+            idPrefix: `spa_tile_${body.id}`,
+            inward: true,
+          });
+        }
+
         pushSpaSpilloverWater(meshes, {
           spills,
           spaOutline: outer,
@@ -2556,6 +2577,7 @@ export function buildSceneModel(
           height: tileH,
           thicknessMm: wallT * 0.55,
           material: "waterline",
+          waterlineTileId: body.waterlineTileId,
           select,
           idPrefix: `pool_tile_${body.id}`,
           inward: true,

@@ -61,6 +61,7 @@ import {
   makeWaterlineTileTexture,
 } from "@/lib/cad3d/proceduralTextures";
 import { getPatioFinishTexture } from "@/lib/cad3d/patioFinishTextures";
+import { getWaterlineTileTexture } from "@/lib/cad3d/waterlineTileTextures";
 import { OpeningMesh } from "@/lib/cad3d/OpeningMesh";
 import {
   BasinCausticOverlay,
@@ -330,6 +331,7 @@ function SelectableMaterial({
   /** Water volume fill vs top surface — different depth/side settings. */
   waterLayer,
   patioFinishId,
+  waterlineTileId,
   colorHex,
 }: {
   material: SceneMaterialKey;
@@ -337,6 +339,7 @@ function SelectableMaterial({
   selected: boolean;
   waterLayer?: "volume" | "surface";
   patioFinishId?: string;
+  waterlineTileId?: string;
   colorHex?: string;
 }) {
   const clippingPlanes = useContext(ClipPlanesContext);
@@ -347,8 +350,17 @@ function SelectableMaterial({
       material === "patio" ? getPatioFinishTexture(patioFinishId) : null,
     [material, patioFinishId],
   );
+  const waterlinePair = useMemo(
+    () =>
+      material === "waterline"
+        ? getWaterlineTileTexture(waterlineTileId)
+        : null,
+    [material, waterlineTileId],
+  );
   const pair =
-    patioPair ?? (mat.map && textures ? textures[mat.map] : null);
+    patioPair ??
+    waterlinePair ??
+    (mat.map && textures ? textures[mat.map] : null);
   const isWater =
     material === "poolWater" ||
     material === "spaWater" ||
@@ -593,6 +605,7 @@ function PlainBoxMesh({
           opacity={desc.opacity}
           selected={selected}
           colorHex={desc.colorHex}
+          waterlineTileId={desc.waterlineTileId}
         />
       </mesh>
     </group>

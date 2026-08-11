@@ -22,3 +22,4 @@ export * from "./scene3d";
 export * from "./water-geometry";
 export * from "./spa-spillover";
 export * from "./depth-profile";
+export * from "./waterline-tiles";

@@ -70,6 +70,10 @@ import {
   isPatioFinishId,
 } from "./patio-finishes";
 import {
+  DEFAULT_WATERLINE_TILE_ID,
+  isWaterlineTileId,
+} from "./waterline-tiles";
+import {
   defaultFabricFinishId,
   defaultFrameFinishId,
   furnitureFinishRoles,
@@ -358,6 +362,10 @@ export function normalizeDesignDocument(
               : p.shellHeightMm,
           spillover:
             kind === "spa" ? normalizeSpaSpillover(p.spillover) : undefined,
+          waterlineTileId:
+            p.waterlineTileId && isWaterlineTileId(p.waterlineTileId)
+              ? p.waterlineTileId
+              : DEFAULT_WATERLINE_TILE_ID,
         };
         if (
           kind === "pool" &&

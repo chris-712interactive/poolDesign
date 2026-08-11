@@ -159,6 +159,7 @@ import { FenceFinishPicker } from "@/components/FenceFinishPicker";
 import { HouseFinishPicker } from "@/components/HouseFinishPicker";
 import { FurnitureFinishPicker } from "@/components/FurnitureFinishPicker";
 import { PatioFinishPicker } from "@/components/PatioFinishPicker";
+import { WaterlineTilePicker } from "@/components/WaterlineTilePicker";
 import {
   catalogIdForPadTool,
   isPadEquipTool,
@@ -3174,6 +3175,25 @@ export function CadWorkspace({
                         }
                       />
                     )}
+                    <div className="stack" style={{ gap: "0.4rem" }}>
+                      <strong style={{ fontSize: "0.9rem" }}>
+                        Waterline tile
+                      </strong>
+                      <WaterlineTilePicker
+                        key={`wl-tile-${selectedPool.id}-${selectedPool.waterlineTileId ?? "default"}`}
+                        value={selectedPool.waterlineTileId}
+                        onChange={(waterlineTileId) =>
+                          commitDesign({
+                            ...design,
+                            poolBodies: design.poolBodies.map((p) =>
+                              p.id === selectedPool.id
+                                ? { ...p, waterlineTileId }
+                                : p,
+                            ),
+                          })
+                        }
+                      />
+                    </div>
                     {waterBodyKind(selectedPool) === "spa" && (
                       <SpaShellFields
                         key={`spa-shell-${selectedPool.id}-${spaWallThicknessMm(selectedPool)}-${spaShellHeightMm(selectedPool)}-${JSON.stringify(selectedPool.spillover ?? null)}`}
