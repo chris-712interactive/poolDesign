@@ -641,6 +641,97 @@ function cascadeOutwardNormal(
   return { nx, ny };
 }
 
+/**
+ * Fill the miter gap where two adjacent weirs meet at a spa corner so water
+ * wraps over the corner cover instead of leaving a dry post.
+ */
+function pushSpilloverCornerCascades(
+  meshes: MeshDescriptor[],
+  opts: {
+    spills: ResolvedSpaSpillover[];
+    spaOutline: PointMm[];
+    crestY: number;
+    poolWaterTopY: number;
+    wallThicknessMm: number;
+    select: SceneSelection;
+    idPrefix: string;
+  },
+) {
+  if (opts.spills.length < 2) return;
+  const pts = ringPoints(opts.spaOutline);
+  const n = pts.length;
+  if (n < 3) return;
+
+  const byEdge = new Map(opts.spills.map((s) => [s.edgeIndex, s]));
+  let cornerIdx = 0;
+  for (const spill of opts.spills) {
+    const nextIdx = (spill.edgeIndex + 1) % n;
+    const next = byEdge.get(nextIdx);
+    if (!next) continue;
+
+    const vertex = pts[nextIdx];
+    const n0 = cascadeOutwardNormal(spill.a, spill.b, opts.spaOutline);
+    const n1 = cascadeOutwardNormal(next.a, next.b, opts.spaOutline);
+    let nx = n0.nx + n1.nx;
+    let ny = n0.ny + n1.ny;
+    const nLen = Math.hypot(nx, ny);
+    if (nLen < 1e-6) continue;
+    nx /= nLen;
+    ny /= nLen;
+
+    // Narrow ribbon along the angle bisector, centered on the corner.
+    const widthMm = Math.max(
+      120,
+      Math.min(opts.wallThicknessMm * 1.8, 280),
+    );
+    const tx = -ny;
+    const ty = nx;
+    const opening = {
+      a: {
+        x: vertex.x - tx * (widthMm / 2),
+        y: vertex.y - ty * (widthMm / 2),
+      },
+      b: {
+        x: vertex.x + tx * (widthMm / 2),
+        y: vertex.y + ty * (widthMm / 2),
+      },
+    };
+
+    const sheetThickMm = spill.style === "sheer" ? 12 : 18;
+    const outwardMm =
+      Math.max(10, opts.wallThicknessMm * 0.12) + sheetThickMm * 0.25;
+    const mid = {
+      x: (opening.a.x + opening.b.x) / 2 + nx * outwardMm,
+      y: (opening.a.y + opening.b.y) / 2 + ny * outwardMm,
+    };
+    const xz = planToWorldXZ(mid);
+    const topY = opts.crestY - 0.008;
+    const bottomY = opts.poolWaterTopY + 0.004;
+    const ribbonH = Math.max(0.04, topY - bottomY);
+
+    meshes.push({
+      kind: "box",
+      id: `${opts.idPrefix}_${cornerIdx++}`,
+      material: "spilloverWater",
+      position: {
+        x: xz.x,
+        y: bottomY + ribbonH / 2,
+        z: xz.z,
+      },
+      size: {
+        x: mmToMeters(widthMm),
+        y: ribbonH,
+        z: mmToMeters(sheetThickMm),
+      },
+      rotationY: 0,
+      axisX: planDirToWorldXZ(tx, ty),
+      axisZ: planDirToWorldXZ(nx, ny),
+      opacity: spill.style === "sheer" ? 0.55 : 0.72,
+      select: opts.select,
+    });
+  }
+}
+
 /** Spa floor / water / rim elevations — shared by shell meshes and fixtures. */
 function spaElevations(
   body: Parameters<typeof spaShellParams>[0],
@@ -2117,6 +2208,15 @@ export function buildSceneModel(
             idPrefix: `spa_${body.id}_e${spill.edgeIndex}`,
           });
         }
+        pushSpilloverCornerCascades(meshes, {
+          spills,
+          spaOutline: outer,
+          crestY: Math.max(crestY, spaWaterTop),
+          poolWaterTopY: waterTopY,
+          wallThicknessMm: wallT,
+          select,
+          idPrefix: `spa_${body.id}_corner`,
+        });
       } else {
         const profile = depthProfileForBody(body);
         const maxDepth = Math.max(maxDepthMmFromProfile(body), 900);

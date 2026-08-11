@@ -468,6 +468,8 @@ export function spilloverWeirConfigs(
 
 /**
  * Resolve all active spa→pool weirs (one per enabled pool-facing edge).
+ * Adjacent weirs that share a spa corner are stretched to that vertex so
+ * water wraps continuously (no dry corner post between them).
  */
 export function resolveSpaSpillovers(
   spa: PoolBody,
@@ -494,7 +496,103 @@ export function resolveSpaSpillovers(
     const resolved = resolveOneWeir(spa, edge, w, cfg);
     if (resolved) out.push(resolved);
   }
-  return out;
+  return extendAdjacentWeirsToSharedCorners(spa, edges, out, cfg);
+}
+
+/**
+ * When two enabled weirs share a spa corner, stretch both spans to that
+ * vertex so the upper wall notch and cascade wrap continuously.
+ */
+function extendAdjacentWeirsToSharedCorners(
+  spa: PoolBody,
+  edges: SharedSpilloverEdge[],
+  resolved: ResolvedSpaSpillover[],
+  cfg: SpaSpillover | undefined,
+): ResolvedSpaSpillover[] {
+  if (resolved.length < 2) return resolved;
+
+  const spaRing = openRing(spa.outline);
+  const n = spaRing.length;
+  if (n < 3) return resolved;
+
+  const byEdge = new Map(resolved.map((r) => [r.edgeIndex, r]));
+  const edgeByIndex = new Map(edges.map((e) => [e.edgeIndex, e]));
+
+  /** Per-edge: stretch weir toward start and/or end of its overlap. */
+  const stretch = new Map<number, { toStart: boolean; toEnd: boolean }>();
+  const flag = (idx: number) => {
+    let f = stretch.get(idx);
+    if (!f) {
+      f = { toStart: false, toEnd: false };
+      stretch.set(idx, f);
+    }
+    return f;
+  };
+
+  for (const r of resolved) {
+    const next = (r.edgeIndex + 1) % n;
+    const prev = (r.edgeIndex - 1 + n) % n;
+    if (byEdge.has(next)) {
+      // Shared vertex = end of this edge / start of next.
+      flag(r.edgeIndex).toEnd = true;
+      flag(next).toStart = true;
+    }
+    if (byEdge.has(prev)) {
+      flag(r.edgeIndex).toStart = true;
+      flag(prev).toEnd = true;
+    }
+  }
+
+  if (!stretch.size) return resolved;
+
+  return resolved.map((r) => {
+    const f = stretch.get(r.edgeIndex);
+    if (!f || (!f.toStart && !f.toEnd)) return r;
+    const edge = edgeByIndex.get(r.edgeIndex);
+    if (!edge) return r;
+
+    const len = segmentLengthMm(edge.edgeA, edge.edgeB) || 1;
+    const ux = (edge.edgeB.x - edge.edgeA.x) / len;
+    const uy = (edge.edgeB.y - edge.edgeA.y) / len;
+    const proj = (p: PointMm) =>
+      (p.x - edge.edgeA.x) * ux + (p.y - edge.edgeA.y) * uy;
+
+    let t0 = Math.min(proj(r.a), proj(r.b));
+    let t1 = Math.max(proj(r.a), proj(r.b));
+    if (f.toStart) t0 = edge.overlapT0;
+    if (f.toEnd) t1 = edge.overlapT1;
+    t0 = Math.max(edge.overlapT0, Math.min(t0, edge.overlapT1));
+    t1 = Math.max(edge.overlapT0, Math.min(t1, edge.overlapT1));
+    if (t1 - t0 < 50) return r;
+
+    // Already covers the needed corner(s).
+    if (
+      Math.abs(t0 - Math.min(proj(r.a), proj(r.b))) < 2 &&
+      Math.abs(t1 - Math.max(proj(r.a), proj(r.b))) < 2
+    ) {
+      return r;
+    }
+
+    const params = weirParamsFromSpan(
+      edge.overlapT0,
+      edge.overlapT1,
+      t0,
+      t1,
+    );
+    return (
+      resolveOneWeir(
+        spa,
+        edge,
+        {
+          edgeIndex: r.edgeIndex,
+          enabled: true,
+          widthMm: params.widthMm,
+          offsetMm: params.offsetMm,
+        },
+        cfg,
+      ) ?? r
+    );
+  });
 }
 
 /**

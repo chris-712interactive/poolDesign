@@ -195,6 +195,42 @@ describe("spa spillover", () => {
     }
   });
 
+  it("extends adjacent weirs to the shared corner", () => {
+    const pool = poolBody("pool_1", rect(0, 0, 8000, 4000));
+    const spa = spaBody("spa_1", rect(5500, 2500, 9000, 5000));
+    const resolved = resolveSpaSpillovers(spa, [pool]);
+    assert.ok(resolved.length >= 2, "expected ≥2 weirs on corner inset");
+
+    const spaRing = spa.outline;
+    // Find a pair of adjacent edge indexes among resolved weirs.
+    const indexes = resolved.map((r) => r.edgeIndex).sort((a, b) => a - b);
+    let pair: [number, number] | null = null;
+    for (const i of indexes) {
+      const next = (i + 1) % spaRing.length;
+      if (indexes.includes(next)) {
+        pair = [i, next];
+        break;
+      }
+    }
+    assert.ok(pair, "expected two adjacent weir edges");
+    const [i0, i1] = pair!;
+    const r0 = resolved.find((r) => r.edgeIndex === i0)!;
+    const r1 = resolved.find((r) => r.edgeIndex === i1)!;
+    const shared = spaRing[(i0 + 1) % spaRing.length];
+
+    const near = (p: { x: number; y: number }, q: { x: number; y: number }) =>
+      Math.hypot(p.x - q.x, p.y - q.y) < 80;
+
+    assert.ok(
+      near(r0.a, shared) || near(r0.b, shared),
+      "first weir should reach the shared corner",
+    );
+    assert.ok(
+      near(r1.a, shared) || near(r1.b, shared),
+      "second weir should reach the shared corner",
+    );
+  });
+
   it("splits scuppers into N openings", () => {
     const a = { x: 0, y: 0 };
     const b = { x: 3000, y: 0 };
