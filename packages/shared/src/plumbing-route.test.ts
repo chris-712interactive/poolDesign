@@ -9,6 +9,7 @@ import {
 import {
   attachFixturePlumbing,
   buildPadManifoldRuns,
+  placeEquipmentPadWithStandardKit,
   rebuildBodyPlumbing,
   obstaclesFromDesign,
   routeOrthoAvoiding,
@@ -339,6 +340,45 @@ describe("pad manifold", () => {
     };
     design = syncPlumbingAfterObjectRemoved(design, pump);
     assert.equal(design.plumbingRuns.some((r) => r.padLocal), false);
+  });
+
+  it("auto-places standard flow kit with a new equipment pad", () => {
+    const empty = emptyDesignDocument("residential");
+    const withPool: DesignDocument = {
+      ...empty,
+      poolBodies: [
+        {
+          id: "pool_1",
+          name: "Pool",
+          kind: "pool",
+          outline: rect(0, 0, 20 * FT, 40 * FT),
+          depthShallowMm: 914,
+          depthDeepMm: 2438,
+        },
+      ],
+    };
+    const { design, pad, equipment } = placeEquipmentPadWithStandardKit(
+      withPool,
+      { x: 30 * FT, y: 20 * FT },
+      { designLevel: "residential" },
+    );
+    assert.equal(pad.catalogItemId, "equip_pad");
+    const ids = equipment.map((e) => e.catalogItemId).sort();
+    assert.deepEqual(ids, [
+      "filter_cartridge",
+      "heater_gas",
+      "pump_variable_speed",
+      "salt_chlorinator",
+    ].sort());
+    assert.ok(
+      (pad.widthMm ?? 0) >= equipment.reduce((s, e) => s + (e.widthMm ?? 0), 0),
+      "pad should be wide enough for the kit",
+    );
+    const synced = rebuildBodyPlumbing(design, "pool_1");
+    assert.ok(synced.plumbingRuns.some((r) => r.padLocal));
+    assert.ok(
+      synced.plumbingRuns.some((r) => /pump/i.test(r.name) && /filter/i.test(r.name)),
+    );
   });
 });
 

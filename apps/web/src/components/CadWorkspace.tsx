@@ -42,6 +42,7 @@ import {
   insideBoundsFromOutside,
   insideOutlineFromOutside,
   isPadEquipmentId,
+  placeEquipmentPadWithStandardKit,
   isPoolFixtureId,
   isSpaFixtureId,
   isWaterFixtureId,
@@ -1057,7 +1058,7 @@ export function CadWorkspace({
       ctx.fillStyle = "rgba(20,32,41,0.45)";
       ctx.font = "14px Source Sans 3, sans-serif";
       ctx.fillText(
-        "Tip: draw the house, place pad equipment, then pool/spa — plumbing auto-routes",
+        "Tip: draw the house, place an equipment pad (adds pump/filter/heater/salt), then pool/spa — plumbing auto-routes",
         16,
         28,
       );
@@ -1974,6 +1975,19 @@ export function CadWorkspace({
 
     if (isPlacingObject) {
       if (!placeItem) return;
+      if (placeItem.id === "equip_pad") {
+        const { design: withPad, pad } = placeEquipmentPadWithStandardKit(
+          design,
+          point,
+          {
+            rotationDeg: 0,
+            designLevel,
+          },
+        );
+        commitDesign(syncAllBodiesPlumbing(withPad));
+        setSelection({ kind: "object", id: pad.id });
+        return;
+      }
       const wallSnap = isWallWaterFixtureId(placeItem.id)
         ? snapWaterWallFixture(design.poolBodies, point)
         : null;
@@ -2686,6 +2700,8 @@ export function CadWorkspace({
                     : isPadEquipTool(tool)
                       ? isWallWaterFixtureId(placeItem?.id ?? "")
                         ? `Click near a pool/spa wall to place ${placeItem?.name ?? "light"} — snaps to the wall and faces inward.`
+                        : placeItem?.id === "equip_pad"
+                          ? "Click to place the equipment pad — pump, filter, heater, and salt cell are added automatically."
                         : `Click to place ${placeItem?.name ?? "equipment"}. Pools/spas auto-route plumbing to the pad.`
                       : tool === "place"
                         ? "Pick furniture/fixture, then click to place. R rotates 15°."

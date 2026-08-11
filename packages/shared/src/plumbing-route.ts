@@ -15,6 +15,8 @@ import type {
   PoolBody,
 } from "./design-model";
 import { waterBodyKind } from "./design-model";
+import type { DesignLevel } from "./design-level";
+import { getPlaceableItem } from "./object-library";
 
 type Bounds = {
   minX: number;
@@ -165,12 +167,122 @@ export const PAD_EQUIPMENT_IDS = [
 
 export type PadEquipmentId = (typeof PAD_EQUIPMENT_IDS)[number];
 
+/**
+ * Standard flow equipment placed automatically with a new equipment pad.
+ * Same kit for pool or spa — hydraulic order matches {@link PAD_FLOW_ORDER}.
+ */
+export const STANDARD_PAD_EQUIPMENT_IDS = [
+  "pump_variable_speed",
+  "filter_cartridge",
+  "heater_gas",
+  "salt_chlorinator",
+] as const;
+
 export function isPadEquipment(obj: PlacedObject): boolean {
   return (PAD_EQUIPMENT_IDS as readonly string[]).includes(obj.catalogItemId);
 }
 
 export function isPadEquipmentId(id: string): boolean {
   return (PAD_EQUIPMENT_IDS as readonly string[]).includes(id);
+}
+
+/** Catalog ids for the auto pad kit filtered by design level. */
+export function standardPadEquipmentIdsForLevel(
+  level: DesignLevel,
+): string[] {
+  return STANDARD_PAD_EQUIPMENT_IDS.filter((id) => {
+    const item = getPlaceableItem(id);
+    return item?.levels.includes(level) ?? false;
+  });
+}
+
+const PAD_KIT_GAP_MM = 6 * IN;
+const PAD_KIT_MARGIN_MM = 8 * IN;
+
+/**
+ * Place an equipment pad and the standard flow kit (pump → filter → heater →
+ * salt when available for the design level). Pads grow to fit the kit.
+ * Does not rebuild plumbing — call {@link syncAllBodiesPlumbing} after.
+ */
+export function placeEquipmentPadWithStandardKit(
+  design: DesignDocument,
+  position: PointMm,
+  opts?: { rotationDeg?: number; designLevel?: DesignLevel },
+): { design: DesignDocument; pad: PlacedObject; equipment: PlacedObject[] } {
+  const level = opts?.designLevel ?? design.designLevel ?? "residential";
+  const rotationDeg = opts?.rotationDeg ?? 0;
+  const kitIds = standardPadEquipmentIdsForLevel(level);
+  const kitItems = kitIds
+    .map((id) => getPlaceableItem(id))
+    .filter((item): item is NonNullable<typeof item> => !!item);
+
+  const padItem = getPlaceableItem("equip_pad");
+  const baseW = padItem?.widthMm ?? 8 * FT;
+  const baseD = padItem?.depthMm ?? 4 * FT;
+
+  const rowWidth =
+    kitItems.reduce((sum, item) => sum + item.widthMm, 0) +
+    Math.max(0, kitItems.length - 1) * PAD_KIT_GAP_MM;
+  const rowDepth = kitItems.length
+    ? Math.max(...kitItems.map((item) => item.depthMm))
+    : baseD;
+
+  const padWidthMm = Math.max(baseW, rowWidth + 2 * PAD_KIT_MARGIN_MM);
+  const padDepthMm = Math.max(baseD, rowDepth + 2 * PAD_KIT_MARGIN_MM);
+
+  const pad: PlacedObject = {
+    id: newId("obj"),
+    catalogItemId: "equip_pad",
+    name: padItem?.name ?? "Equipment pad",
+    position,
+    rotationDeg,
+    layerId: padItem?.layerId ?? "equipment",
+    widthMm: padWidthMm,
+    depthMm: padDepthMm,
+    heightMm: padItem?.heightMm ?? 150,
+  };
+
+  // Lay kit along pad local +X (width), centered; same rotation as the pad.
+  const equipment: PlacedObject[] = [];
+  let cursor = -rowWidth / 2;
+  for (const item of kitItems) {
+    const lx = cursor + item.widthMm / 2;
+    const plan = equipmentLocalToPlan(
+      { ...pad, position, rotationDeg },
+      lx,
+      0,
+    );
+    equipment.push({
+      id: newId("obj"),
+      catalogItemId: item.id,
+      name: item.name,
+      position: plan,
+      rotationDeg,
+      layerId: item.layerId,
+      widthMm: item.widthMm,
+      depthMm: item.depthMm,
+      heightMm: item.heightMm,
+    });
+    cursor += item.widthMm + PAD_KIT_GAP_MM;
+  }
+
+  let layers = design.layers;
+  if (!layers.some((l) => l.id === "equipment")) {
+    layers = [
+      ...layers,
+      { id: "equipment", name: "equipment", visible: true },
+    ];
+  }
+
+  return {
+    pad,
+    equipment,
+    design: {
+      ...design,
+      layers,
+      objects: [...(design.objects ?? []), pad, ...equipment],
+    },
+  };
 }
 
 export type RouteObstacle = {

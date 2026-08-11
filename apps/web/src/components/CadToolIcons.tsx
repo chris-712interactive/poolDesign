@@ -76,7 +76,7 @@ export const TOOL_GROUPS: {
     id: "pad",
     realm: "land",
     label: "Equipment pad",
-    hint: "Concrete pad and equipment that sits on it",
+    hint: "Concrete pad with standard pump, filter, heater, and salt kit",
     icon: (
       <Svg>
         <rect x="3" y="6" width="18" height="12" rx="1.5" />
