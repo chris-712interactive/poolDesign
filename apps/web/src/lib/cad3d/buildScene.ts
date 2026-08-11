@@ -643,7 +643,7 @@ function cascadeOutwardNormal(
 
 /**
  * Fill the miter gap where two adjacent weirs meet at a spa corner so water
- * wraps over the corner cover instead of leaving a dry post.
+ * wraps over the outer corner post instead of leaving it dry.
  */
 function pushSpilloverCornerCascades(
   meshes: MeshDescriptor[],
@@ -663,46 +663,37 @@ function pushSpilloverCornerCascades(
   if (n < 3) return;
 
   const byEdge = new Map(opts.spills.map((s) => [s.edgeIndex, s]));
-  let cornerIdx = 0;
-  for (const spill of opts.spills) {
-    const nextIdx = (spill.edgeIndex + 1) % n;
-    const next = byEdge.get(nextIdx);
-    if (!next) continue;
+  const near = (a: PointMm, b: PointMm, tol = 140) =>
+    Math.hypot(a.x - b.x, a.y - b.y) <= tol;
 
-    const vertex = pts[nextIdx];
+  let cornerIdx = 0;
+  const seen = new Set<string>();
+
+  const emitCorner = (vertex: PointMm, spill: ResolvedSpaSpillover, next: ResolvedSpaSpillover) => {
+    const key = `${Math.round(vertex.x)}:${Math.round(vertex.y)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+
     const n0 = cascadeOutwardNormal(spill.a, spill.b, opts.spaOutline);
     const n1 = cascadeOutwardNormal(next.a, next.b, opts.spaOutline);
     let nx = n0.nx + n1.nx;
     let ny = n0.ny + n1.ny;
     const nLen = Math.hypot(nx, ny);
-    if (nLen < 1e-6) continue;
+    if (nLen < 1e-6) return;
     nx /= nLen;
     ny /= nLen;
 
-    // Narrow ribbon along the angle bisector, centered on the corner.
-    const widthMm = Math.max(
-      120,
-      Math.min(opts.wallThicknessMm * 1.8, 280),
-    );
+    // Wide enough to cover the outer corner post + both sheet miters.
+    const widthMm = Math.max(opts.wallThicknessMm * 3.2, 520);
+    const sheetThickMm = spill.style === "sheer" ? 14 : 22;
+    // Sit on the outer corner face (beyond wall thickness), then flare out.
+    const outwardMm =
+      opts.wallThicknessMm * 0.65 + sheetThickMm * 0.35 + 20;
     const tx = -ny;
     const ty = nx;
-    const opening = {
-      a: {
-        x: vertex.x - tx * (widthMm / 2),
-        y: vertex.y - ty * (widthMm / 2),
-      },
-      b: {
-        x: vertex.x + tx * (widthMm / 2),
-        y: vertex.y + ty * (widthMm / 2),
-      },
-    };
-
-    const sheetThickMm = spill.style === "sheer" ? 12 : 18;
-    const outwardMm =
-      Math.max(10, opts.wallThicknessMm * 0.12) + sheetThickMm * 0.25;
     const mid = {
-      x: (opening.a.x + opening.b.x) / 2 + nx * outwardMm,
-      y: (opening.a.y + opening.b.y) / 2 + ny * outwardMm,
+      x: vertex.x + nx * outwardMm,
+      y: vertex.y + ny * outwardMm,
     };
     const xz = planToWorldXZ(mid);
     const topY = opts.crestY - 0.008;
@@ -721,14 +712,45 @@ function pushSpilloverCornerCascades(
       size: {
         x: mmToMeters(widthMm),
         y: ribbonH,
-        z: mmToMeters(sheetThickMm),
+        z: mmToMeters(sheetThickMm * 1.4),
       },
       rotationY: 0,
       axisX: planDirToWorldXZ(tx, ty),
       axisZ: planDirToWorldXZ(nx, ny),
-      opacity: spill.style === "sheer" ? 0.55 : 0.72,
+      opacity: spill.style === "sheer" ? 0.55 : 0.75,
       select: opts.select,
     });
+  };
+
+  for (const spill of opts.spills) {
+    const nextIdx = (spill.edgeIndex + 1) % n;
+    const next = byEdge.get(nextIdx);
+    if (next) {
+      emitCorner(pts[nextIdx], spill, next);
+      continue;
+    }
+
+    // Fallback: any other weir whose span endpoint meets this one.
+    for (const other of opts.spills) {
+      if (other.edgeIndex === spill.edgeIndex) continue;
+      const hits =
+        (near(spill.a, other.a) && spill.a) ||
+        (near(spill.a, other.b) && spill.a) ||
+        (near(spill.b, other.a) && spill.b) ||
+        (near(spill.b, other.b) && spill.b);
+      if (!hits || typeof hits === "boolean") continue;
+      // Prefer the outline vertex nearest the meeting point.
+      let vertex = hits;
+      let bestD = Infinity;
+      for (const p of pts) {
+        const d = Math.hypot(p.x - hits.x, p.y - hits.y);
+        if (d < bestD) {
+          bestD = d;
+          vertex = p;
+        }
+      }
+      emitCorner(vertex, spill, other);
+    }
   }
 }
 
@@ -2110,9 +2132,32 @@ export function buildSceneModel(
           ? spills.map((spill) => {
               const edgeA = pts[spill.edgeIndex];
               const edgeB = pts[(spill.edgeIndex + 1) % pts.length];
+              const edgeLen = Math.hypot(
+                edgeB.x - edgeA.x,
+                edgeB.y - edgeA.y,
+              );
+              let intervals = spilloverOmitIntervals(spill, edgeA, edgeB);
+              // When an adjacent weir shares this corner, open the upper wall
+              // all the way to the vertex so the corner post is notched out.
+              const prev = spills.find(
+                (s) => (s.edgeIndex + 1) % pts.length === spill.edgeIndex,
+              );
+              const next = spills.find(
+                (s) =>
+                  s.edgeIndex === (spill.edgeIndex + 1) % pts.length,
+              );
+              if (prev || next) {
+                intervals = intervals.map(([t0, t1]) => {
+                  let lo = t0;
+                  let hi = t1;
+                  if (prev) lo = Math.min(lo, 0);
+                  if (next) hi = Math.max(hi, edgeLen);
+                  return [lo, hi] as [number, number];
+                });
+              }
               return {
                 edgeIndex: spill.edgeIndex,
-                intervals: spilloverOmitIntervals(spill, edgeA, edgeB),
+                intervals,
               };
             })
           : undefined;

@@ -518,28 +518,83 @@ function extendAdjacentWeirsToSharedCorners(
   const byEdge = new Map(resolved.map((r) => [r.edgeIndex, r]));
   const edgeByIndex = new Map(edges.map((e) => [e.edgeIndex, e]));
 
-  /** Per-edge: stretch weir toward start and/or end of its overlap. */
-  const stretch = new Map<number, { toStart: boolean; toEnd: boolean }>();
-  const flag = (idx: number) => {
+  /** Per-edge: stretch weir toward start and/or end of its edge. */
+  const stretch = new Map<
+    number,
+    { toStart: boolean; toEnd: boolean; corner: PointMm }
+  >();
+  const flag = (
+    idx: number,
+    which: "toStart" | "toEnd",
+    corner: PointMm,
+  ) => {
     let f = stretch.get(idx);
     if (!f) {
-      f = { toStart: false, toEnd: false };
+      f = { toStart: false, toEnd: false, corner };
       stretch.set(idx, f);
     }
-    return f;
+    f[which] = true;
+    f.corner = corner;
   };
 
-  for (const r of resolved) {
-    const next = (r.edgeIndex + 1) % n;
-    const prev = (r.edgeIndex - 1 + n) % n;
-    if (byEdge.has(next)) {
-      // Shared vertex = end of this edge / start of next.
-      flag(r.edgeIndex).toEnd = true;
-      flag(next).toStart = true;
+  const markPair = (i: number, j: number, corner: PointMm) => {
+    // i → j around the ring: corner is end of i / start of j.
+    if ((i + 1) % n === j) {
+      flag(i, "toEnd", corner);
+      flag(j, "toStart", corner);
+    } else if ((j + 1) % n === i) {
+      flag(j, "toEnd", corner);
+      flag(i, "toStart", corner);
+    } else {
+      // Non-sequential indexes but shared vertex — decide by proximity to ends.
+      const ei = edgeByIndex.get(i);
+      const ej = edgeByIndex.get(j);
+      if (!ei || !ej) return;
+      const iAtStart =
+        Math.hypot(ei.edgeA.x - corner.x, ei.edgeA.y - corner.y) <=
+        Math.hypot(ei.edgeB.x - corner.x, ei.edgeB.y - corner.y);
+      const jAtStart =
+        Math.hypot(ej.edgeA.x - corner.x, ej.edgeA.y - corner.y) <=
+        Math.hypot(ej.edgeB.x - corner.x, ej.edgeB.y - corner.y);
+      flag(i, iAtStart ? "toStart" : "toEnd", corner);
+      flag(j, jAtStart ? "toStart" : "toEnd", corner);
     }
-    if (byEdge.has(prev)) {
-      flag(r.edgeIndex).toStart = true;
-      flag(prev).toEnd = true;
+  };
+
+  for (let a = 0; a < resolved.length; a++) {
+    for (let b = a + 1; b < resolved.length; b++) {
+      const ra = resolved[a];
+      const rb = resolved[b];
+      const ea = edgeByIndex.get(ra.edgeIndex);
+      const eb = edgeByIndex.get(rb.edgeIndex);
+      if (!ea || !eb) continue;
+
+      // Prefer the spa-ring vertex shared by the two outline edges.
+      const ringCorner =
+        (ra.edgeIndex + 1) % n === rb.edgeIndex
+          ? spaRing[rb.edgeIndex]
+          : (rb.edgeIndex + 1) % n === ra.edgeIndex
+            ? spaRing[ra.edgeIndex]
+            : null;
+
+      if (ringCorner) {
+        markPair(ra.edgeIndex, rb.edgeIndex, ringCorner);
+        continue;
+      }
+
+      // Fallback: weir endpoints that meet (dragged / partial spans).
+      const endsA = [ra.a, ra.b];
+      const endsB = [rb.a, rb.b];
+      let best: { d: number; p: PointMm } | null = null;
+      for (const pa of endsA) {
+        for (const pb of endsB) {
+          const d = Math.hypot(pa.x - pb.x, pa.y - pb.y);
+          if (d < 120 && (!best || d < best.d)) {
+            best = { d, p: { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 } };
+          }
+        }
+      }
+      if (best) markPair(ra.edgeIndex, rb.edgeIndex, best.p);
     }
   }
 
@@ -559,33 +614,31 @@ function extendAdjacentWeirsToSharedCorners(
 
     let t0 = Math.min(proj(r.a), proj(r.b));
     let t1 = Math.max(proj(r.a), proj(r.b));
-    if (f.toStart) t0 = edge.overlapT0;
-    if (f.toEnd) t1 = edge.overlapT1;
-    t0 = Math.max(edge.overlapT0, Math.min(t0, edge.overlapT1));
-    t1 = Math.max(edge.overlapT0, Math.min(t1, edge.overlapT1));
+    const tCorner = Math.max(0, Math.min(len, proj(f.corner)));
+
+    // Stretch to the shared outline vertex and the pool-facing overlap end.
+    if (f.toStart) {
+      t0 = Math.min(t0, tCorner, edge.overlapT0);
+    }
+    if (f.toEnd) {
+      t1 = Math.max(t1, tCorner, edge.overlapT1);
+    }
+    t0 = Math.max(0, Math.min(t0, len - 50));
+    t1 = Math.min(len, Math.max(t1, t0 + 50));
     if (t1 - t0 < 50) return r;
 
-    // Already covers the needed corner(s).
-    if (
-      Math.abs(t0 - Math.min(proj(r.a), proj(r.b))) < 2 &&
-      Math.abs(t1 - Math.max(proj(r.a), proj(r.b))) < 2
-    ) {
-      return r;
-    }
-
-    const params = weirParamsFromSpan(
-      edge.overlapT0,
-      edge.overlapT1,
-      t0,
-      t1,
-    );
+    const params = weirParamsFromSpan(0, len, t0, t1);
+    const edgeForResolve: SharedSpilloverEdge = {
+      ...edge,
+      overlapT0: Math.min(edge.overlapT0, t0),
+      overlapT1: Math.max(edge.overlapT1, t1),
+      overlapLenMm: Math.max(edge.overlapLenMm, t1 - t0),
+    };
     return (
       resolveOneWeir(
         spa,
-        edge,
+        edgeForResolve,
         {
-          edgeIndex: r.edgeIndex,
-          enabled: true,
           widthMm: params.widthMm,
           offsetMm: params.offsetMm,
         },
