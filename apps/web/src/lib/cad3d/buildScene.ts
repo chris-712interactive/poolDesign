@@ -180,6 +180,31 @@ export type BoxDescriptor = {
 } & Selectable;
 
 /**
+ * Curved spa spillover at a corner where two weirs meet.
+ * Plan normals point outward (toward the pool); the mesh sweeps the exterior arc.
+ */
+export type SpilloverCornerDescriptor = {
+  kind: "spilloverCorner";
+  id: string;
+  material: "spilloverWater";
+  /** Spa outline corner in plan mm. */
+  cornerMm: PointMm;
+  /** Outward plan normal of the first weir. */
+  normal0: PointMm;
+  /** Outward plan normal of the second weir. */
+  normal1: PointMm;
+  /** World Y of weir crest (top of sheet). */
+  crestY: number;
+  /** World Y where the sheet meets the pool water. */
+  poolWaterY: number;
+  /** Radius at the lip (m) — typically ~ wall thickness / 2. */
+  lipRadiusM: number;
+  /** Extra radial throw at the pool (m). */
+  flareM: number;
+  opacity?: number;
+} & Selectable;
+
+/**
  * Racked fence / glass panel: top & bottom follow grade, vertical edges stay plumb.
  * World-space bottom-rail endpoints + vertical height.
  */
@@ -343,6 +368,7 @@ export type TerrainDescriptor = {
 export type MeshDescriptor =
   | ExtrudeDescriptor
   | BoxDescriptor
+  | SpilloverCornerDescriptor
   | FloorDescriptor
   | WaterBodyDescriptor
   | TubeDescriptor
@@ -642,8 +668,77 @@ function cascadeOutwardNormal(
 }
 
 /**
- * Fill the miter gap where two adjacent weirs meet at a spa corner so water
- * wraps over the outer corner post instead of leaving it dry.
+ * Pull straight weir openings back from shared corners so the curved corner
+ * curtain owns the wrap (avoids a hard vertical sheet edge at the vertex).
+ */
+function insetSpillOpeningsAtCorners(
+  spills: ResolvedSpaSpillover[],
+  spaOutline: PointMm[],
+  insetMm: number,
+): ResolvedSpaSpillover[] {
+  if (spills.length < 2 || insetMm < 1) return spills;
+  const pts = ringPoints(spaOutline);
+  const n = pts.length;
+  if (n < 3) return spills;
+
+  const cornerVerts = new Set<string>();
+  const keyOf = (p: PointMm) => `${Math.round(p.x)}:${Math.round(p.y)}`;
+  const byEdge = new Map(spills.map((s) => [s.edgeIndex, s]));
+  for (const s of spills) {
+    const next = (s.edgeIndex + 1) % n;
+    if (byEdge.has(next)) cornerVerts.add(keyOf(pts[next]));
+  }
+
+  const insetEnd = (from: PointMm, to: PointMm, corner: PointMm): PointMm => {
+    // If `to` is at the corner, pull it toward `from`.
+    if (Math.hypot(to.x - corner.x, to.y - corner.y) > 160) return to;
+    const len = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+    const pull = Math.min(insetMm, len * 0.35);
+    const ux = (from.x - to.x) / len;
+    const uy = (from.y - to.y) / len;
+    return { x: to.x + ux * pull, y: to.y + uy * pull };
+  };
+
+  return spills.map((spill) => {
+    const edgeA = pts[spill.edgeIndex];
+    const edgeB = pts[(spill.edgeIndex + 1) % n];
+    const startCorner = cornerVerts.has(keyOf(edgeA)) ? edgeA : null;
+    const endCorner = cornerVerts.has(keyOf(edgeB)) ? edgeB : null;
+    if (!startCorner && !endCorner) return spill;
+
+    const openings = spill.openings.map((o) => {
+      let a = o.a;
+      let b = o.b;
+      if (startCorner) {
+        // Whichever endpoint is nearer the start corner gets inset.
+        if (
+          Math.hypot(a.x - startCorner.x, a.y - startCorner.y) <=
+          Math.hypot(b.x - startCorner.x, b.y - startCorner.y)
+        ) {
+          a = insetEnd(b, a, startCorner);
+        } else {
+          b = insetEnd(a, b, startCorner);
+        }
+      }
+      if (endCorner) {
+        if (
+          Math.hypot(a.x - endCorner.x, a.y - endCorner.y) <=
+          Math.hypot(b.x - endCorner.x, b.y - endCorner.y)
+        ) {
+          a = insetEnd(b, a, endCorner);
+        } else {
+          b = insetEnd(a, b, endCorner);
+        }
+      }
+      return { a, b };
+    });
+    return { ...spill, openings };
+  });
+}
+
+/**
+ * Curved spillover curtain where two weirs meet — sweeps the exterior corner
+ * arc with the same free-fall pour profile as the straight sheets.
  */
 function pushSpilloverCornerCascades(
   meshes: MeshDescriptor[],
@@ -669,55 +764,37 @@ function pushSpilloverCornerCascades(
   let cornerIdx = 0;
   const seen = new Set<string>();
 
-  const emitCorner = (vertex: PointMm, spill: ResolvedSpaSpillover, next: ResolvedSpaSpillover) => {
+  const emitCorner = (
+    vertex: PointMm,
+    spill: ResolvedSpaSpillover,
+    next: ResolvedSpaSpillover,
+  ) => {
     const key = `${Math.round(vertex.x)}:${Math.round(vertex.y)}`;
     if (seen.has(key)) return;
     seen.add(key);
 
     const n0 = cascadeOutwardNormal(spill.a, spill.b, opts.spaOutline);
     const n1 = cascadeOutwardNormal(next.a, next.b, opts.spaOutline);
-    let nx = n0.nx + n1.nx;
-    let ny = n0.ny + n1.ny;
-    const nLen = Math.hypot(nx, ny);
-    if (nLen < 1e-6) return;
-    nx /= nLen;
-    ny /= nLen;
+    // Ensure both normals point toward the pool / away from spa interior.
+    const n0p = { x: n0.nx, y: n0.ny };
+    const n1p = { x: n1.nx, y: n1.ny };
 
-    // Wide enough to cover the outer corner post + both sheet miters.
-    const widthMm = Math.max(opts.wallThicknessMm * 3.2, 520);
-    const sheetThickMm = spill.style === "sheer" ? 14 : 22;
-    // Sit on the outer corner face (beyond wall thickness), then flare out.
-    const outwardMm =
-      opts.wallThicknessMm * 0.65 + sheetThickMm * 0.35 + 20;
-    const tx = -ny;
-    const ty = nx;
-    const mid = {
-      x: vertex.x + nx * outwardMm,
-      y: vertex.y + ny * outwardMm,
-    };
-    const xz = planToWorldXZ(mid);
-    const topY = opts.crestY - 0.008;
-    const bottomY = opts.poolWaterTopY + 0.004;
-    const ribbonH = Math.max(0.04, topY - bottomY);
+    const lipRadiusM = Math.max(0.04, mmToMeters(opts.wallThicknessMm) * 0.55);
+    const drop = Math.max(0.05, opts.crestY - opts.poolWaterTopY);
+    const flareM = Math.max(0.1, Math.min(0.34, drop * 0.95));
 
     meshes.push({
-      kind: "box",
+      kind: "spilloverCorner",
       id: `${opts.idPrefix}_${cornerIdx++}`,
       material: "spilloverWater",
-      position: {
-        x: xz.x,
-        y: bottomY + ribbonH / 2,
-        z: xz.z,
-      },
-      size: {
-        x: mmToMeters(widthMm),
-        y: ribbonH,
-        z: mmToMeters(sheetThickMm * 1.4),
-      },
-      rotationY: 0,
-      axisX: planDirToWorldXZ(tx, ty),
-      axisZ: planDirToWorldXZ(nx, ny),
-      opacity: spill.style === "sheer" ? 0.55 : 0.75,
+      cornerMm: vertex,
+      normal0: n0p,
+      normal1: n1p,
+      crestY: opts.crestY - 0.008,
+      poolWaterY: opts.poolWaterTopY + 0.004,
+      lipRadiusM,
+      flareM,
+      opacity: spill.style === "sheer" ? 0.55 : 0.78,
       select: opts.select,
     });
   };
@@ -730,7 +807,6 @@ function pushSpilloverCornerCascades(
       continue;
     }
 
-    // Fallback: any other weir whose span endpoint meets this one.
     for (const other of opts.spills) {
       if (other.edgeIndex === spill.edgeIndex) continue;
       const hits =
@@ -739,7 +815,6 @@ function pushSpilloverCornerCascades(
         (near(spill.b, other.a) && spill.b) ||
         (near(spill.b, other.b) && spill.b);
       if (!hits || typeof hits === "boolean") continue;
-      // Prefer the outline vertex nearest the meeting point.
       let vertex = hits;
       let bestD = Infinity;
       for (const p of pts) {
@@ -2242,7 +2317,12 @@ export function buildSceneModel(
           });
         }
 
-        for (const spill of spills) {
+        const cascadeSpills = insetSpillOpeningsAtCorners(
+          spills,
+          outer,
+          Math.max(180, wallT * 0.85),
+        );
+        for (const spill of cascadeSpills) {
           pushSpilloverCascades(meshes, {
             spill,
             spaOutline: outer,

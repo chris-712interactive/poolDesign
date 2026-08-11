@@ -34,6 +34,7 @@ import {
   type MeshDescriptor,
   type SceneMaterialKey,
   type SceneSelection,
+  type SpilloverCornerDescriptor,
   type TerrainDescriptor,
   type TubeDescriptor,
   type WallPanelDescriptor,
@@ -739,6 +740,173 @@ function SpilloverCascadeMesh({
           depthWrite={false}
           side={THREE.DoubleSide}
           blending={THREE.AdditiveBlending}
+          toneMapped={false}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * Quarter-turn (or exterior) curved spillover curtain joining two weirs.
+ * Sweeps between the weir outward normals with the same free-fall pour profile.
+ */
+function SpilloverCornerCascadeMesh({
+  desc,
+  selected,
+  onSelect,
+}: {
+  desc: SpilloverCornerDescriptor;
+  selected: boolean;
+  onSelect?: (sel: SceneSelection | null) => void;
+}) {
+  const handlers = useSelectHandlers(desc.select, onSelect);
+
+  const { sheetGeo, veilGeo, foamGeo } = useMemo(() => {
+    const n0 = new THREE.Vector2(desc.normal0.x, desc.normal0.y).normalize();
+    const n1 = new THREE.Vector2(desc.normal1.x, desc.normal1.y).normalize();
+    let ang0 = Math.atan2(n0.y, n0.x);
+    let ang1 = Math.atan2(n1.y, n1.x);
+    let dAng = ang1 - ang0;
+    while (dAng > Math.PI) dAng -= Math.PI * 2;
+    while (dAng < -Math.PI) dAng += Math.PI * 2;
+    // Prefer the exterior turn (≤ 180°). If we somehow got the interior
+    // reflex, flip to the short exterior arc.
+    if (Math.abs(dAng) < 1e-3) dAng = Math.PI / 2;
+    if (Math.abs(dAng) > Math.PI * 0.95) {
+      dAng = dAng > 0 ? dAng - Math.PI * 2 : dAng + Math.PI * 2;
+    }
+    // Overlap slightly into each straight weir so seams disappear.
+    const pad = Math.min(0.22, Math.abs(dAng) * 0.18) * Math.sign(dAng || 1);
+    ang0 -= pad;
+    dAng += pad * 2;
+
+    const segsU = Math.max(10, Math.ceil(Math.abs(dAng) / (Math.PI / 18)));
+    const segsV = 36;
+    const lipR = Math.max(0.03, desc.lipRadiusM);
+    const flare = Math.max(0.08, desc.flareM);
+    const topY = desc.crestY;
+    const botY = desc.poolWaterY;
+    const h = Math.max(0.04, topY - botY);
+
+    const build = (radiusScale: number, heightScale: number) => {
+      const positions: number[] = [];
+      const uvs: number[] = [];
+      const indices: number[] = [];
+      const uCount = segsU + 1;
+      const vCount = segsV + 1;
+      for (let iv = 0; iv < vCount; iv++) {
+        const v = iv / segsV; // 0 crest → 1 pool
+        const fall = v;
+        const pour = Math.sqrt(Math.min(1, Math.max(0, fall * (2 - fall))));
+        const r = (lipR + pour * flare) * radiusScale;
+        const y = topY - v * h * heightScale;
+        for (let iu = 0; iu < uCount; iu++) {
+          const u = iu / segsU;
+          const ang = ang0 + dAng * u;
+          const dirX = Math.cos(ang);
+          const dirY = Math.sin(ang);
+          const plan = {
+            x: desc.cornerMm.x + dirX * r * 1000,
+            y: desc.cornerMm.y + dirY * r * 1000,
+          };
+          const xz = planToWorldXZ(plan);
+          positions.push(xz.x, y, xz.z);
+          uvs.push(u, 1 - v);
+        }
+      }
+      for (let iv = 0; iv < segsV; iv++) {
+        for (let iu = 0; iu < segsU; iu++) {
+          const a = iv * uCount + iu;
+          const b = a + 1;
+          const c = a + uCount;
+          const d = c + 1;
+          indices.push(a, c, b, b, c, d);
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(positions, 3),
+      );
+      geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+      geo.setIndex(indices);
+      geo.computeVertexNormals();
+      return geo;
+    };
+
+    const sheet = build(1, 1);
+    const veil = build(1.03, 0.98);
+
+    // Crest foam arc hugging the lip
+    const foamPos: number[] = [];
+    const foamUv: number[] = [];
+    const foamIdx: number[] = [];
+    const foamRows = 2;
+    const foamH = Math.min(0.035, h * 0.1);
+    const foamU = segsU + 1;
+    for (let iv = 0; iv <= foamRows; iv++) {
+      const v = iv / foamRows;
+      const y = topY - v * foamH;
+      const r = lipR + 0.004;
+      for (let iu = 0; iu < foamU; iu++) {
+        const u = iu / segsU;
+        const ang = ang0 + dAng * u;
+        const plan = {
+          x: desc.cornerMm.x + Math.cos(ang) * r * 1000,
+          y: desc.cornerMm.y + Math.sin(ang) * r * 1000,
+        };
+        const xz = planToWorldXZ(plan);
+        foamPos.push(xz.x, y, xz.z);
+        foamUv.push(u, 1 - v);
+      }
+    }
+    for (let iv = 0; iv < foamRows; iv++) {
+      for (let iu = 0; iu < segsU; iu++) {
+        const a = iv * foamU + iu;
+        const b = a + 1;
+        const c = a + foamU;
+        const d = c + 1;
+        foamIdx.push(a, c, b, b, c, d);
+      }
+    }
+    const foam = new THREE.BufferGeometry();
+    foam.setAttribute("position", new THREE.Float32BufferAttribute(foamPos, 3));
+    foam.setAttribute("uv", new THREE.Float32BufferAttribute(foamUv, 2));
+    foam.setIndex(foamIdx);
+    foam.computeVertexNormals();
+
+    return { sheetGeo: sheet, veilGeo: veil, foamGeo: foam };
+  }, [desc]);
+
+  useEffect(
+    () => () => {
+      sheetGeo.dispose();
+      veilGeo.dispose();
+      foamGeo.dispose();
+    },
+    [sheetGeo, veilGeo, foamGeo],
+  );
+
+  return (
+    <group>
+      <mesh geometry={sheetGeo} renderOrder={4.1} {...handlers}>
+        <SpilloverWaterMaterial
+          selected={selected}
+          opacity={desc.opacity ?? 0.78}
+          layer={0}
+        />
+      </mesh>
+      <mesh geometry={veilGeo} renderOrder={4.12} raycast={() => null}>
+        <SpilloverWaterMaterial selected={false} opacity={0.38} layer={1} />
+      </mesh>
+      <mesh geometry={foamGeo} renderOrder={4.25} raycast={() => null}>
+        <meshBasicMaterial
+          color="#f2fbff"
+          transparent
+          opacity={0.7}
+          depthWrite={false}
+          side={THREE.DoubleSide}
           toneMapped={false}
         />
       </mesh>
@@ -1474,6 +1642,16 @@ function SceneMeshes({
         if (m.kind === "box") {
           return (
             <BoxMesh
+              key={m.id}
+              desc={m}
+              selected={selected}
+              onSelect={onSelect}
+            />
+          );
+        }
+        if (m.kind === "spilloverCorner") {
+          return (
+            <SpilloverCornerCascadeMesh
               key={m.id}
               desc={m}
               selected={selected}
