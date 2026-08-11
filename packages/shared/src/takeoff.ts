@@ -30,6 +30,14 @@ import type { UnitSystem } from "./units";
 import { mmToInches } from "./units";
 import { computeInfinityHydraulics, infinityTroughLf } from "./infinity-hydraulics";
 import { resolveInfinityEdges } from "./infinity-edge";
+import {
+  excavationVolumeCy,
+  maxDepthMmFromProfile,
+  waterVolumeGal,
+  wetInteriorSurfaceMm2,
+} from "./depth-profile";
+import { computePoolHydraulics } from "./pool-hydraulics";
+
 
 /** Typical #3/#4 shell reinforcing allowance (lb per sf of shell surface) */
 const REBAR_LB_PER_SF_SHELL = 2;
@@ -193,7 +201,13 @@ export function buildTakeoff(
 
     quantity = roundQty(
       quantity,
-      unit === "ea" || unit === "hr" || unit === "lb" || unit === "kg" ? 1 : 2,
+      unit === "ea" ||
+        unit === "hr" ||
+        unit === "lb" ||
+        unit === "kg" ||
+        unit === "gal"
+        ? 1
+        : 2,
     );
     lines.push({
       catalogItemId,
@@ -211,14 +225,14 @@ export function buildTakeoff(
   // Gunite / shotcrete: floor + walls; open shared pool↔spa walls deducted.
   let shellMm2 = 0;
   for (const pool of pools) {
-    const depth = avgBodyDepthMm(pool);
+    const depth = maxDepthMmFromProfile(pool);
     shellMm2 +=
       polygonAreaMm2(pool.outline) +
       polygonPerimeterMm(pool.outline) * depth;
   }
   for (let i = 0; i < spas.length; i++) {
     const spa = spas[i];
-    const depth = avgBodyDepthMm(spa);
+    const depth = maxDepthMmFromProfile(spa);
     const inside = spaInsides[i];
     shellMm2 +=
       polygonAreaMm2(inside) + polygonPerimeterMm(inside) * depth;
@@ -232,8 +246,8 @@ export function buildTakeoff(
     for (const spa of spas) {
       const shared = sharedBoundaryLengthMm(pool.outline, spa.outline);
       if (shared <= 0) continue;
-      shellMm2 -= shared * avgBodyDepthMm(pool);
-      shellMm2 -= shared * avgBodyDepthMm(spa);
+      shellMm2 -= shared * maxDepthMmFromProfile(pool);
+      shellMm2 -= shared * maxDepthMmFromProfile(spa);
     }
   }
   shellMm2 = Math.max(0, shellMm2);
@@ -243,8 +257,44 @@ export function buildTakeoff(
     "gunite_shotcrete",
     shellSf,
     "sf",
-    "Floor + walls (shared openings & overlap deducted)",
+    "Floor + walls @ max profile depth (shared openings deducted)",
   );
+
+  // Excavation + water volume (depth-profile aware).
+  let excavCy = 0;
+  let totalGal = 0;
+  for (const body of design.poolBodies) {
+    excavCy += excavationVolumeCy(body);
+    totalGal += waterVolumeGal(body);
+  }
+  if (excavCy > 0) {
+    push(
+      "excavation_pool",
+      excavCy,
+      "cy",
+      "Outside footprint × max depth + 6″ overdig/working space",
+    );
+  }
+  if (totalGal > 0) {
+    push(
+      "water_volume",
+      totalGal,
+      "gal",
+      (() => {
+        const notes: string[] = [];
+        for (const body of design.poolBodies) {
+          const hydro = computePoolHydraulics(body, design);
+          if (hydro) {
+            notes.push(
+              `${body.name}: ${hydro.volumeGal} gal · ${hydro.filtrationGpm} GPM @ ${hydro.turnoverHours} h turnover`,
+            );
+          }
+        }
+        return notes.join(" · ") || "Depth-profile integrated gallonage";
+      })(),
+    );
+  }
+
   push(
     "rebar_steel",
     shellSf * REBAR_LB_PER_SF_SHELL,
@@ -267,23 +317,44 @@ export function buildTakeoff(
     "lf",
     "Spa shell perimeter footing",
   );
-  const coverCount = (design.patioCovers ?? []).length;
+  const coverPostCount = (design.patioCovers ?? []).reduce((sum, c) => {
+    const n = (c.supports ?? []).length;
+    return sum + (n > 0 ? n : POST_FOOTINGS_PER_COVER);
+  }, 0);
   push(
     "footing_post",
-    coverCount * POST_FOOTINGS_PER_COVER,
+    coverPostCount,
     "ea",
-    `${POST_FOOTINGS_PER_COVER} post footings per pergola/roof`,
+    "Post footings from cover support layout",
   );
 
+  // Plaster on wet interior surface (floor + walls), not just water surface.
+  let poolPlasterMm2 = 0;
+  for (const pool of pools) {
+    poolPlasterMm2 += wetInteriorSurfaceMm2(pool);
+  }
+  let spaPlasterMm2 = 0;
+  for (const spa of spas) {
+    spaPlasterMm2 += wetInteriorSurfaceMm2(spa);
+  }
+  // Rough overlap deduction: shared waterline area × avg wall depth is hard;
+  // keep prior surface-overlap scale against wet surfaces proportionally.
+  if (plasterOverlapMm2 > 0 && poolAreaMm2 > 0) {
+    const ratio = Math.min(1, plasterOverlapMm2 / poolAreaMm2);
+    poolPlasterMm2 = Math.max(0, poolPlasterMm2 * (1 - ratio * 0.35));
+  }
   push(
     "plaster_interior",
-    mm2ToSf(poolAreaMm2),
+    mm2ToSf(poolPlasterMm2),
     "sf",
-    plasterOverlapMm2 > 0
-      ? "Pool water surface (overlap with spa deducted)"
-      : "Pool water surface area",
+    "Pool wet surface (floor + walls)",
   );
-  push("plaster_interior", mm2ToSf(spaAreaMm2), "sf", "Spa water surface area");
+  push(
+    "plaster_interior",
+    mm2ToSf(spaPlasterMm2),
+    "sf",
+    "Spa wet surface (floor + walls)",
+  );
   push(
     "waterline_tile",
     mmToLf(waterPerimeterMm),
@@ -470,7 +541,7 @@ export function buildTakeoff(
     mmToLf(pipeMm) * 0.15 +
     mmToLf(waterPerimeterMm) * 0.2 +
     mmToLf(spaFootingMm) * 0.15 +
-    coverCount * POST_FOOTINGS_PER_COVER * 1.5 +
+    coverPostCount * 1.5 +
     fenceLfTotal * 0.35 +
     [...gateCountByKind.values()].reduce((s, n) => s + n, 0) * 1.5 +
     poolCount * 24 +

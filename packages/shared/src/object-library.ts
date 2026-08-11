@@ -28,6 +28,9 @@ export type PlaceableItem = {
 /** In-water fixtures placed on pool / spa (not pad equipment). */
 export const WATER_FIXTURE_IDS = [
   "spa_drain",
+  "pool_drain",
+  "pool_skimmer",
+  "pool_return",
   "spa_bubbler",
   "pool_bubbler",
   "spa_jet",
@@ -47,6 +50,9 @@ export function isBubblerId(id: string): boolean {
 
 export function isPoolFixtureId(id: string): boolean {
   return (
+    id === "pool_drain" ||
+    id === "pool_skimmer" ||
+    id === "pool_return" ||
     id === "pool_bubbler" ||
     id === "light_standard" ||
     id === "light_color"
@@ -143,6 +149,43 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     layerId: "equipment",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 18500,
+  },
+  {
+    id: "pool_drain",
+    name: "Pool main drain (VGBA)",
+    category: "equipment",
+    widthMm: 12 * IN,
+    depthMm: 12 * IN,
+    heightMm: 80,
+    layerId: "equipment",
+    levels: ["residential", "commercial", "water_park"],
+    unitPriceCents: 22500,
+    description:
+      "ANSI/APSP-16 compliant floor suction outlet — install in pairs",
+  },
+  {
+    id: "pool_skimmer",
+    name: "Pool skimmer",
+    category: "equipment",
+    widthMm: 14 * IN,
+    depthMm: 18 * IN,
+    heightMm: 200,
+    layerId: "equipment",
+    levels: ["residential", "commercial", "water_park"],
+    unitPriceCents: 28500,
+    description: "Wall skimmer throat at operating waterline",
+  },
+  {
+    id: "pool_return",
+    name: "Pool return inlet",
+    category: "equipment",
+    widthMm: 5 * IN,
+    depthMm: 5 * IN,
+    heightMm: 80,
+    layerId: "equipment",
+    levels: ["residential", "commercial", "water_park"],
+    unitPriceCents: 6500,
+    description: "Wall return / inlet fitting",
   },
   {
     id: "spa_bubbler",

@@ -6,6 +6,7 @@ export type CatalogUnit =
   | "sf"
   | "sy"
   | "cy"
+  | "gal"
   | "hr"
   | "lb"
   | "kg"
@@ -44,6 +45,25 @@ export const DEFAULT_CATALOG: CatalogItem[] = [
     levels: ["residential", "commercial", "water_park"],
     description:
       "Structural shell: floor + walls (shared pool/spa openings deducted)",
+  },
+  {
+    id: "excavation_pool",
+    name: "Pool excavation",
+    category: "structure",
+    unit: "cy",
+    unitPriceCents: 4500,
+    levels: ["residential", "commercial", "water_park"],
+    description:
+      "Outside shell footprint × max depth + 6″ overdig / working space",
+  },
+  {
+    id: "water_volume",
+    name: "Pool water volume",
+    category: "equipment",
+    unit: "gal",
+    unitPriceCents: 0,
+    levels: ["residential", "commercial", "water_park"],
+    description: "Depth-profile integrated gallonage (design aid, not billed)",
   },
   {
     id: "rebar_steel",
@@ -88,7 +108,8 @@ export const DEFAULT_CATALOG: CatalogItem[] = [
     unit: "sf",
     unitPriceCents: 1200,
     levels: ["residential", "commercial", "water_park"],
-    description: "Interior finish coat based on water surface area (not gunite)",
+    description:
+      "Interior finish coat on wet surface (floor + walls)",
   },
   {
     id: "waterline_tile",

@@ -1594,8 +1594,16 @@ export function fixturePlumbingKind(
   ) {
     return "feature";
   }
-  if (catalogItemId === "spa_jet") return "return";
-  if (catalogItemId === "spa_drain") return "suction";
+  if (catalogItemId === "spa_jet" || catalogItemId === "pool_return") {
+    return "return";
+  }
+  if (
+    catalogItemId === "spa_drain" ||
+    catalogItemId === "pool_drain" ||
+    catalogItemId === "pool_skimmer"
+  ) {
+    return "suction";
+  }
   return null;
 }
 

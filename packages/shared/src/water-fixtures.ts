@@ -7,11 +7,16 @@ import { isBubblerId } from "./object-library";
 
 /** Wall-mounted in-water fixtures (jets, niche lights) — snap to shell. */
 export function isWallWaterFixtureId(id: string): boolean {
-  return id === "spa_jet" || id.startsWith("light_");
+  return (
+    id === "spa_jet" ||
+    id === "pool_return" ||
+    id === "pool_skimmer" ||
+    id.startsWith("light_")
+  );
 }
 
 export function isFloorWaterFixtureId(id: string): boolean {
-  return isBubblerId(id) || id === "spa_drain";
+  return isBubblerId(id) || id === "spa_drain" || id === "pool_drain";
 }
 
 export type WallFixtureSnap = {

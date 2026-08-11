@@ -48,6 +48,7 @@ const ESTIMATE_UNITS: CatalogUnit[] = [
   "m",
   "m2",
   "cy",
+  "gal",
 ];
 
 const PATIO_GRADE_STRATEGIES: PatioGradeStrategy[] = [

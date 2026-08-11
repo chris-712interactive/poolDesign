@@ -16,15 +16,20 @@ import {
   FENCE_KINDS,
   GATE_KINDS,
   applySpaPackage,
+  applyPoolPackage,
   attachFixturePlumbing,
   axisAlignedRect,
   buildBodyPlumbingRuns,
   buildSpaPackage,
+  buildPoolPackage,
   connectBodiesToEquipment,
+  computePoolHydraulics,
+  analyzeBarrierCompliance,
   isPlumbingFixtureId,
   normalizeDesignDocument,
   obstaclesFromDesign,
   rebuildBodyPlumbing,
+  resetPoolPackage,
   syncAllBodiesPlumbing,
   syncPlumbingAfterObjectChange,
   syncPlumbingAfterObjectRemoved,
@@ -1181,44 +1186,14 @@ export function CadWorkspace({
       commitDesign(applySpaPackage(design, pkg));
       setSelection({ kind: "pool", id: pkg.body.id });
     } else {
-      const pool: PoolBody = {
-        id: newId("pool"),
-        name: `Pool ${poolCount(design) + 1}`,
-        kind: "pool",
+      const pkg = buildPoolPackage(
         outline,
-        depthShallowMm: DEFAULT_POOL_SHALLOW_MM,
-        depthDeepMm: DEFAULT_POOL_DEEP_MM,
-        wallThicknessMm: DEFAULT_POOL_WALL_THICKNESS_MM,
-      };
-      let next: DesignDocument = {
-        ...design,
-        poolBodies: [...design.poolBodies, pool],
-      };
-      const bounds = outlineBounds(outline);
-      const connection = resolveEquipmentConnection(next, {
-        x: bounds.cx,
-        y: bounds.cy,
-      });
-      if (connection) {
-        next = {
-          ...next,
-          plumbingRuns: [
-            ...next.plumbingRuns,
-            ...buildBodyPlumbingRuns({
-              body: pool,
-              connection,
-              suctionStart: {
-                x: bounds.cx,
-                y: bounds.cy,
-              },
-              returnEnds: [{ x: bounds.cx, y: bounds.cy }],
-              obstacles: obstaclesFromDesign(next),
-            }),
-          ],
-        };
-      }
-      commitDesign(next);
-      setSelection({ kind: "pool", id: pool.id });
+        poolCount(design) + 1,
+        DEFAULT_POOL_WALL_THICKNESS_MM,
+        design,
+      );
+      commitDesign(applyPoolPackage(design, pkg));
+      setSelection({ kind: "pool", id: pkg.body.id });
     }
     setDraftPoints([]);
     setLengthBuffer("");
@@ -3104,6 +3079,7 @@ export function CadWorkspace({
                       </span>
                     </div>
                   ))}
+                  <BarrierChecklistPanel design={design} />
                 </div>
 
                 <button
@@ -3212,7 +3188,11 @@ export function CadWorkspace({
                                   p.id === selectedPool.id ? asPool : p,
                                 ),
                               };
-                              commitDesign(connectBodiesToEquipment(withPool));
+                              commitDesign(
+                                connectBodiesToEquipment(
+                                  resetPoolPackage(withPool, asPool),
+                                ),
+                              );
                             }
                           }}
                         >
@@ -3303,6 +3283,11 @@ export function CadWorkspace({
                         }
                       />
                     )}
+                    <PoolHydraulicsPanel
+                      key={`hydro-${selectedPool.id}-${selectedPool.depthShallowMm}-${selectedPool.depthDeepMm}-${JSON.stringify(selectedPool.depthStations ?? null)}`}
+                      body={selectedPool}
+                      design={design}
+                    />
                     <div className="stack" style={{ gap: "0.4rem" }}>
                       <strong style={{ fontSize: "0.9rem" }}>
                         Waterline tile
@@ -5204,6 +5189,91 @@ function PoolWallFields({
         Inside waterline: {formatLength(inside.width, unitSystem)} ×{" "}
         {formatLength(inside.height, unitSystem)}
       </div>
+    </div>
+  );
+}
+
+function PoolHydraulicsPanel({
+  body,
+  design,
+}: {
+  body: PoolBody;
+  design: DesignDocument;
+}) {
+  const hydro = computePoolHydraulics(body, design);
+  if (!hydro) return null;
+  return (
+    <div
+      className="stack"
+      style={{
+        gap: "0.25rem",
+        padding: "0.55rem 0.65rem",
+        background: "rgba(15,92,74,0.08)",
+        borderRadius: 6,
+        fontSize: "0.8rem",
+      }}
+    >
+      <strong style={{ fontSize: "0.82rem" }}>Filtration hydraulics</strong>
+      <div>
+        Volume ≈ {hydro.volumeGal.toLocaleString()} gal · {hydro.turnoverHours}{" "}
+        h turnover
+      </div>
+      <div>
+        Filtration {hydro.filtrationGpm.toFixed(0)} GPM · pump ≥{" "}
+        {hydro.designPumpGpm} GPM @ ~{hydro.estimatedTdhFt.toFixed(1)} ft TDH
+      </div>
+      <div>
+        Filter ≥ {hydro.recommendedFilterSf} ft² cartridge · suction{" "}
+        {hydro.suctionPipeIdIn}&quot; ({hydro.suctionVelocityFps.toFixed(1)} fps)
+        · return {hydro.returnPipeIdIn}&quot; (
+        {hydro.returnVelocityFps.toFixed(1)} fps)
+      </div>
+      {!hydro.velocityOk && (
+        <div style={{ color: "#8a3b12" }}>
+          Pipe velocity exceeds target — upsize suction/return lines.
+        </div>
+      )}
+      <details>
+        <summary style={{ cursor: "pointer" }}>Method notes</summary>
+        <ul
+          style={{
+            margin: "0.35rem 0 0",
+            paddingLeft: "1.1rem",
+            fontSize: "0.72rem",
+          }}
+        >
+          {hydro.methodNotes.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
+function BarrierChecklistPanel({ design }: { design: DesignDocument }) {
+  const report = analyzeBarrierCompliance(design);
+  if (design.poolBodies.length === 0) return null;
+  return (
+    <div className="stack" style={{ gap: "0.25rem", marginTop: "0.35rem" }}>
+      <strong style={{ fontSize: "0.82rem" }}>Barrier (ISPSC soft check)</strong>
+      {report.findings.map((f) => (
+        <div
+          key={f.id}
+          style={{
+            fontSize: "0.78rem",
+            color:
+              f.severity === "warn"
+                ? "#8a3b12"
+                : f.severity === "ok"
+                  ? "#0f5c4a"
+                  : undefined,
+          }}
+        >
+          {f.severity === "warn" ? "⚠ " : f.severity === "ok" ? "✓ " : "· "}
+          {f.message}
+        </div>
+      ))}
     </div>
   );
 }

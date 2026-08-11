@@ -1071,6 +1071,33 @@ export type DesignGuideStep = {
 /** Simple guided checklist for designers building out a job */
 export function designGuideSteps(design: DesignDocument): DesignGuideStep[] {
   const features = design.features ?? [];
+  const fences = design.fences ?? [];
+  const objects = design.objects ?? [];
+  const furnitureOnly = objects.filter(
+    (o) =>
+      ![
+        "equip_pad",
+        "pump_variable_speed",
+        "filter_cartridge",
+        "heater_gas",
+        "salt_chlorinator",
+        "spa_drain",
+        "pool_drain",
+        "pool_skimmer",
+        "pool_return",
+        "spa_bubbler",
+        "pool_bubbler",
+        "spa_jet",
+        "light_standard",
+        "light_color",
+      ].includes(o.catalogItemId),
+  );
+  const hasPoolPackage = objects.some(
+    (o) =>
+      o.catalogItemId === "pool_drain" ||
+      o.catalogItemId === "pool_skimmer" ||
+      o.catalogItemId === "pool_return",
+  );
   return [
     {
       id: "house",
@@ -1088,7 +1115,14 @@ export function designGuideSteps(design: DesignDocument): DesignGuideStep[] {
       id: "pool",
       title: "Draw the pool or spa",
       done: design.poolBodies.length > 0,
-      hint: "Use Pool/Spa rect — spas auto-add benches, jets, and plumbing",
+      hint:
+        "Pool/Spa rect — pools auto-add drains, skimmers, returns, lights & steps; spas auto-add benches/jets",
+    },
+    {
+      id: "fixtures",
+      title: "Confirm water fixtures",
+      done: hasPoolPackage || objects.some((o) => o.catalogItemId === "spa_drain"),
+      hint: "Package fixtures land automatically — adjust on plan as needed",
     },
     {
       id: "features",
@@ -1097,13 +1131,19 @@ export function designGuideSteps(design: DesignDocument): DesignGuideStep[] {
         (f) =>
           f.kind === "steps" || f.kind === "bench" || f.kind === "sunshelf",
       ),
-      hint: "Use Steps, Bench, or Sunshelf tools inside the pool",
+      hint: "Use Steps, Bench, or Sunshelf tools (pools include entry steps)",
     },
     {
       id: "patio",
       title: "Add patio / deck",
       done: design.patios.length > 0,
       hint: "Trace the surround with Patio",
+    },
+    {
+      id: "fence",
+      title: "Add barrier fence & gate",
+      done: fences.length > 0 && fences.some((f) => (f.gates ?? []).length > 0),
+      hint: "Fence tool + gate — aim for 48″+ enclosure (ISPSC-style soft check)",
     },
     {
       id: "covers",
@@ -1114,7 +1154,7 @@ export function designGuideSteps(design: DesignDocument): DesignGuideStep[] {
     {
       id: "equipment",
       title: "Place pad equipment",
-      done: (design.objects ?? []).some((o) =>
+      done: objects.some((o) =>
         [
           "equip_pad",
           "pump_variable_speed",
@@ -1134,14 +1174,14 @@ export function designGuideSteps(design: DesignDocument): DesignGuideStep[] {
     {
       id: "furniture",
       title: "Place furniture / amenities",
-      done: (design.objects ?? []).length > 0,
-      hint: "Library tool — click to place",
+      done: furnitureOnly.length > 0,
+      hint: "Library tool — lounge chairs, tables, etc.",
     },
     {
       id: "estimate",
       title: "Review the estimate",
       done: false,
-      hint: "Open Estimate / BOM when ready",
+      hint: "Open Estimate / BOM — check gallons, excavation, hydraulics notes",
     },
   ];
 }

@@ -3,8 +3,21 @@ import {
   type DepthTransition,
   type PointMm,
   type PoolBody,
+  pointInPolygon,
+  polygonAreaMm2,
+  polygonPerimeterMm,
+  waterBodyKind,
 } from "./design-model";
-import { outlineBounds } from "./spa-defaults";
+import {
+  insideOutlineFromOutside,
+  outlineBounds,
+  poolWallThicknessMm,
+  spaWallThicknessMm,
+} from "./spa-defaults";
+import { MM_PER_FOOT } from "./units";
+
+const GAL_PER_CU_FT = 7.48052;
+const MM3_PER_CY = 764_554_857.984; // (304.8)^3 * 27
 
 export type ResolvedDepthStation = {
   id: string;
@@ -364,4 +377,74 @@ export function depthStationPlanPoint(
     x: originMm.x + a.x * axisLengthMm * tt,
     y: originMm.y + a.y * axisLengthMm * tt,
   };
+}
+
+/**
+ * Integrate water volume over the inside waterline using the depth profile.
+ * Samples a grid; good enough for takeoff / turnover sizing.
+ */
+export function waterVolumeMm3(body: PoolBody, stepMm = 300): number {
+  const wall =
+    waterBodyKind(body) === "spa"
+      ? spaWallThicknessMm(body)
+      : poolWallThicknessMm(body);
+  const inside = insideOutlineFromOutside(body.outline, wall);
+  const ring = inside.length >= 3 ? inside : body.outline;
+  if (ring.length < 3) return 0;
+
+  const b = outlineBounds(ring);
+  const step = Math.max(100, stepMm);
+  let sum = 0;
+  let cells = 0;
+  for (let y = b.minY + step / 2; y < b.maxY; y += step) {
+    for (let x = b.minX + step / 2; x < b.maxX; x += step) {
+      const p = { x, y };
+      if (!pointInPolygon(p, ring)) continue;
+      sum += depthMmAtPlanPoint(body, p);
+      cells += 1;
+    }
+  }
+  if (cells === 0) {
+    const avg = (body.depthShallowMm + body.depthDeepMm) / 2;
+    return polygonAreaMm2(ring) * avg;
+  }
+  return sum * step * step;
+}
+
+export function waterVolumeGal(body: PoolBody, stepMm = 300): number {
+  const cuFt = waterVolumeMm3(body, stepMm) / (MM_PER_FOOT ** 3);
+  return cuFt * GAL_PER_CU_FT;
+}
+
+/**
+ * Wet interior surface (floor + walls) for plaster takeoff.
+ * Floor = inside area; walls = inside perimeter × mean profile depth.
+ */
+export function wetInteriorSurfaceMm2(body: PoolBody): number {
+  const wall =
+    waterBodyKind(body) === "spa"
+      ? spaWallThicknessMm(body)
+      : poolWallThicknessMm(body);
+  const inside = insideOutlineFromOutside(body.outline, wall);
+  const ring = inside.length >= 3 ? inside : body.outline;
+  const floor = polygonAreaMm2(ring);
+  const wallDepth =
+    body.depthStations && body.depthStations.length >= 2
+      ? (body.depthShallowMm + maxDepthMmFromProfile(body)) / 2
+      : (body.depthShallowMm + body.depthDeepMm) / 2;
+  return floor + polygonPerimeterMm(ring) * wallDepth;
+}
+
+/**
+ * Excavation allowance (cy): outside footprint × max depth + 6″ overdig
+ * on the floor, plus 6″ working space outside the shell.
+ */
+export function excavationVolumeCy(body: PoolBody): number {
+  const overdigMm = 6 * 25.4;
+  const workingMm = 6 * 25.4;
+  const b = outlineBounds(body.outline);
+  const footprint =
+    (b.width + 2 * workingMm) * (b.height + 2 * workingMm);
+  const depth = maxDepthMmFromProfile(body) + overdigMm;
+  return (footprint * depth) / MM3_PER_CY;
 }
