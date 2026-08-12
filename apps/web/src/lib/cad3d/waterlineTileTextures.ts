@@ -304,6 +304,15 @@ export function getWaterlineTileTexture(
   return pair;
 }
 
+/** Source canvas used by the 3D waterline material — for 2D finish previews. */
+export function getWaterlineTilePreviewCanvas(
+  tileId: string | undefined,
+): HTMLCanvasElement | null {
+  if (typeof document === "undefined") return null;
+  const img = getWaterlineTileTexture(tileId).color.image;
+  return img instanceof HTMLCanvasElement ? img : null;
+}
+
 export function preloadWaterlineTileTextures(ids: string[]) {
   for (const id of ids) getWaterlineTileTexture(id);
 }

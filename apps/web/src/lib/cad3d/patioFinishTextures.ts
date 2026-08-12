@@ -656,6 +656,15 @@ export function getPatioFinishTexture(finishId: string | undefined): PatioTexPai
   return pair;
 }
 
+/** Source canvas used by the 3D patio material — for 2D finish previews. */
+export function getPatioFinishPreviewCanvas(
+  finishId: string | undefined,
+): HTMLCanvasElement | null {
+  if (typeof document === "undefined") return null;
+  const img = getPatioFinishTexture(finishId).color.image;
+  return img instanceof HTMLCanvasElement ? img : null;
+}
+
 export function preloadPatioFinishTextures(ids: string[]) {
   for (const id of ids) getPatioFinishTexture(id);
 }

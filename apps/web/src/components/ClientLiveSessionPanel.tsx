@@ -4,14 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_PATIO_FINISH_ID,
   DEFAULT_WATERLINE_TILE_ID,
-  getPatioFinish,
-  getWaterlineTile,
-  patioFinishCssColor,
-  waterlineTileCssColor,
   type LiveSessionState,
 } from "@pool-design/shared";
 import { PatioFinishPicker } from "@/components/PatioFinishPicker";
 import { WaterlineTilePicker } from "@/components/WaterlineTilePicker";
+import { FinishCombinationPreview } from "@/components/FinishCombinationPreview";
 
 type Props = { token: string };
 
@@ -91,15 +88,6 @@ export function ClientLiveSessionPanel({ token }: Props) {
     }
   }
 
-  const tile = useMemo(
-    () => getWaterlineTile(draft.waterlineTileId),
-    [draft.waterlineTileId],
-  );
-  const patio = useMemo(
-    () => getPatioFinish(draft.patioMaterialId),
-    [draft.patioMaterialId],
-  );
-
   const dirty = useMemo(() => {
     const sentTile = state?.finishes.waterlineTileId;
     const sentPatio =
@@ -144,35 +132,10 @@ export function ClientLiveSessionPanel({ token }: Props) {
         </p>
       </div>
 
-      <div className="client-finish-preview" aria-live="polite">
-        <div className="client-finish-preview-stage">
-          <div
-            className="client-finish-preview-patio"
-            style={{
-              background: `linear-gradient(135deg, ${patioFinishCssColor(patio.color)} 55%, ${patioFinishCssColor(patio.accent)} 55%)`,
-            }}
-          />
-          <div className="client-finish-preview-pool">
-            <div
-              className="client-finish-preview-waterline"
-              style={{
-                background: `linear-gradient(90deg, ${waterlineTileCssColor(tile.color)}, ${waterlineTileCssColor(tile.blend?.[0] ?? tile.accent)})`,
-              }}
-            />
-            <div className="client-finish-preview-water" />
-          </div>
-        </div>
-        <div className="client-finish-preview-meta">
-          <div>
-            <span className="muted">Waterline</span>
-            <strong>{tile.name}</strong>
-          </div>
-          <div>
-            <span className="muted">Patio</span>
-            <strong>{patio.name}</strong>
-          </div>
-        </div>
-      </div>
+      <FinishCombinationPreview
+        waterlineTileId={draft.waterlineTileId}
+        patioMaterialId={draft.patioMaterialId}
+      />
 
       <div className="client-finish-pickers">
         <div className="client-finish-block">

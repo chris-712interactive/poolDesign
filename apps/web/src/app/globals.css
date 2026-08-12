@@ -425,37 +425,12 @@ textarea {
   background: rgba(255, 255, 255, 0.55);
 }
 
-.client-finish-preview-stage {
-  position: relative;
-  height: 140px;
+.client-finish-preview-canvas {
+  width: 100%;
+  height: auto;
+  display: block;
   border-radius: 10px;
-  overflow: hidden;
-}
-
-.client-finish-preview-patio {
-  position: absolute;
-  inset: 0;
-}
-
-.client-finish-preview-pool {
-  position: absolute;
-  left: 12%;
-  right: 12%;
-  top: 28%;
-  bottom: 18%;
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: 0 8px 24px rgba(20, 40, 50, 0.18);
-}
-
-.client-finish-preview-waterline {
-  height: 14%;
-  min-height: 10px;
-}
-
-.client-finish-preview-water {
-  height: 86%;
-  background: linear-gradient(180deg, #5eb0d4 0%, #2f7fa8 100%);
+  background: #d8d0c4;
 }
 
 .client-finish-preview-meta {
