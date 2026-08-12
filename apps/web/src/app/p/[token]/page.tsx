@@ -1,12 +1,9 @@
 import { prisma } from "@pool-design/db";
-import {
-  formatMoney,
-  formatQuantity,
-  type TakeoffResult,
-} from "@pool-design/shared";
+import { type TakeoffResult } from "@pool-design/shared";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { ClientLiveSessionPanel } from "@/components/ClientLiveSessionPanel";
+import { ProposalEstimateSection } from "@/components/ProposalEstimateSection";
 
 type PageProps = { params: Promise<{ token: string }> };
 
@@ -113,46 +110,13 @@ export default async function PublicProposalPage({ params }: PageProps) {
           ) : null}
         </section>
 
-        {share.includeEstimate && estimate ? (
-          <section className="proposal-panel">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <h2>Estimate summary</h2>
-              <strong>{formatMoney(estimate.subtotalCents)}</strong>
-            </div>
-            <p className="muted">
-              Indicative takeoff at share time. Final pricing may change.
-            </p>
-            <div className="proposal-table-wrap">
-              <table className="proposal-table">
-                <thead>
-                  <tr>
-                    <th>Item</th>
-                    <th>Qty</th>
-                    <th>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {estimate.lines.map((line) => (
-                    <tr key={line.lineKey}>
-                      <td>
-                        <div>{line.name}</div>
-                        {line.note ? (
-                          <div className="muted">{line.note}</div>
-                        ) : null}
-                      </td>
-                      <td>
-                        {formatQuantity(line.quantity, line.unit)}
-                      </td>
-                      <td>{formatMoney(line.totalCents)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        ) : null}
-
         <ClientLiveSessionPanel token={token} />
+
+        <ProposalEstimateSection
+          token={token}
+          shareIncludesEstimate={share.includeEstimate}
+          estimate={estimate}
+        />
 
         <p className="proposal-footer muted">
           Shared by {company.name}

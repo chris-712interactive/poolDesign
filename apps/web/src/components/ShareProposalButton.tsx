@@ -13,6 +13,8 @@ type Props = {
   capturePreview?: () => string | null;
   /** Switch to 3D before capture (optional). */
   ensure3d?: () => void;
+  /** When true, snapshot estimate onto the share (default false). */
+  includeEstimate?: boolean;
   onShared?: (result: ShareResult) => void;
   onError?: (message: string) => void;
 };
@@ -22,6 +24,7 @@ export function ShareProposalButton({
   projectId,
   capturePreview,
   ensure3d,
+  includeEstimate = false,
   onShared,
   onError,
 }: Props) {
@@ -52,7 +55,7 @@ export function ShareProposalButton({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          includeEstimate: true,
+          includeEstimate,
           previewImageUrl,
         }),
       });

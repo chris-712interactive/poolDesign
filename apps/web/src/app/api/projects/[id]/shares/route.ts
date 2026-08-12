@@ -82,7 +82,7 @@ export async function POST(request: Request, context: RouteContext) {
     expiresInDays?: number | null;
   };
 
-  const includeEstimate = body.includeEstimate !== false;
+  const includeEstimate = body.includeEstimate === true;
   const design = parseDesignDocument(
     project.designJson,
     project.designLevel as DesignLevel,

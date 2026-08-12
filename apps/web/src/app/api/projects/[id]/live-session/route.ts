@@ -141,6 +141,7 @@ export async function PATCH(
 
   const body = (await request.json().catch(() => ({}))) as {
     finishes?: LiveSessionFinishes;
+    showEstimate?: boolean;
     approval?: Omit<LiveSessionApproval, "id" | "at" | "by"> & {
       id?: string;
     };
@@ -153,6 +154,9 @@ export async function PATCH(
   state.hostOnlineAt = new Date().toISOString();
   state.active = session.active;
 
+  if (typeof body.showEstimate === "boolean") {
+    state.showEstimate = body.showEstimate;
+  }
   if (body.finishes) {
     state.finishes = {
       ...state.finishes,

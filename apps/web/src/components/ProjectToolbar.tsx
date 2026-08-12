@@ -87,6 +87,8 @@ export function ProjectToolbar({
 }: Props) {
   const [strip, setStrip] = useState<StripState>(null);
   const [live, setLive] = useState<LiveSessionStatus | null>(null);
+  const [includeEstimate, setIncludeEstimate] = useState(false);
+  const [estimateBusy, setEstimateBusy] = useState(false);
 
   const onLiveStatus = useCallback((status: LiveSessionStatus) => {
     setLive(status);
@@ -110,6 +112,37 @@ export function ProjectToolbar({
     }
   }
 
+  async function setShowEstimate(next: boolean) {
+    setEstimateBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/live-session`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ showEstimate: next }),
+      });
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setStrip({
+          kind: "error",
+          message: json.error || "Could not update estimate visibility",
+        });
+        return;
+      }
+      const json = (await res.json()) as {
+        state?: { showEstimate?: boolean };
+      };
+      setLive((prev) =>
+        prev
+          ? { ...prev, showEstimate: Boolean(json.state?.showEstimate ?? next) }
+          : prev,
+      );
+    } finally {
+      setEstimateBusy(false);
+    }
+  }
+
   const showLiveStrip = Boolean(live?.active);
   const showStrip = strip != null || showLiveStrip;
 
@@ -130,10 +163,19 @@ export function ProjectToolbar({
             entitlements={entitlements}
             onStatusChange={onLiveStatus}
           />
+          <label className="project-toolbar-check" title="Attach estimate to the client link">
+            <input
+              type="checkbox"
+              checked={includeEstimate}
+              onChange={(e) => setIncludeEstimate(e.target.checked)}
+            />
+            <span>Include estimate</span>
+          </label>
           <ShareProposalButton
             projectId={projectId}
             ensure3d={ensure3d}
             capturePreview={capturePreview}
+            includeEstimate={includeEstimate}
             onShared={onShared}
             onError={onShareError}
           />
@@ -222,6 +264,15 @@ export function ProjectToolbar({
                 {live?.tileName ? ` · ${live.tileName}` : ""}
                 {live?.lastApproval ? ` · ${live.lastApproval}` : ""}
               </span>
+              <label className="project-toolbar-check project-toolbar-strip-check">
+                <input
+                  type="checkbox"
+                  checked={Boolean(live?.showEstimate)}
+                  disabled={estimateBusy}
+                  onChange={(e) => void setShowEstimate(e.target.checked)}
+                />
+                <span>Show estimate to client</span>
+              </label>
               {live?.canApplyFinishes ? (
                 <button
                   type="button"

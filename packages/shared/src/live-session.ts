@@ -25,6 +25,11 @@ export type LiveSessionState = {
   guestOnlineAt: string | null;
   finishes: LiveSessionFinishes;
   approvals: LiveSessionApproval[];
+  /**
+   * When true, the client proposal may show the estimate during a live session.
+   * Default false — live preview hides pricing unless the designer opts in.
+   */
+  showEstimate: boolean;
 };
 
 export function emptyLiveSessionState(): LiveSessionState {
@@ -35,6 +40,7 @@ export function emptyLiveSessionState(): LiveSessionState {
     guestOnlineAt: null,
     finishes: {},
     approvals: [],
+    showEstimate: false,
   };
 }
 
@@ -72,5 +78,6 @@ export function parseLiveSessionState(raw: unknown): LiveSessionState {
           : undefined,
     },
     approvals,
+    showEstimate: Boolean(o.showEstimate),
   };
 }

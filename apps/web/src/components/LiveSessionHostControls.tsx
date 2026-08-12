@@ -15,6 +15,7 @@ export type LiveSessionStatus = {
   canApplyFinishes: boolean;
   finishes: LiveSessionFinishes;
   lastApproval: string | null;
+  showEstimate: boolean;
   error: string | null;
 };
 
@@ -48,6 +49,7 @@ function statusFromState(
     ),
     finishes,
     lastApproval: last ? `${last.label} — ${last.status}` : null,
+    showEstimate: Boolean(state?.showEstimate),
     error,
   };
 }

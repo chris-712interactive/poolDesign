@@ -390,6 +390,109 @@ textarea {
   flex-shrink: 0;
 }
 
+.project-toolbar-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted, #5c6b64);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.project-toolbar-check input {
+  accent-color: var(--accent);
+}
+
+.project-toolbar-strip-check {
+  color: var(--panel-ink);
+}
+
+/* Client live finish preview */
+.client-live-panel h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.client-finish-preview {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.client-finish-preview-stage {
+  position: relative;
+  height: 140px;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.client-finish-preview-patio {
+  position: absolute;
+  inset: 0;
+}
+
+.client-finish-preview-pool {
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  top: 28%;
+  bottom: 18%;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(20, 40, 50, 0.18);
+}
+
+.client-finish-preview-waterline {
+  height: 14%;
+  min-height: 10px;
+}
+
+.client-finish-preview-water {
+  height: 86%;
+  background: linear-gradient(180deg, #5eb0d4 0%, #2f7fa8 100%);
+}
+
+.client-finish-preview-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.client-finish-preview-meta .muted {
+  display: block;
+  font-size: 0.75rem;
+  margin-bottom: 0.15rem;
+}
+
+.client-finish-preview-meta strong {
+  font-size: 0.9rem;
+}
+
+.client-finish-pickers {
+  display: grid;
+  gap: 1.25rem;
+}
+
+@media (min-width: 900px) {
+  .client-finish-pickers {
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+}
+
+.client-finish-block {
+  padding: 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.45);
+}
+
 @media (max-width: 720px) {
   .project-toolbar-divider {
     display: none;

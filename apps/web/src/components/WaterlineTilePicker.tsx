@@ -144,9 +144,12 @@ function previewColors(
 export function WaterlineTilePicker({
   value,
   onChange,
+  hideEstimateNote = false,
 }: {
   value: string | undefined;
   onChange: (tileId: string) => void;
+  /** Client / live preview: skip BOM note. */
+  hideEstimateNote?: boolean;
 }) {
   const tile = getWaterlineTile(value);
   const patterns = waterlinePatternsInCategory(tile.category);
@@ -178,10 +181,12 @@ export function WaterlineTilePicker({
 
   return (
     <div className="patio-finish-picker">
-      <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
-        Waterline tile band (~6″). Estimate still prices exposed perimeter as
-        waterline tile LF.
-      </p>
+      {!hideEstimateNote ? (
+        <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
+          Waterline tile band (~6″). Estimate still prices exposed perimeter as
+          waterline tile LF.
+        </p>
+      ) : null}
       <div className="field">
         <label htmlFor="wl-tile-category">Style</label>
         <select
