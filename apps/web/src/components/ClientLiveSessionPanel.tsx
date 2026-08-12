@@ -38,10 +38,15 @@ export function ClientLiveSessionPanel({ token }: Props) {
     if (!res.ok) return;
     const json = (await res.json()) as {
       active: boolean;
+      previewImageUrl?: string | null;
       state: LiveSessionState;
     };
     setActive(json.active);
-    setState(json.state);
+    setState({
+      ...json.state,
+      previewImageUrl:
+        json.previewImageUrl || json.state.previewImageUrl || null,
+    });
     if (!seeded && json.state) {
       const patioId =
         json.state.finishes.patioMaterialById?.["*"] ??
@@ -131,6 +136,25 @@ export function ClientLiveSessionPanel({ token }: Props) {
           until you send.
         </p>
       </div>
+
+      {state?.previewImageUrl ? (
+        <div className="client-live-still">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            key={state.previewImageUrl}
+            src={state.previewImageUrl}
+            alt="Current 3D design still from your designer"
+            className="proposal-preview"
+          />
+          <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.8rem" }}>
+            Designer&apos;s current 3D still — updates when they refresh it.
+          </p>
+        </div>
+      ) : (
+        <p className="muted" style={{ margin: 0 }}>
+          Waiting for a 3D still from your designer…
+        </p>
+      )}
 
       <FinishCombinationPreview
         waterlineTileId={draft.waterlineTileId}

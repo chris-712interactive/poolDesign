@@ -30,6 +30,8 @@ export type LiveSessionState = {
    * Default false — live preview hides pricing unless the designer opts in.
    */
   showEstimate: boolean;
+  /** Latest 3D still URL pushed by the designer for this live session. */
+  previewImageUrl?: string | null;
 };
 
 export function emptyLiveSessionState(): LiveSessionState {
@@ -41,6 +43,7 @@ export function emptyLiveSessionState(): LiveSessionState {
     finishes: {},
     approvals: [],
     showEstimate: false,
+    previewImageUrl: null,
   };
 }
 
@@ -79,5 +82,11 @@ export function parseLiveSessionState(raw: unknown): LiveSessionState {
     },
     approvals,
     showEstimate: Boolean(o.showEstimate),
+    previewImageUrl:
+      typeof o.previewImageUrl === "string"
+        ? o.previewImageUrl
+        : o.previewImageUrl === null
+          ? null
+          : base.previewImageUrl,
   };
 }

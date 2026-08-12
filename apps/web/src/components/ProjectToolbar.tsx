@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   DesignDocument,
   DesignLevel,
@@ -13,6 +13,7 @@ import {
 } from "@/components/LiveSessionHostControls";
 import {
   ShareProposalButton,
+  UpdateShareStillButton,
   type ShareResult,
 } from "@/components/ShareProposalButton";
 
@@ -31,8 +32,10 @@ type Props = {
   capturePreview: () => string | null;
 };
 
+type ActiveShare = { id: string; url: string };
+
 type StripState =
-  | { kind: "share"; url: string; copied: boolean }
+  | { kind: "share"; url: string; copied: boolean; updated?: boolean }
   | { kind: "error"; message: string }
   | null;
 
@@ -89,12 +92,33 @@ export function ProjectToolbar({
   const [live, setLive] = useState<LiveSessionStatus | null>(null);
   const [includeEstimate, setIncludeEstimate] = useState(false);
   const [estimateBusy, setEstimateBusy] = useState(false);
+  const [activeShare, setActiveShare] = useState<ActiveShare | null>(null);
 
   const onLiveStatus = useCallback((status: LiveSessionStatus) => {
     setLive(status);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/projects/${projectId}/shares`);
+      if (!res.ok || cancelled) return;
+      const json = (await res.json()) as {
+        shares?: Array<{ id: string; url: string }>;
+      };
+      const latest = json.shares?.[0];
+      if (latest && !cancelled) {
+        setActiveShare({ id: latest.id, url: latest.url });
+        setStrip({ kind: "share", url: latest.url, copied: false });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
   function onShared(result: ShareResult) {
+    setActiveShare({ id: result.id, url: result.url });
     setStrip({ kind: "share", url: result.url, copied: result.copied });
   }
 
@@ -144,7 +168,12 @@ export function ProjectToolbar({
   }
 
   const showLiveStrip = Boolean(live?.active);
-  const showStrip = strip != null || showLiveStrip;
+  const showShareStrip = strip?.kind === "share" || Boolean(activeShare);
+  const showStrip =
+    strip != null || showLiveStrip || Boolean(activeShare);
+
+  const shareUrl =
+    strip?.kind === "share" ? strip.url : activeShare?.url ?? null;
 
   return (
     <div className="panel project-toolbar">
@@ -161,9 +190,18 @@ export function ProjectToolbar({
           <LiveSessionHostControls
             projectId={projectId}
             entitlements={entitlements}
+            ensure3d={ensure3d}
+            capturePreview={capturePreview}
             onStatusChange={onLiveStatus}
+            onShareReady={(share) => {
+              setActiveShare({ id: share.shareId, url: share.url });
+              setStrip({ kind: "share", url: share.url, copied: false });
+            }}
           />
-          <label className="project-toolbar-check" title="Attach estimate to the client link">
+          <label
+            className="project-toolbar-check"
+            title="Attach estimate to a new client link"
+          >
             <input
               type="checkbox"
               checked={includeEstimate}
@@ -205,36 +243,59 @@ export function ProjectToolbar({
 
       {showStrip ? (
         <div className="project-toolbar-strip">
-          {strip?.kind === "share" ? (
+          {showShareStrip && shareUrl ? (
             <>
               <span className="project-toolbar-strip-ok">
-                {strip.copied ? "Link copied" : "Link ready"}
+                {strip?.kind === "share" && strip.updated
+                  ? "Still updated"
+                  : strip?.kind === "share" && strip.copied
+                    ? "Link copied"
+                    : "Client link"}
               </span>
-              <span className="project-toolbar-strip-url" title={strip.url}>
-                {truncateUrl(strip.url)}
+              <span className="project-toolbar-strip-url" title={shareUrl}>
+                {truncateUrl(shareUrl)}
               </span>
               <button
                 type="button"
                 className="btn secondary project-toolbar-strip-btn"
-                onClick={() => void copyAgain(strip.url)}
+                onClick={() => void copyAgain(shareUrl)}
               >
                 Copy
               </button>
               <a
                 className="btn secondary project-toolbar-strip-btn"
-                href={strip.url}
+                href={shareUrl}
                 target="_blank"
                 rel="noreferrer"
               >
                 Open
               </a>
-              <button
-                type="button"
-                className="btn ghost project-toolbar-strip-dismiss"
-                onClick={() => setStrip(null)}
-              >
-                Dismiss
-              </button>
+              {activeShare ? (
+                <UpdateShareStillButton
+                  projectId={projectId}
+                  shareId={activeShare.id}
+                  ensure3d={ensure3d}
+                  capturePreview={capturePreview}
+                  onUpdated={() =>
+                    setStrip({
+                      kind: "share",
+                      url: activeShare.url,
+                      copied: false,
+                      updated: true,
+                    })
+                  }
+                  onError={onShareError}
+                />
+              ) : null}
+              {strip?.kind === "share" ? (
+                <button
+                  type="button"
+                  className="btn ghost project-toolbar-strip-dismiss"
+                  onClick={() => setStrip(null)}
+                >
+                  Dismiss
+                </button>
+              ) : null}
             </>
           ) : null}
 
@@ -253,7 +314,7 @@ export function ProjectToolbar({
 
           {showLiveStrip && strip?.kind !== "error" ? (
             <>
-              {strip?.kind === "share" ? (
+              {showShareStrip ? (
                 <span className="project-toolbar-strip-sep" aria-hidden />
               ) : null}
               <span className="project-toolbar-strip-live">

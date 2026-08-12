@@ -2,13 +2,17 @@ import { NextResponse } from "next/server";
 import { prisma } from "@pool-design/db";
 import {
   emptyLiveSessionState,
+  parseDesignDocument,
   parseLiveSessionState,
+  type DesignLevel,
   type LiveSessionApproval,
   type LiveSessionFinishes,
   type LiveSessionState,
 } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { requireEntitlement } from "@/lib/subscription";
+import { completeMilestone, newShareToken } from "@/lib/shares";
+import { appBaseUrl } from "@/lib/app-url";
 
 async function getOrCreateSession(projectId: string) {
   const existing = await prisma.projectLiveSession.findUnique({
@@ -39,6 +43,52 @@ function serialize(session: {
     hostUserId: session.hostUserId,
     updatedAt: session.updatedAt.toISOString(),
     state,
+  };
+}
+
+/** Ensure an active client share exists; optionally set/update its still. */
+async function ensureClientShare(opts: {
+  projectId: string;
+  companyId: string;
+  userId: string;
+  previewImageUrl?: string | null;
+}): Promise<{ shareId: string; url: string }> {
+  const { projectId, companyId, userId, previewImageUrl } = opts;
+  let latest = await prisma.projectShare.findFirst({
+    where: { projectId, revokedAt: null },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (!latest) {
+    const project = await prisma.project.findUniqueOrThrow({
+      where: { id: projectId },
+    });
+    const design = parseDesignDocument(
+      project.designJson,
+      project.designLevel as DesignLevel,
+      project.unitSystem,
+    );
+    latest = await prisma.projectShare.create({
+      data: {
+        projectId,
+        token: newShareToken(),
+        includeEstimate: false,
+        designSnapshotJson: JSON.stringify(design),
+        previewImageUrl: previewImageUrl || null,
+        createdByUserId: userId,
+      },
+    });
+    await completeMilestone(companyId, "first_client_share");
+  } else if (previewImageUrl) {
+    latest = await prisma.projectShare.update({
+      where: { id: latest.id },
+      data: { previewImageUrl },
+    });
+  }
+
+  return {
+    shareId: latest.id,
+    url: `${appBaseUrl()}/p/${latest.token}`,
   };
 }
 
@@ -90,15 +140,26 @@ export async function POST(
 
   const body = (await request.json().catch(() => ({}))) as {
     action?: "start" | "end" | "heartbeat";
+    previewImageUrl?: string | null;
   };
   const action = body.action ?? "start";
   const session = await getOrCreateSession(project.id);
   const state = parseLiveSessionState(JSON.parse(session.stateJson || "{}"));
   const now = new Date().toISOString();
+  let shareLink: { shareId: string; url: string } | null = null;
 
   if (action === "start") {
     state.active = true;
     state.hostOnlineAt = now;
+    if (typeof body.previewImageUrl === "string" && body.previewImageUrl) {
+      state.previewImageUrl = body.previewImageUrl;
+    }
+    shareLink = await ensureClientShare({
+      projectId: project.id,
+      companyId: user.companyId,
+      userId: user.id,
+      previewImageUrl: state.previewImageUrl,
+    });
   } else if (action === "end") {
     state.active = false;
   } else {
@@ -115,7 +176,10 @@ export async function POST(
     },
   });
 
-  return NextResponse.json(serialize(updated));
+  return NextResponse.json({
+    ...serialize(updated),
+    share: shareLink,
+  });
 }
 
 export async function PATCH(
@@ -142,6 +206,7 @@ export async function PATCH(
   const body = (await request.json().catch(() => ({}))) as {
     finishes?: LiveSessionFinishes;
     showEstimate?: boolean;
+    previewImageUrl?: string | null;
     approval?: Omit<LiveSessionApproval, "id" | "at" | "by"> & {
       id?: string;
     };
@@ -156,6 +221,15 @@ export async function PATCH(
 
   if (typeof body.showEstimate === "boolean") {
     state.showEstimate = body.showEstimate;
+  }
+  if (typeof body.previewImageUrl === "string" && body.previewImageUrl) {
+    state.previewImageUrl = body.previewImageUrl;
+    await ensureClientShare({
+      projectId: project.id,
+      companyId: user.companyId,
+      userId: user.id,
+      previewImageUrl: body.previewImageUrl,
+    });
   }
   if (body.finishes) {
     state.finishes = {

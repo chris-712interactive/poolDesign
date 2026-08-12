@@ -411,9 +411,12 @@ textarea {
 }
 
 /* Client live finish preview */
-.client-live-panel h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
+.client-live-still {
+  margin: 0;
+}
+
+.client-live-still .proposal-preview {
+  margin: 0;
 }
 
 .client-finish-preview {

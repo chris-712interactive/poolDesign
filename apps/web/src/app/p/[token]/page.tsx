@@ -3,6 +3,7 @@ import { type TakeoffResult } from "@pool-design/shared";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { ClientLiveSessionPanel } from "@/components/ClientLiveSessionPanel";
+import { ProposalDesignPreview } from "@/components/ProposalDesignPreview";
 import { ProposalEstimateSection } from "@/components/ProposalEstimateSection";
 
 type PageProps = { params: Promise<{ token: string }> };
@@ -85,30 +86,12 @@ export default async function PublicProposalPage({ params }: PageProps) {
       </header>
 
       <main className="proposal-main">
-        <section className="proposal-panel">
-          <h2>Design preview</h2>
-          {share.previewImageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={share.previewImageUrl}
-              alt={`3D preview of ${project.name}`}
-              className="proposal-preview"
-            />
-          ) : (
-            <p className="muted">
-              A 3D still has not been attached to this link yet. Ask your
-              designer to refresh the preview from the CAD workspace.
-            </p>
-          )}
-          {share.previewVideoUrl ? (
-            <video
-              className="proposal-preview"
-              src={share.previewVideoUrl}
-              controls
-              playsInline
-            />
-          ) : null}
-        </section>
+        <ProposalDesignPreview
+          token={token}
+          projectName={project.name}
+          initialPreviewImageUrl={share.previewImageUrl}
+          initialPreviewVideoUrl={share.previewVideoUrl}
+        />
 
         <ClientLiveSessionPanel token={token} />
 

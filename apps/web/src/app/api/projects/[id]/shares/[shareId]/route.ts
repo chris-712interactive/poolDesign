@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@pool-design/db";
+import {
+  buildTakeoff,
+  parseDesignDocument,
+  type DesignLevel,
+} from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { companyHasAppAccess } from "@/lib/subscription";
+import { catalogWithCompanyPrices } from "@/lib/shares";
 
 type RouteContext = { params: Promise<{ id: string; shareId: string }> };
 
@@ -38,11 +44,18 @@ export async function DELETE(_request: Request, context: RouteContext) {
   return NextResponse.json({ ok: true });
 }
 
-/** Update preview media on an existing share. */
+/**
+ * Refresh an existing share in place (same client URL):
+ * - preview still / video
+ * - optional design + estimate snapshots from current project
+ */
 export async function PATCH(request: Request, context: RouteContext) {
   const user = await getSessionUser();
   if (!user?.companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!companyHasAppAccess(user.company)) {
+    return NextResponse.json({ error: "Subscription inactive" }, { status: 402 });
   }
 
   const { id, shareId } = await context.params;
@@ -63,23 +76,50 @@ export async function PATCH(request: Request, context: RouteContext) {
   const body = (await request.json().catch(() => ({}))) as {
     previewImageUrl?: string | null;
     previewVideoUrl?: string | null;
+    /** Re-snapshot designJson (and estimate if share includes it). */
+    refreshSnapshot?: boolean;
   };
+
+  const data: {
+    previewImageUrl?: string | null;
+    previewVideoUrl?: string | null;
+    designSnapshotJson?: string;
+    estimateSnapshotJson?: string | null;
+  } = {};
+
+  if (body.previewImageUrl !== undefined) {
+    data.previewImageUrl = body.previewImageUrl;
+  }
+  if (body.previewVideoUrl !== undefined) {
+    data.previewVideoUrl = body.previewVideoUrl;
+  }
+
+  if (body.refreshSnapshot) {
+    const design = parseDesignDocument(
+      project.designJson,
+      project.designLevel as DesignLevel,
+      project.unitSystem,
+    );
+    data.designSnapshotJson = JSON.stringify(design);
+    if (share.includeEstimate) {
+      const catalog = await catalogWithCompanyPrices(
+        user.companyId,
+        project.designLevel as DesignLevel,
+      );
+      const takeoff = buildTakeoff(design, project.unitSystem, catalog);
+      data.estimateSnapshotJson = JSON.stringify(takeoff);
+    }
+  }
 
   const updated = await prisma.projectShare.update({
     where: { id: share.id },
-    data: {
-      ...(body.previewImageUrl !== undefined
-        ? { previewImageUrl: body.previewImageUrl }
-        : {}),
-      ...(body.previewVideoUrl !== undefined
-        ? { previewVideoUrl: body.previewVideoUrl }
-        : {}),
-    },
+    data,
   });
 
   return NextResponse.json({
     id: updated.id,
     previewImageUrl: updated.previewImageUrl,
     previewVideoUrl: updated.previewVideoUrl,
+    refreshedSnapshot: Boolean(body.refreshSnapshot),
   });
 }
