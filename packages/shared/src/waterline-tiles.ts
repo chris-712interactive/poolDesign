@@ -663,3 +663,22 @@ export function resolveWaterlineTile(opts: {
 export function waterlineTileCssColor(c: WaterlineTileColor): string {
   return `rgb(${c.r},${c.g},${c.b})`;
 }
+
+/** Default nosing band width on steps / sunshelf (~6″). */
+export const DEFAULT_WATERLINE_NOSING_BAND_MM = 152.4;
+/** Practical authorable range for tread / shelf edge bands. */
+export const MIN_WATERLINE_NOSING_BAND_MM = 25.4; // 1″
+export const MAX_WATERLINE_NOSING_BAND_MM = 457.2; // 18″
+
+/** Resolve and clamp a feature nosing band width (mm). */
+export function waterlineNosingBandMm(
+  bandMm: number | undefined | null,
+): number {
+  if (bandMm == null || !Number.isFinite(bandMm)) {
+    return DEFAULT_WATERLINE_NOSING_BAND_MM;
+  }
+  return Math.min(
+    MAX_WATERLINE_NOSING_BAND_MM,
+    Math.max(MIN_WATERLINE_NOSING_BAND_MM, bandMm),
+  );
+}

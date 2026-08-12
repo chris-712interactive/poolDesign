@@ -13,6 +13,8 @@ import {
   DEFAULT_SPA_WALL_THICKNESS_MM,
   DEFAULT_SUNSHELF_DEPTH_MM,
   DEFAULT_WATERLINE_TILE_ID,
+  DEFAULT_WATERLINE_NOSING_BAND_MM,
+  waterlineNosingBandMm,
   DESIGN_LEVEL_LABELS,
   FENCE_KINDS,
   GATE_KINDS,
@@ -4847,34 +4849,88 @@ export function CadWorkspace({
                           <span>Waterline tile nosing band on tread / edge</span>
                         </label>
                         {selectedFeature.waterlineTiles !== false && (
-                          <WaterlineTilePicker
-                            key={`feat-wl-${selectedFeature.id}-${selectedFeature.waterlineTileId ?? "inherit"}`}
-                            value={
-                              selectedFeature.waterlineTileId ??
-                              (selectedFeature.poolBodyId
-                                ? design.poolBodies.find(
-                                    (p) => p.id === selectedFeature.poolBodyId,
-                                  )?.waterlineTileId
-                                : design.poolBodies.find(
-                                    (p) => waterBodyKind(p) === "pool",
-                                  )?.waterlineTileId) ??
-                              DEFAULT_WATERLINE_TILE_ID
-                            }
-                            onChange={(waterlineTileId) =>
-                              commitDesign({
-                                ...design,
-                                features: (design.features ?? []).map((f) =>
-                                  f.id === selectedFeature.id
-                                    ? {
-                                        ...f,
-                                        waterlineTiles: true,
-                                        waterlineTileId,
-                                      }
-                                    : f,
-                                ),
-                              })
-                            }
-                          />
+                          <>
+                            <div className="field">
+                              <label htmlFor="wl-nosing-band">
+                                Nosing band thickness
+                              </label>
+                              <input
+                                id="wl-nosing-band"
+                                key={`feat-wl-band-${selectedFeature.id}-${selectedFeature.waterlineNosingBandMm ?? "default"}`}
+                                defaultValue={formatLength(
+                                  waterlineNosingBandMm(
+                                    selectedFeature.waterlineNosingBandMm,
+                                  ),
+                                  unitSystem,
+                                )}
+                                onBlur={(e) => {
+                                  const mm = parseLengthToMm(
+                                    e.target.value,
+                                    unitSystem,
+                                  );
+                                  if (mm == null || mm <= 0) return;
+                                  commitDesign({
+                                    ...design,
+                                    features: (design.features ?? []).map(
+                                      (f) =>
+                                        f.id === selectedFeature.id
+                                          ? {
+                                              ...f,
+                                              waterlineTiles: true,
+                                              waterlineNosingBandMm:
+                                                waterlineNosingBandMm(mm),
+                                            }
+                                          : f,
+                                    ),
+                                  });
+                                }}
+                              />
+                              <p
+                                className="muted"
+                                style={{
+                                  margin: "0.25rem 0 0",
+                                  fontSize: "0.75rem",
+                                }}
+                              >
+                                How far the tile strip runs in from the edge
+                                (default{" "}
+                                {formatLength(
+                                  DEFAULT_WATERLINE_NOSING_BAND_MM,
+                                  unitSystem,
+                                )}
+                                ).
+                              </p>
+                            </div>
+                            <WaterlineTilePicker
+                              key={`feat-wl-${selectedFeature.id}-${selectedFeature.waterlineTileId ?? "inherit"}`}
+                              value={
+                                selectedFeature.waterlineTileId ??
+                                (selectedFeature.poolBodyId
+                                  ? design.poolBodies.find(
+                                      (p) =>
+                                        p.id === selectedFeature.poolBodyId,
+                                    )?.waterlineTileId
+                                  : design.poolBodies.find(
+                                      (p) => waterBodyKind(p) === "pool",
+                                    )?.waterlineTileId) ??
+                                DEFAULT_WATERLINE_TILE_ID
+                              }
+                              onChange={(waterlineTileId) =>
+                                commitDesign({
+                                  ...design,
+                                  features: (design.features ?? []).map((f) =>
+                                    f.id === selectedFeature.id
+                                      ? {
+                                          ...f,
+                                          waterlineTiles: true,
+                                          waterlineTileId,
+                                        }
+                                      : f,
+                                  ),
+                                })
+                              }
+                            />
+                          </>
                         )}
                       </div>
                     )}

@@ -617,6 +617,11 @@ export type PoolFeature = {
    * When omitted, inherits the parent pool's waterlineTileId.
    */
   waterlineTileId?: string;
+  /**
+   * Nosing band width on the tread / shelf top (mm).
+   * How far the tile strip runs inward from the edge. Default ~6″.
+   */
+  waterlineNosingBandMm?: number;
 };
 
 /** User-authored estimate line (not derived from geometry). */

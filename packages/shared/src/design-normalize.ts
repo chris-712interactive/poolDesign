@@ -77,6 +77,7 @@ import {
 import {
   DEFAULT_WATERLINE_TILE_ID,
   isWaterlineTileId,
+  waterlineNosingBandMm,
 } from "./waterline-tiles";
 import {
   defaultFabricFinishId,
@@ -274,6 +275,11 @@ export function normalizeDesignDocument(
       waterlineTileId:
         f.waterlineTileId && isWaterlineTileId(f.waterlineTileId)
           ? f.waterlineTileId
+          : undefined,
+      waterlineNosingBandMm:
+        typeof f.waterlineNosingBandMm === "number" &&
+        Number.isFinite(f.waterlineNosingBandMm)
+          ? waterlineNosingBandMm(f.waterlineNosingBandMm)
           : undefined,
     })),
     patios: (Array.isArray(doc.patios) ? doc.patios : []).map((p) => ({

@@ -39,6 +39,7 @@ import {
   stepsRiserCount,
   stepsTreadOutline,
   DEFAULT_WATERLINE_TILE_ID,
+  waterlineNosingBandMm,
   objectHeightMm,
   outlineBounds,
   openWallSegments,
@@ -2962,6 +2963,7 @@ export function buildSceneModel(
         f.waterlineTileId ??
         parent?.waterlineTileId ??
         DEFAULT_WATERLINE_TILE_ID;
+      const nosingBandMm = waterlineNosingBandMm(f.waterlineNosingBandMm);
 
       if (f.kind === "sunshelf") {
         // Solid shell fill from pool floor up to the ledge — no hollow undercroft.
@@ -2993,7 +2995,7 @@ export function buildSceneModel(
           pushShelfTopTileBands(meshes, {
             outlineMm: outline,
             topY: shelfTop,
-            bandWidthMm: 152,
+            bandWidthMm: nosingBandMm,
             waterlineTileId: featureTileId,
             select,
             idPrefix: `feature_sunshelf_tile_${f.id}`,
@@ -3017,7 +3019,6 @@ export function buildSceneModel(
         const risers = stepsRiserCount(f.riserCount);
         const riserM = mmToMeters(STANDARD_STEP_RISER_MM);
         const treadH = riserM * 1.22;
-        const bandMm = 152; // 6″ nosing strip on the tread top
         for (let s = 0; s < risers; s++) {
           const tread = stepsTreadOutline(f.outline, s, risers);
           if (tread.length < 3) continue;
@@ -3054,7 +3055,7 @@ export function buildSceneModel(
               b: deepB,
               inwardX: cx - mid.x,
               inwardY: cy - mid.y,
-              bandWidthMm: bandMm,
+              bandWidthMm: nosingBandMm,
               topY: top,
               waterlineTileId: featureTileId,
               select,
