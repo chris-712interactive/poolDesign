@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  PATIO_FINISHES,
   WATERLINE_TILES,
+  liveFinishesPending,
   type LiveSessionFinishes,
   type LiveSessionState,
   type PlanEntitlements,
@@ -11,7 +13,8 @@ import {
 export type LiveSessionStatus = {
   active: boolean;
   guestConnected: boolean;
-  tileName: string | null;
+  /** Human-readable pending finish payload (tile + patio). Null after apply. */
+  pendingSummary: string | null;
   canApplyFinishes: boolean;
   finishes: LiveSessionFinishes;
   lastApproval: string | null;
@@ -30,30 +33,40 @@ type Props = {
   onShareReady?: (share: { shareId: string; url: string }) => void;
 };
 
+function pendingFinishSummary(finishes: LiveSessionFinishes): string | null {
+  const parts: string[] = [];
+  if (finishes.waterlineTileId) {
+    const tile = WATERLINE_TILES.find((t) => t.id === finishes.waterlineTileId);
+    if (tile) parts.push(tile.name);
+  }
+  const patioIds = [
+    ...new Set(Object.values(finishes.patioMaterialById ?? {})),
+  ];
+  for (const id of patioIds) {
+    const patio = PATIO_FINISHES.find((f) => f.id === id);
+    if (patio) parts.push(patio.name);
+  }
+  return parts.length ? parts.join(" · ") : null;
+}
+
 function statusFromState(
   state: LiveSessionState | null,
   error: string | null,
 ): LiveSessionStatus {
   const finishes = state?.finishes ?? {};
-  const tileName = finishes.waterlineTileId
-    ? WATERLINE_TILES.find((t) => t.id === finishes.waterlineTileId)?.name ??
-      null
-    : null;
+  const pending = Boolean(
+    state?.active && liveFinishesPending(finishes, state?.appliedFinishesKey),
+  );
   const last = state?.approvals?.length
     ? state.approvals[state.approvals.length - 1]
     : null;
   return {
     active: Boolean(state?.active),
     guestConnected: Boolean(state?.guestOnlineAt),
-    tileName,
-    canApplyFinishes: Boolean(
-      state?.active &&
-        (finishes.waterlineTileId ||
-          (finishes.patioMaterialById &&
-            Object.keys(finishes.patioMaterialById).length > 0)),
-    ),
+    pendingSummary: pending ? pendingFinishSummary(finishes) : null,
+    canApplyFinishes: pending,
     finishes,
-    lastApproval: last ? `${last.label} — ${last.status}` : null,
+    lastApproval: pending && last ? `${last.label} — ${last.status}` : null,
     showEstimate: Boolean(state?.showEstimate),
     previewImageUrl: state?.previewImageUrl ?? null,
     error,

@@ -18,6 +18,31 @@ export type LiveSessionFinishes = {
   patioMaterialById?: Record<string, string>;
 };
 
+/** Stable key for a finish payload so we can hide Apply after it's consumed. */
+export function liveFinishesKey(finishes: LiveSessionFinishes): string {
+  const patio = finishes.patioMaterialById
+    ? Object.entries(finishes.patioMaterialById)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => `${k}:${v}`)
+        .join(",")
+    : "";
+  return `${finishes.waterlineTileId ?? ""}|${patio}`;
+}
+
+export function liveFinishesPending(
+  finishes: LiveSessionFinishes,
+  appliedFinishesKey?: string | null,
+): boolean {
+  const has =
+    Boolean(finishes.waterlineTileId) ||
+    Boolean(
+      finishes.patioMaterialById &&
+        Object.keys(finishes.patioMaterialById).length > 0,
+    );
+  if (!has) return false;
+  return liveFinishesKey(finishes) !== (appliedFinishesKey ?? "");
+}
+
 export type LiveSessionState = {
   version: 1;
   active: boolean;
@@ -32,6 +57,11 @@ export type LiveSessionState = {
   showEstimate: boolean;
   /** Latest 3D still URL pushed by the designer for this live session. */
   previewImageUrl?: string | null;
+  /**
+   * Fingerprint of finishes the designer already applied.
+   * Cleared when the client sends a new finish payload.
+   */
+  appliedFinishesKey?: string | null;
 };
 
 export function emptyLiveSessionState(): LiveSessionState {
@@ -44,6 +74,7 @@ export function emptyLiveSessionState(): LiveSessionState {
     approvals: [],
     showEstimate: false,
     previewImageUrl: null,
+    appliedFinishesKey: null,
   };
 }
 
@@ -88,5 +119,11 @@ export function parseLiveSessionState(raw: unknown): LiveSessionState {
         : o.previewImageUrl === null
           ? null
           : base.previewImageUrl,
+    appliedFinishesKey:
+      typeof o.appliedFinishesKey === "string"
+        ? o.appliedFinishesKey
+        : o.appliedFinishesKey === null
+          ? null
+          : base.appliedFinishesKey,
   };
 }

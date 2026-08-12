@@ -207,6 +207,7 @@ export async function PATCH(
     finishes?: LiveSessionFinishes;
     showEstimate?: boolean;
     previewImageUrl?: string | null;
+    appliedFinishesKey?: string | null;
     approval?: Omit<LiveSessionApproval, "id" | "at" | "by"> & {
       id?: string;
     };
@@ -240,6 +241,12 @@ export async function PATCH(
         ...(body.finishes.patioMaterialById ?? {}),
       },
     };
+  }
+  if (
+    typeof body.appliedFinishesKey === "string" ||
+    body.appliedFinishesKey === null
+  ) {
+    state.appliedFinishesKey = body.appliedFinishesKey;
   }
   if (body.approval) {
     const entry: LiveSessionApproval = {

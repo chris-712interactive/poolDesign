@@ -112,6 +112,8 @@ export async function PATCH(
         ...(body.finishes.patioMaterialById ?? {}),
       },
     };
+    // New client send — designer should see Apply again.
+    state.appliedFinishesKey = null;
   }
   if (body.approval) {
     const entry: LiveSessionApproval = {

@@ -6,7 +6,7 @@ import type {
   DesignLevel,
   PlanEntitlements,
 } from "@pool-design/shared";
-import { DESIGN_LEVEL_LABELS } from "@pool-design/shared";
+import { DESIGN_LEVEL_LABELS, liveFinishesKey } from "@pool-design/shared";
 import {
   LiveSessionHostControls,
   type LiveSessionStatus,
@@ -179,6 +179,8 @@ export function ProjectToolbar({
       ensure3d();
       await new Promise((r) => setTimeout(r, 800));
       const dataUrl = capturePreview();
+      const appliedKey = liveFinishesKey(live.finishes);
+      let previewImageUrl: string | undefined;
       if (dataUrl) {
         const up = await fetch(`/api/projects/${projectId}/preview`, {
           method: "POST",
@@ -187,15 +189,28 @@ export function ProjectToolbar({
         });
         if (up.ok) {
           const json = (await up.json()) as { url?: string };
-          if (json.url) {
-            await fetch(`/api/projects/${projectId}/live-session`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ previewImageUrl: json.url }),
-            });
-          }
+          if (json.url) previewImageUrl = json.url;
         }
       }
+      await fetch(`/api/projects/${projectId}/live-session`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appliedFinishesKey: appliedKey,
+          ...(previewImageUrl ? { previewImageUrl } : {}),
+        }),
+      });
+      setLive((prev) =>
+        prev
+          ? {
+              ...prev,
+              canApplyFinishes: false,
+              pendingSummary: null,
+              lastApproval: null,
+              previewImageUrl: previewImageUrl ?? prev.previewImageUrl,
+            }
+          : prev,
+      );
       if (activeShare) {
         setStrip({
           kind: "share",
@@ -370,7 +385,7 @@ export function ProjectToolbar({
                 {live?.guestConnected
                   ? " · guest connected"
                   : " · waiting for guest"}
-                {live?.tileName ? ` · ${live.tileName}` : ""}
+                {live?.pendingSummary ? ` · ${live.pendingSummary}` : ""}
                 {live?.lastApproval ? ` · ${live.lastApproval}` : ""}
               </span>
               <label className="project-toolbar-check project-toolbar-strip-check">
@@ -391,10 +406,6 @@ export function ProjectToolbar({
                 >
                   {applyBusy ? "Applying…" : "Apply finishes"}
                 </button>
-              ) : live?.active ? (
-                <span className="muted" style={{ fontSize: "0.8rem" }}>
-                  Waiting for client finish picks…
-                </span>
               ) : null}
               {live?.error ? (
                 <span className="project-toolbar-strip-err">{live.error}</span>
