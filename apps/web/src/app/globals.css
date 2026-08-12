@@ -242,6 +242,164 @@ textarea {
   color: #4d5c66;
 }
 
+/* —— Project CAD toolbar (stable button row + status strip) —— */
+.project-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0.85rem 1.1rem;
+}
+
+.project-toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.project-toolbar-identity {
+  min-width: 0;
+}
+
+.project-toolbar-label {
+  font-size: 0.78rem;
+  margin: 0 0 0.15rem;
+  line-height: 1.2;
+}
+
+.project-toolbar-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.project-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.project-toolbar-actions > .btn {
+  flex-shrink: 0;
+}
+
+.project-toolbar-divider {
+  width: 1px;
+  height: 1.6rem;
+  background: var(--line);
+  margin: 0 0.15rem;
+  flex-shrink: 0;
+}
+
+.project-toolbar-segment {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.project-toolbar-segment .btn {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+}
+
+.project-toolbar-segment .btn.secondary {
+  border: none;
+  background: transparent;
+}
+
+.project-toolbar-segment .btn + .btn {
+  border-left: 1px solid var(--line);
+}
+
+.project-toolbar-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.65rem;
+  margin-top: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-soft) 70%, #fff);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+}
+
+.project-toolbar-strip-ok {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.project-toolbar-strip-live {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--panel-ink);
+}
+
+.project-toolbar-strip-url {
+  font-size: 0.82rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--muted, #5c6b64);
+  max-width: min(28rem, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-toolbar-strip-btn {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.project-toolbar-strip-dismiss {
+  margin-left: auto;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.8rem;
+  background: transparent;
+  color: var(--muted, #5c6b64);
+  border: none;
+  font-weight: 600;
+}
+
+.project-toolbar-strip-dismiss:hover {
+  color: var(--panel-ink);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.project-toolbar-strip-err {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.project-toolbar-strip-sep {
+  width: 1px;
+  height: 1.1rem;
+  background: color-mix(in srgb, var(--accent) 28%, var(--line));
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .project-toolbar-divider {
+    display: none;
+  }
+
+  .project-toolbar-strip-dismiss {
+    margin-left: 0;
+  }
+}
+
 .hero {
   color: white;
   padding: 4rem 1.5rem 3rem;

@@ -170,10 +170,9 @@ import {
 } from "@pool-design/shared";
 import { EstimatePanel } from "@/components/EstimatePanel";
 import { GradeWalkPanel } from "@/components/GradeWalkPanel";
-import { LiveSessionHostControls } from "@/components/LiveSessionHostControls";
+import { ProjectToolbar } from "@/components/ProjectToolbar";
 import { CadScene3DDynamic } from "@/components/CadScene3DDynamic";
 import type { CadScene3DHandle } from "@/components/CadScene3DCanvas";
-import { ShareProposalButton } from "@/components/ShareProposalButton";
 import { FenceFinishPicker } from "@/components/FenceFinishPicker";
 import { HouseFinishPicker } from "@/components/HouseFinishPicker";
 import { FurnitureFinishPicker } from "@/components/FurnitureFinishPicker";
@@ -2815,59 +2814,23 @@ export function CadWorkspace({
 
   return (
     <div className="stack" style={{ gap: "0.85rem" }}>
-      <div className="panel row" style={{ justifyContent: "space-between" }}>
-        <div>
-          <div className="muted">Project</div>
-          <strong>{projectName}</strong>{" "}
-          <span className="badge">{DESIGN_LEVEL_LABELS[designLevel]}</span>
-        </div>
-        <div className="row" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <LiveSessionHostControls
-            projectId={projectId}
-            entitlements={planEntitlements}
-            onApplyFinishes={(finishes) => {
-              commitDesign({
-                ...design,
-                poolBodies: design.poolBodies.map((b) =>
-                  finishes.waterlineTileId
-                    ? { ...b, waterlineTileId: finishes.waterlineTileId }
-                    : b,
-                ),
-                patios: design.patios.map((p) => {
-                  const all = finishes.patioMaterialById?.["*"];
-                  const one = finishes.patioMaterialById?.[p.id];
-                  const materialId = one ?? all;
-                  return materialId ? { ...p, materialId } : p;
-                }),
-              });
-            }}
-          />
-          <ShareProposalButton
-            projectId={projectId}
-            ensure3d={() => {
-              setView("design");
-              setDesignMode("3d");
-            }}
-            capturePreview={() =>
-              scene3dHandleRef.current?.capturePngDataUrl() ?? null
-            }
-          />
-          <button
-            type="button"
-            className={`btn ${view === "design" ? "" : "secondary"}`}
-            onClick={() => setView("design")}
-          >
-            Design
-          </button>
-          <button
-            type="button"
-            className={`btn ${view === "estimate" ? "" : "secondary"}`}
-            onClick={() => setView("estimate")}
-          >
-            Estimate / BOM
-          </button>
-        </div>
-      </div>
+      <ProjectToolbar
+        projectId={projectId}
+        projectName={projectName}
+        designLevel={designLevel}
+        view={view}
+        onViewChange={setView}
+        entitlements={planEntitlements}
+        design={design}
+        onDesignChange={commitDesign}
+        ensure3d={() => {
+          setView("design");
+          setDesignMode("3d");
+        }}
+        capturePreview={() =>
+          scene3dHandleRef.current?.capturePngDataUrl() ?? null
+        }
+      />
 
       {view === "estimate" ? (
         <EstimatePanel
