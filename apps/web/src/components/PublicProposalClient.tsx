@@ -29,6 +29,13 @@ type Props = {
   expiresAt: string | null;
 };
 
+function stillSrc(url: string | null, rev: string | null): string | null {
+  if (!url) return null;
+  if (!rev || url.startsWith("data:")) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}v=${encodeURIComponent(rev)}`;
+}
+
 /**
  * Public proposal shell. When a live session is on, drops the duplicate
  * still and uses a wide side-by-side preview + finish picker layout.
@@ -48,13 +55,15 @@ export function PublicProposalClient({
   const [previewImageUrl, setPreviewImageUrl] = useState(
     initialPreviewImageUrl,
   );
+  const [previewRev, setPreviewRev] = useState<string | null>(null);
   const [showEstimateInLive, setShowEstimateInLive] = useState(false);
 
   const refresh = useCallback(async () => {
-    const res = await fetch(`/api/p/${token}/live`);
+    const res = await fetch(`/api/p/${token}/live`, { cache: "no-store" });
     if (!res.ok) return;
     const json = (await res.json()) as {
       active: boolean;
+      updatedAt?: string | null;
       previewImageUrl?: string | null;
       state: LiveSessionState;
     };
@@ -64,6 +73,7 @@ export function PublicProposalClient({
     const next =
       json.previewImageUrl || json.state?.previewImageUrl || null;
     if (next) setPreviewImageUrl(next);
+    if (json.updatedAt) setPreviewRev(json.updatedAt);
   }, [token]);
 
   useEffect(() => {
@@ -110,20 +120,23 @@ export function PublicProposalClient({
             token={token}
             projectName={project.name}
             state={liveState}
-            previewImageUrl={previewImageUrl}
+            previewImageUrl={stillSrc(previewImageUrl, previewRev)}
             showEstimate={showEstimateInLive}
             estimate={shareIncludesEstimate ? estimate : null}
             onPatched={(next) => {
               setLiveState(next);
               const url = next.previewImageUrl;
-              if (url) setPreviewImageUrl(url);
+              if (url) {
+                setPreviewImageUrl(url);
+                setPreviewRev(new Date().toISOString());
+              }
             }}
           />
         ) : (
           <>
             <ProposalDesignPreview
               projectName={project.name}
-              previewImageUrl={previewImageUrl}
+              previewImageUrl={stillSrc(previewImageUrl, previewRev)}
               previewVideoUrl={initialPreviewVideoUrl}
             />
             {shareIncludesEstimate ? (

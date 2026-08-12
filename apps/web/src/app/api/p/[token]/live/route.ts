@@ -32,18 +32,23 @@ function serialize(
   companyName: string,
   projectName: string,
   sharePreviewImageUrl: string | null,
+  shareUpdatedAt?: Date | null,
 ) {
   const state = session
     ? parseLiveSessionState(JSON.parse(session.stateJson || "{}"))
     : emptyLiveSessionState();
   if (session) state.active = session.active;
-  const previewImageUrl =
-    state.previewImageUrl || sharePreviewImageUrl || null;
+  const livePreview = state.previewImageUrl || null;
+  const sharePreview = sharePreviewImageUrl || null;
+  const previewImageUrl = session?.active
+    ? livePreview || sharePreview
+    : sharePreview || livePreview;
+  const stamp = session?.updatedAt ?? shareUpdatedAt ?? null;
   return {
     companyName,
     projectName,
     active: Boolean(session?.active),
-    updatedAt: session?.updatedAt.toISOString() ?? null,
+    updatedAt: stamp ? stamp.toISOString() : null,
     previewImageUrl,
     state: {
       ...state,
@@ -68,7 +73,13 @@ export async function GET(
       share.project.company.name,
       share.project.name,
       share.previewImageUrl,
+      share.updatedAt,
     ),
+    {
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    },
   );
 }
 
@@ -137,6 +148,7 @@ export async function PATCH(
       share.project.company.name,
       share.project.name,
       share.previewImageUrl,
+      share.updatedAt,
     ),
   );
 }

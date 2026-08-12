@@ -3,6 +3,7 @@ import { prisma } from "@pool-design/db";
 import {
   buildTakeoff,
   parseDesignDocument,
+  parseLiveSessionState,
   type DesignLevel,
 } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
@@ -115,6 +116,22 @@ export async function PATCH(request: Request, context: RouteContext) {
     where: { id: share.id },
     data,
   });
+
+  // Client live poll prefers live-session still while a session exists.
+  // Mirror the new still so "Update still" shows up without a reload.
+  if (typeof data.previewImageUrl === "string" && data.previewImageUrl) {
+    const live = await prisma.projectLiveSession.findUnique({
+      where: { projectId: project.id },
+    });
+    if (live) {
+      const state = parseLiveSessionState(JSON.parse(live.stateJson || "{}"));
+      state.previewImageUrl = data.previewImageUrl;
+      await prisma.projectLiveSession.update({
+        where: { id: live.id },
+        data: { stateJson: JSON.stringify(state) },
+      });
+    }
+  }
 
   return NextResponse.json({
     id: updated.id,
