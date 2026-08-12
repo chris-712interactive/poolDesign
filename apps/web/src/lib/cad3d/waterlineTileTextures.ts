@@ -20,6 +20,23 @@ function tint(
   return `rgb(${clamp(base.r + delta)},${clamp(base.g + delta)},${clamp(base.b + delta)})`;
 }
 
+/** JS `%` is signed; mosaic wrap loops use col=-1 and need a non-negative index. */
+function mod(n: number, m: number): number {
+  if (m <= 0) return 0;
+  return ((n % m) + m) % m;
+}
+
+function paletteColor(
+  palette: { r: number; g: number; b: number }[],
+  idx: number,
+): { r: number; g: number; b: number } {
+  return palette[mod(Math.floor(idx), palette.length)] ?? palette[0] ?? {
+    r: 100,
+    g: 160,
+    b: 190,
+  };
+}
+
 export type WaterlineTexPair = {
   color: THREE.CanvasTexture;
   roughness: THREE.CanvasTexture;
@@ -80,11 +97,12 @@ function drawChip(
   y: number,
   w: number,
   h: number,
-  color: { r: number; g: number; b: number },
+  color: { r: number; g: number; b: number } | undefined,
   n: number,
   iridescent: boolean,
 ) {
-  c.fillStyle = tint(color, (n - 0.5) * 28);
+  const safe = color ?? { r: 100, g: 160, b: 190 };
+  c.fillStyle = tint(safe, (n - 0.5) * 28);
   c.fillRect(x, y, w, h);
   if (iridescent) {
     c.fillStyle = "rgba(255,255,255,0.22)";
@@ -157,9 +175,7 @@ function drawMosaic(
         const ox = offset && row % 2 ? tw * 0.5 : 0;
         for (let col = -1; col <= cols; col++) {
           const n = hash2(col + 3, row + 7, 55);
-          const idx = Math.floor(
-            (n * palette.length + col + row * 2) % palette.length,
-          );
+          const idx = n * palette.length + col + row * 2;
           drawChip(
             c,
             r,
@@ -167,7 +183,7 @@ function drawMosaic(
             row * th + joint * 0.5,
             tw - joint,
             th - joint,
-            palette[idx],
+            paletteColor(palette, idx),
             n,
             !!tile.iridescent,
           );
@@ -196,15 +212,8 @@ function drawBlendBand(tile: WaterlineTile, size: number): WaterlineTexPair {
         const band = row / Math.max(1, rows - 1);
         for (let col = 0; col < cols; col++) {
           const n = hash2(col, row, 77);
-          const baseIdx = Math.min(
-            palette.length - 1,
-            Math.floor(band * (palette.length - 0.01)),
-          );
+          const baseIdx = Math.floor(band * (palette.length - 0.01));
           const jitter = n > 0.72 ? 1 : n < 0.18 ? -1 : 0;
-          const idx = Math.max(
-            0,
-            Math.min(palette.length - 1, baseIdx + jitter),
-          );
           drawChip(
             c,
             r,
@@ -212,7 +221,7 @@ function drawBlendBand(tile: WaterlineTile, size: number): WaterlineTexPair {
             row * th + joint * 0.5,
             tw - joint,
             th - joint,
-            palette[idx],
+            paletteColor(palette, baseIdx + jitter),
             n,
             !!tile.iridescent,
           );
@@ -275,13 +284,22 @@ export function getWaterlineTileTexture(
   tileId: string | undefined,
 ): WaterlineTexPair {
   const tile = getWaterlineTile(tileId);
-  const key = `${tile.id}@v1`;
+  const key = `${tile.id}@v2`;
   const cached = cache.get(key);
   if (cached) return cached;
   if (typeof document === "undefined") {
-    return makePair(4, () => {}, [1, 1]);
+    const stub = new THREE.DataTexture(
+      new Uint8Array([180, 190, 200, 255]),
+      1,
+      1,
+    );
+    stub.needsUpdate = true;
+    return {
+      color: stub as unknown as THREE.CanvasTexture,
+      roughness: stub.clone() as unknown as THREE.CanvasTexture,
+    };
   }
-  const pair = generators[tile.pattern](tile, 768);
+  const pair = (generators[tile.pattern] ?? drawGrid)(tile, 512);
   cache.set(key, pair);
   return pair;
 }
