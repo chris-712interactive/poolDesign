@@ -2548,7 +2548,6 @@ export function CadScene3DCanvas({
         </div>
       ) : null}
       <Canvas
-        shadows
         dpr={[1, 2]}
         camera={{ fov: 45, near: 0.1, far: 2000 }}
         gl={{

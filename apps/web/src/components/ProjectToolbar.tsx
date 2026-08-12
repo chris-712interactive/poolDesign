@@ -56,17 +56,19 @@ function applyFinishesToDesign(
   design: DesignDocument,
   finishes: LiveSessionStatus["finishes"],
 ): DesignDocument {
+  const tileId = finishes.waterlineTileId;
+  const patioAll = finishes.patioMaterialById?.["*"];
   return {
     ...design,
     poolBodies: design.poolBodies.map((b) =>
-      finishes.waterlineTileId
-        ? { ...b, waterlineTileId: finishes.waterlineTileId }
-        : b,
+      tileId ? { ...b, waterlineTileId: tileId } : b,
+    ),
+    features: (design.features ?? []).map((f) =>
+      tileId ? { ...f, waterlineTileId: tileId } : f,
     ),
     patios: design.patios.map((p) => {
-      const all = finishes.patioMaterialById?.["*"];
-      const one = finishes.patioMaterialById?.[p.id];
-      const materialId = one ?? all;
+      const materialId =
+        finishes.patioMaterialById?.[p.id] ?? patioAll ?? undefined;
       return materialId ? { ...p, materialId } : p;
     }),
   };
@@ -92,6 +94,7 @@ export function ProjectToolbar({
   const [live, setLive] = useState<LiveSessionStatus | null>(null);
   const [includeEstimate, setIncludeEstimate] = useState(false);
   const [estimateBusy, setEstimateBusy] = useState(false);
+  const [applyBusy, setApplyBusy] = useState(false);
   const [activeShare, setActiveShare] = useState<ActiveShare | null>(null);
 
   const onLiveStatus = useCallback((status: LiveSessionStatus) => {
@@ -164,6 +167,51 @@ export function ProjectToolbar({
       );
     } finally {
       setEstimateBusy(false);
+    }
+  }
+
+  async function applyClientFinishes() {
+    if (!live?.canApplyFinishes) return;
+    setApplyBusy(true);
+    try {
+      onDesignChange(applyFinishesToDesign(design, live.finishes));
+      onViewChange("design");
+      ensure3d();
+      await new Promise((r) => setTimeout(r, 800));
+      const dataUrl = capturePreview();
+      if (dataUrl) {
+        const up = await fetch(`/api/projects/${projectId}/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dataUrl }),
+        });
+        if (up.ok) {
+          const json = (await up.json()) as { url?: string };
+          if (json.url) {
+            await fetch(`/api/projects/${projectId}/live-session`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ previewImageUrl: json.url }),
+            });
+          }
+        }
+      }
+      if (activeShare) {
+        setStrip({
+          kind: "share",
+          url: activeShare.url,
+          copied: false,
+          updated: true,
+        });
+      }
+    } catch (e) {
+      setStrip({
+        kind: "error",
+        message:
+          e instanceof Error ? e.message : "Could not apply client finishes",
+      });
+    } finally {
+      setApplyBusy(false);
     }
   }
 
@@ -338,12 +386,15 @@ export function ProjectToolbar({
                 <button
                   type="button"
                   className="btn secondary project-toolbar-strip-btn"
-                  onClick={() =>
-                    onDesignChange(applyFinishesToDesign(design, live.finishes))
-                  }
+                  disabled={applyBusy}
+                  onClick={() => void applyClientFinishes()}
                 >
-                  Apply finishes
+                  {applyBusy ? "Applying…" : "Apply finishes"}
                 </button>
+              ) : live?.active ? (
+                <span className="muted" style={{ fontSize: "0.8rem" }}>
+                  Waiting for client finish picks…
+                </span>
               ) : null}
               {live?.error ? (
                 <span className="project-toolbar-strip-err">{live.error}</span>
