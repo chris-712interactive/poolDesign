@@ -38,6 +38,7 @@ import {
   STANDARD_STEP_RISER_MM,
   stepsRiserCount,
   stepsTreadOutline,
+  DEFAULT_WATERLINE_TILE_ID,
   objectHeightMm,
   outlineBounds,
   openWallSegments,
@@ -2844,14 +2845,22 @@ export function buildSceneModel(
       const select: SceneSelection = { kind: "feature", id: f.id };
       const depthMm = featureDepthMm(f.kind, f.depthMm);
       const outline = closeOutline(f.outline);
+      const parent =
+        (f.poolBodyId
+          ? bodies.find((b) => b.id === f.poolBodyId)
+          : undefined) ??
+        pools[0] ??
+        bodies[0];
+      // Steps / sunshelf show waterline tile by default (same finish as pool).
+      const featureTilesOn = f.waterlineTiles !== false;
+      const featureTileId =
+        f.waterlineTileId ??
+        parent?.waterlineTileId ??
+        DEFAULT_WATERLINE_TILE_ID;
 
       if (f.kind === "sunshelf") {
         // Solid shell fill from pool floor up to the ledge — no hollow undercroft.
         const shelfTop = waterTopY - mmToMeters(depthMm);
-        const parent =
-          (f.poolBodyId
-            ? bodies.find((b) => b.id === f.poolBodyId)
-            : undefined) ?? pools[0];
         let floorY = waterTopY - 1.2;
         if (parent && waterBodyKind(parent) !== "spa") {
           const profile = depthProfileForBody(parent);
@@ -2874,20 +2883,20 @@ export function buildSceneModel(
           height: fillH,
           select,
         });
-        // Optional waterline tile on the shelf leading edges (wet vertical faces).
-        if (f.waterlineTileId) {
+        // Waterline tile on the shelf leading edges (wet vertical faces).
+        if (featureTilesOn) {
           const tileH = mmToMeters(152);
           pushWallRing(meshes, {
             outlineMm: outline,
-            bottomY: shelfTop - tileH * 0.85,
+            bottomY: shelfTop - tileH * 0.9,
             height: tileH,
-            thicknessMm: 40,
+            thicknessMm: 45,
             material: "waterline",
-            waterlineTileId: f.waterlineTileId,
+            waterlineTileId: featureTileId,
             select,
             idPrefix: `feature_sunshelf_tile_${f.id}`,
             inward: false,
-            normalBiasMm: -6,
+            normalBiasMm: -8,
           });
         }
       } else if (f.kind === "bench") {
@@ -2904,10 +2913,12 @@ export function buildSceneModel(
         });
       } else if (f.kind === "steps") {
         // Stepped treads: one strip per riser, descending into the pool.
+        // Tread solids overlap the next riser so the riser/tread joint never
+        // opens a see-through seam when the camera grazes the edge.
         const risers = stepsRiserCount(f.riserCount);
         const riserM = mmToMeters(STANDARD_STEP_RISER_MM);
-        const treadH = Math.max(0.08, riserM * 0.92);
-        const tileH = Math.min(mmToMeters(152), riserM * 0.95);
+        const treadH = riserM * 1.1;
+        const tileH = Math.min(mmToMeters(152), riserM * 0.98);
         for (let s = 0; s < risers; s++) {
           const tread = stepsTreadOutline(f.outline, s, risers);
           if (tread.length < 3) continue;
@@ -2922,19 +2933,19 @@ export function buildSceneModel(
             height: treadH,
             select,
           });
-          // Optional tile on each tread's wet vertical faces / risers.
-          if (f.waterlineTileId) {
+          // Tile the wet vertical faces of each tread / riser.
+          if (featureTilesOn) {
             pushWallRing(meshes, {
               outlineMm: closeOutline(tread),
-              bottomY: top - tileH * 0.15,
+              bottomY: top - tileH * 0.92,
               height: tileH,
-              thicknessMm: 35,
+              thicknessMm: 42,
               material: "waterline",
-              waterlineTileId: f.waterlineTileId,
+              waterlineTileId: featureTileId,
               select,
               idPrefix: `feature_steps_tile_${f.id}_${s}`,
               inward: false,
-              normalBiasMm: -6,
+              normalBiasMm: -8,
             });
           }
         }

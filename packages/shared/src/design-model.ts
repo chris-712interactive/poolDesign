@@ -608,8 +608,13 @@ export type PoolFeature = {
   /** Water depth on the ledge (sunshelf only) */
   depthMm?: number;
   /**
-   * Optional waterline tile finish for steps / sunshelf leading edges.
-   * When set, 3D shows a tile band; omit/undefined = plaster only.
+   * When false, hide waterline tile on steps / sunshelf.
+   * Default (undefined) = show, matching the parent pool finish.
+   */
+  waterlineTiles?: boolean;
+  /**
+   * Optional waterline tile finish override for steps / sunshelf.
+   * When omitted, inherits the parent pool's waterlineTileId.
    */
   waterlineTileId?: string;
 };

@@ -4815,7 +4815,7 @@ export function CadWorkspace({
                         >
                           <input
                             type="checkbox"
-                            checked={!!selectedFeature.waterlineTileId}
+                            checked={selectedFeature.waterlineTiles !== false}
                             onChange={(e) => {
                               const parent = selectedFeature.poolBodyId
                                 ? design.poolBodies.find(
@@ -4824,15 +4824,21 @@ export function CadWorkspace({
                                 : design.poolBodies.find(
                                     (p) => waterBodyKind(p) === "pool",
                                   );
-                              const nextId = e.target.checked
-                                ? (parent?.waterlineTileId ??
-                                  DEFAULT_WATERLINE_TILE_ID)
-                                : undefined;
                               commitDesign({
                                 ...design,
                                 features: (design.features ?? []).map((f) =>
                                   f.id === selectedFeature.id
-                                    ? { ...f, waterlineTileId: nextId }
+                                    ? {
+                                        ...f,
+                                        waterlineTiles: e.target.checked
+                                          ? true
+                                          : false,
+                                        waterlineTileId: e.target.checked
+                                          ? (f.waterlineTileId ??
+                                            parent?.waterlineTileId ??
+                                            DEFAULT_WATERLINE_TILE_ID)
+                                          : f.waterlineTileId,
+                                      }
                                     : f,
                                 ),
                               });
@@ -4840,16 +4846,30 @@ export function CadWorkspace({
                           />
                           <span>Waterline tile on leading edges</span>
                         </label>
-                        {selectedFeature.waterlineTileId && (
+                        {selectedFeature.waterlineTiles !== false && (
                           <WaterlineTilePicker
-                            key={`feat-wl-${selectedFeature.id}-${selectedFeature.waterlineTileId}`}
-                            value={selectedFeature.waterlineTileId}
+                            key={`feat-wl-${selectedFeature.id}-${selectedFeature.waterlineTileId ?? "inherit"}`}
+                            value={
+                              selectedFeature.waterlineTileId ??
+                              (selectedFeature.poolBodyId
+                                ? design.poolBodies.find(
+                                    (p) => p.id === selectedFeature.poolBodyId,
+                                  )?.waterlineTileId
+                                : design.poolBodies.find(
+                                    (p) => waterBodyKind(p) === "pool",
+                                  )?.waterlineTileId) ??
+                              DEFAULT_WATERLINE_TILE_ID
+                            }
                             onChange={(waterlineTileId) =>
                               commitDesign({
                                 ...design,
                                 features: (design.features ?? []).map((f) =>
                                   f.id === selectedFeature.id
-                                    ? { ...f, waterlineTileId }
+                                    ? {
+                                        ...f,
+                                        waterlineTiles: true,
+                                        waterlineTileId,
+                                      }
                                     : f,
                                 ),
                               })

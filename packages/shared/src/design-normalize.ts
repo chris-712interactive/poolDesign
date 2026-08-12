@@ -270,6 +270,7 @@ export function normalizeDesignDocument(
     }),
     features: (Array.isArray(doc.features) ? doc.features : []).map((f) => ({
       ...f,
+      waterlineTiles: f.waterlineTiles === false ? false : undefined,
       waterlineTileId:
         f.waterlineTileId && isWaterlineTileId(f.waterlineTileId)
           ? f.waterlineTileId
