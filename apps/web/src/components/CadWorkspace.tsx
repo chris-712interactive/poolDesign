@@ -4844,7 +4844,7 @@ export function CadWorkspace({
                               });
                             }}
                           />
-                          <span>Waterline tile on leading edges</span>
+                          <span>Waterline tile nosing band on tread / edge</span>
                         </label>
                         {selectedFeature.waterlineTiles !== false && (
                           <WaterlineTilePicker

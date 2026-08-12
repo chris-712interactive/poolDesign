@@ -708,6 +708,106 @@ function pushWaterlineTileBand(
   });
 }
 
+/**
+ * Flat ~6″ tile strip on the TOP of a tread / sunshelf along one edge.
+ * Marks the nosing — not a full vertical riser wrap.
+ */
+function pushTopEdgeTileBand(
+  meshes: MeshDescriptor[],
+  opts: {
+    a: PointMm;
+    b: PointMm;
+    /** Unit plan direction from the edge into the tread/shelf surface. */
+    inwardX: number;
+    inwardY: number;
+    bandWidthMm: number;
+    topY: number;
+    /** Vertical thickness of the band (proud of the surface). */
+    thicknessM?: number;
+    waterlineTileId?: string;
+    select: SceneSelection;
+    id: string;
+  },
+) {
+  const edgeLen = Math.hypot(opts.b.x - opts.a.x, opts.b.y - opts.a.y);
+  if (edgeLen < 40) return;
+  const tx = (opts.b.x - opts.a.x) / edgeLen;
+  const ty = (opts.b.y - opts.a.y) / edgeLen;
+  let ix = opts.inwardX;
+  let iy = opts.inwardY;
+  const il = Math.hypot(ix, iy) || 1;
+  ix /= il;
+  iy /= il;
+  const bandMm = Math.max(40, opts.bandWidthMm);
+  const thickM = opts.thicknessM ?? 0.016;
+  const mid = {
+    x: (opts.a.x + opts.b.x) / 2 + ix * (bandMm / 2),
+    y: (opts.a.y + opts.b.y) / 2 + iy * (bandMm / 2),
+  };
+  const xz = planToWorldXZ(mid);
+  meshes.push({
+    kind: "box",
+    id: opts.id,
+    material: "waterline",
+    position: {
+      x: xz.x,
+      y: opts.topY + thickM * 0.5 + 0.003,
+      z: xz.z,
+    },
+    size: {
+      x: mmToMeters(edgeLen),
+      y: thickM,
+      z: mmToMeters(bandMm),
+    },
+    rotationY: 0,
+    axisX: planDirToWorldXZ(tx, ty),
+    // Local Z = band depth into the tread/shelf.
+    axisZ: planDirToWorldXZ(ix, iy),
+    waterlineTileId: opts.waterlineTileId,
+    select: opts.select,
+  });
+}
+
+/** Perimeter nosing bands on the top face of a sunshelf / ledge. */
+function pushShelfTopTileBands(
+  meshes: MeshDescriptor[],
+  opts: {
+    outlineMm: PointMm[];
+    topY: number;
+    bandWidthMm: number;
+    waterlineTileId?: string;
+    select: SceneSelection;
+    idPrefix: string;
+  },
+) {
+  const pts = ringPoints(opts.outlineMm);
+  if (pts.length < 3) return;
+  let cx = 0;
+  let cy = 0;
+  for (const p of pts) {
+    cx += p.x;
+    cy += p.y;
+  }
+  cx /= pts.length;
+  cy /= pts.length;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    pushTopEdgeTileBand(meshes, {
+      a,
+      b,
+      inwardX: cx - mid.x,
+      inwardY: cy - mid.y,
+      bandWidthMm: opts.bandWidthMm,
+      topY: opts.topY,
+      waterlineTileId: opts.waterlineTileId,
+      select: opts.select,
+      id: `${opts.idPrefix}_${i}`,
+    });
+  }
+}
+
 const BASIN_FLOOR_THICKNESS_M = 0.14;
 
 /** Prefer cascade normal pointing toward the pool (outside the spa). */
@@ -2883,20 +2983,15 @@ export function buildSceneModel(
           height: fillH,
           select,
         });
-        // Waterline tile on the shelf leading edges (wet vertical faces).
+        // Flat nosing band on the shelf TOP (marks the edge — not a riser wrap).
         if (featureTilesOn) {
-          const tileH = mmToMeters(152);
-          pushWallRing(meshes, {
+          pushShelfTopTileBands(meshes, {
             outlineMm: outline,
-            bottomY: shelfTop - tileH * 0.9,
-            height: tileH,
-            thicknessMm: 45,
-            material: "waterline",
+            topY: shelfTop,
+            bandWidthMm: 152,
             waterlineTileId: featureTileId,
             select,
             idPrefix: `feature_sunshelf_tile_${f.id}`,
-            inward: false,
-            normalBiasMm: -8,
           });
         }
       } else if (f.kind === "bench") {
@@ -2913,12 +3008,11 @@ export function buildSceneModel(
         });
       } else if (f.kind === "steps") {
         // Stepped treads: one strip per riser, descending into the pool.
-        // Tread solids overlap the next riser so the riser/tread joint never
-        // opens a see-through seam when the camera grazes the edge.
+        // Overlap + slight plan nest so riser/tread joints stay sealed.
         const risers = stepsRiserCount(f.riserCount);
         const riserM = mmToMeters(STANDARD_STEP_RISER_MM);
-        const treadH = riserM * 1.1;
-        const tileH = Math.min(mmToMeters(152), riserM * 0.98);
+        const treadH = riserM * 1.22;
+        const bandMm = 152; // 6″ nosing strip on the tread top
         for (let s = 0; s < risers; s++) {
           const tread = stepsTreadOutline(f.outline, s, risers);
           if (tread.length < 3) continue;
@@ -2933,19 +3027,33 @@ export function buildSceneModel(
             height: treadH,
             select,
           });
-          // Tile the wet vertical faces of each tread / riser.
-          if (featureTilesOn) {
-            pushWallRing(meshes, {
-              outlineMm: closeOutline(tread),
-              bottomY: top - tileH * 0.92,
-              height: tileH,
-              thicknessMm: 42,
-              material: "waterline",
+          // Small tile band on the tread TOP at the deep nosing edge only.
+          if (featureTilesOn && tread.length >= 4) {
+            // stepsTreadOutline: [0],[1] = shallow edge; [2],[3] = deep edge.
+            const deepA = tread[3];
+            const deepB = tread[2];
+            let cx = 0;
+            let cy = 0;
+            for (const p of tread) {
+              cx += p.x;
+              cy += p.y;
+            }
+            cx /= tread.length;
+            cy /= tread.length;
+            const mid = {
+              x: (deepA.x + deepB.x) / 2,
+              y: (deepA.y + deepB.y) / 2,
+            };
+            pushTopEdgeTileBand(meshes, {
+              a: deepA,
+              b: deepB,
+              inwardX: cx - mid.x,
+              inwardY: cy - mid.y,
+              bandWidthMm: bandMm,
+              topY: top,
               waterlineTileId: featureTileId,
               select,
-              idPrefix: `feature_steps_tile_${f.id}_${s}`,
-              inward: false,
-              normalBiasMm: -8,
+              id: `feature_steps_tile_${f.id}_${s}`,
             });
           }
         }
