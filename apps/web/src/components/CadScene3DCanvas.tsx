@@ -397,6 +397,7 @@ function SelectableMaterial({
 
   if (usePhysical) {
     const glassLike = isGlassFence || material === "window";
+    const waterline = material === "waterline";
     return (
       <meshPhysicalMaterial
         color={color}
@@ -420,6 +421,10 @@ function SelectableMaterial({
         emissiveIntensity={selected ? 0.28 : 0}
         clippingPlanes={clippingPlanes}
         clipShadows={clippingPlanes.length > 0}
+        // Prefer tile over coplanar plaster when viewing the wet face.
+        polygonOffset={waterline}
+        polygonOffsetFactor={waterline ? -2 : 0}
+        polygonOffsetUnits={waterline ? -2 : 0}
       />
     );
   }

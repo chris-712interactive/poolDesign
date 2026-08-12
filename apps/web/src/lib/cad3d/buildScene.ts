@@ -580,11 +580,18 @@ function pushWallRing(
     edgeOmits?: { edgeIndex: number; intervals: [number, number][] }[];
     /** Waterline tile finish (material === "waterline"). */
     waterlineTileId?: string;
+    /**
+     * Extra shift along the thickness normal (mm). Positive = further in the
+     * thickness direction. Use a small negative bias on waterline veneers so
+     * they sit slightly proud of the shell and avoid z-fighting.
+     */
+    normalBiasMm?: number;
   },
 ) {
   const pts = ringPoints(opts.outlineMm);
   if (pts.length < 3) return;
   const thickM = mmToMeters(opts.thicknessMm);
+  const biasMm = opts.normalBiasMm ?? 0;
   let segIndex = 0;
   for (let i = 0; i < pts.length; i++) {
     const a = pts[i];
@@ -633,8 +640,8 @@ function pushWallRing(
         ny = -ny;
       }
       const centerPlan = {
-        x: mid.x + nx * (opts.thicknessMm / 2),
-        y: mid.y + ny * (opts.thicknessMm / 2),
+        x: mid.x + nx * (opts.thicknessMm / 2 + biasMm),
+        y: mid.y + ny * (opts.thicknessMm / 2 + biasMm),
       };
       const xz = planToWorldXZ(centerPlan);
       meshes.push({
@@ -659,6 +666,45 @@ function pushWallRing(
       });
     }
   }
+}
+
+/** ~6″ waterline tile veneer on the wet face of a basin / ledge. */
+function pushWaterlineTileBand(
+  meshes: MeshDescriptor[],
+  opts: {
+    /** Inside / waterline outline (not the outer shell). */
+    waterlineOutlineMm: PointMm[];
+    wallThicknessMm: number;
+    waterTopY: number;
+    waterlineTileId?: string;
+    select: SceneSelection;
+    idPrefix: string;
+    openAgainst?: PointMm[][];
+    edgeOmits?: { edgeIndex: number; intervals: [number, number][] }[];
+  },
+) {
+  if (opts.waterlineOutlineMm.length < 3) return;
+  const tileH = mmToMeters(152); // 6″
+  const veneerMm = Math.min(
+    Math.max(28, opts.wallThicknessMm * 0.22),
+    Math.max(40, opts.wallThicknessMm * 0.45),
+  );
+  pushWallRing(meshes, {
+    outlineMm: opts.waterlineOutlineMm,
+    bottomY: opts.waterTopY - tileH * 0.92,
+    height: tileH,
+    thicknessMm: veneerMm,
+    material: "waterline",
+    waterlineTileId: opts.waterlineTileId,
+    select: opts.select,
+    idPrefix: opts.idPrefix,
+    // Grow from waterline into the shell so the face reads underwater.
+    inward: false,
+    openAgainst: opts.openAgainst,
+    edgeOmits: opts.edgeOmits,
+    // Slightly proud of the plaster so the tile wins depth tests.
+    normalBiasMm: -6,
+  });
 }
 
 const BASIN_FLOOR_THICKNESS_M = 0.14;
@@ -2546,21 +2592,16 @@ export function buildSceneModel(
           });
         }
 
-        // Waterline tile on the spa inner face (~6″ band at freeboard).
-        {
-          const tileH = mmToMeters(150);
-          pushWallRing(meshes, {
-            outlineMm: outer,
-            bottomY: spaWaterTop - tileH * 0.85,
-            height: tileH,
-            thicknessMm: wallT * 0.45,
-            material: "waterline",
-            waterlineTileId: body.waterlineTileId,
-            select,
-            idPrefix: `spa_tile_${body.id}`,
-            inward: true,
-          });
-        }
+        // Waterline tile on the spa wet face (~6″ band at freeboard).
+        pushWaterlineTileBand(meshes, {
+          waterlineOutlineMm: inner,
+          wallThicknessMm: wallT,
+          waterTopY: spaWaterTop,
+          waterlineTileId: body.waterlineTileId,
+          select,
+          idPrefix: `spa_tile_${body.id}`,
+          edgeOmits,
+        });
 
         pushSpaSpilloverWater(meshes, {
           spills,
@@ -2729,19 +2770,19 @@ export function buildSceneModel(
           edgeOmits: spaOutlines.length === 0 ? infinityOmits : undefined,
         });
 
-        // Waterline tile band just below the freeboard.
-        const tileH = mmToMeters(150);
-        pushWallRing(meshes, {
-          outlineMm: wallOutline,
-          bottomY: waterTopY - tileH * 0.85,
-          height: tileH,
-          thicknessMm: wallT * 0.55,
-          material: "waterline",
+        // Waterline tile band on the wet face (inside waterline), not the
+        // outer shell — old placement sat in the wall and flickered outside.
+        pushWaterlineTileBand(meshes, {
+          waterlineOutlineMm:
+            waterOutline.length >= 3 ? waterOutline : waterInner,
+          wallThicknessMm: wallT,
+          waterTopY,
           waterlineTileId: body.waterlineTileId,
           select,
           idPrefix: `pool_tile_${body.id}`,
-          inward: true,
           openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
+          // Infinity notches are indexed on the outer ring; only apply when
+          // the waterline ring still matches that topology (no spa clip).
           edgeOmits: spaOutlines.length === 0 ? infinityOmits : undefined,
         });
 
@@ -2833,6 +2874,22 @@ export function buildSceneModel(
           height: fillH,
           select,
         });
+        // Optional waterline tile on the shelf leading edges (wet vertical faces).
+        if (f.waterlineTileId) {
+          const tileH = mmToMeters(152);
+          pushWallRing(meshes, {
+            outlineMm: outline,
+            bottomY: shelfTop - tileH * 0.85,
+            height: tileH,
+            thicknessMm: 40,
+            material: "waterline",
+            waterlineTileId: f.waterlineTileId,
+            select,
+            idPrefix: `feature_sunshelf_tile_${f.id}`,
+            inward: false,
+            normalBiasMm: -6,
+          });
+        }
       } else if (f.kind === "bench") {
         const benchTop = waterTopY - mmToMeters(Math.min(depthMm, 450));
         const thickness = 0.35;
@@ -2850,6 +2907,7 @@ export function buildSceneModel(
         const risers = stepsRiserCount(f.riserCount);
         const riserM = mmToMeters(STANDARD_STEP_RISER_MM);
         const treadH = Math.max(0.08, riserM * 0.92);
+        const tileH = Math.min(mmToMeters(152), riserM * 0.95);
         for (let s = 0; s < risers; s++) {
           const tread = stepsTreadOutline(f.outline, s, risers);
           if (tread.length < 3) continue;
@@ -2864,6 +2922,21 @@ export function buildSceneModel(
             height: treadH,
             select,
           });
+          // Optional tile on each tread's wet vertical faces / risers.
+          if (f.waterlineTileId) {
+            pushWallRing(meshes, {
+              outlineMm: closeOutline(tread),
+              bottomY: top - tileH * 0.15,
+              height: tileH,
+              thicknessMm: 35,
+              material: "waterline",
+              waterlineTileId: f.waterlineTileId,
+              select,
+              idPrefix: `feature_steps_tile_${f.id}_${s}`,
+              inward: false,
+              normalBiasMm: -6,
+            });
+          }
         }
       }
     }

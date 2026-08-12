@@ -607,6 +607,11 @@ export type PoolFeature = {
   riserCount?: number;
   /** Water depth on the ledge (sunshelf only) */
   depthMm?: number;
+  /**
+   * Optional waterline tile finish for steps / sunshelf leading edges.
+   * When set, 3D shows a tile band; omit/undefined = plaster only.
+   */
+  waterlineTileId?: string;
 };
 
 /** User-authored estimate line (not derived from geometry). */

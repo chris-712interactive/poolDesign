@@ -12,6 +12,7 @@ import {
   DEFAULT_SPA_SHELL_HEIGHT_MM,
   DEFAULT_SPA_WALL_THICKNESS_MM,
   DEFAULT_SUNSHELF_DEPTH_MM,
+  DEFAULT_WATERLINE_TILE_ID,
   DESIGN_LEVEL_LABELS,
   FENCE_KINDS,
   GATE_KINDS,
@@ -4803,6 +4804,58 @@ export function CadWorkspace({
                           Typical sunshelf depth is about 9″. Footprint area
                           rolls into the estimate.
                         </p>
+                      </div>
+                    )}
+                    {(selectedFeature.kind === "steps" ||
+                      selectedFeature.kind === "sunshelf") && (
+                      <div className="stack" style={{ gap: "0.4rem" }}>
+                        <label
+                          className="row"
+                          style={{ gap: "0.45rem", alignItems: "center" }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!selectedFeature.waterlineTileId}
+                            onChange={(e) => {
+                              const parent = selectedFeature.poolBodyId
+                                ? design.poolBodies.find(
+                                    (p) => p.id === selectedFeature.poolBodyId,
+                                  )
+                                : design.poolBodies.find(
+                                    (p) => waterBodyKind(p) === "pool",
+                                  );
+                              const nextId = e.target.checked
+                                ? (parent?.waterlineTileId ??
+                                  DEFAULT_WATERLINE_TILE_ID)
+                                : undefined;
+                              commitDesign({
+                                ...design,
+                                features: (design.features ?? []).map((f) =>
+                                  f.id === selectedFeature.id
+                                    ? { ...f, waterlineTileId: nextId }
+                                    : f,
+                                ),
+                              });
+                            }}
+                          />
+                          <span>Waterline tile on leading edges</span>
+                        </label>
+                        {selectedFeature.waterlineTileId && (
+                          <WaterlineTilePicker
+                            key={`feat-wl-${selectedFeature.id}-${selectedFeature.waterlineTileId}`}
+                            value={selectedFeature.waterlineTileId}
+                            onChange={(waterlineTileId) =>
+                              commitDesign({
+                                ...design,
+                                features: (design.features ?? []).map((f) =>
+                                  f.id === selectedFeature.id
+                                    ? { ...f, waterlineTileId }
+                                    : f,
+                                ),
+                              })
+                            }
+                          />
+                        )}
                       </div>
                     )}
                     <button

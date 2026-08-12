@@ -268,7 +268,13 @@ export function normalizeDesignDocument(
         personOutfitId,
       };
     }),
-    features: Array.isArray(doc.features) ? doc.features : [],
+    features: (Array.isArray(doc.features) ? doc.features : []).map((f) => ({
+      ...f,
+      waterlineTileId:
+        f.waterlineTileId && isWaterlineTileId(f.waterlineTileId)
+          ? f.waterlineTileId
+          : undefined,
+    })),
     patios: (Array.isArray(doc.patios) ? doc.patios : []).map((p) => ({
       ...p,
       materialId:
