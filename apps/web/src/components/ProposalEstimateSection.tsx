@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import {
   formatMoney,
   formatQuantity,
@@ -8,63 +7,37 @@ import {
 } from "@pool-design/shared";
 
 type Props = {
-  token: string;
-  /** Share was created with an estimate snapshot. */
-  shareIncludesEstimate: boolean;
   estimate: TakeoffResult | null;
+  /** Compact body for the live-session sidebar tab. */
+  embedded?: boolean;
 };
 
-/**
- * Hides the estimate during an active live session unless the designer
- * opts in via live session `showEstimate`.
- */
+/** Estimate table used on the public proposal and in the live sidebar. */
 export function ProposalEstimateSection({
-  token,
-  shareIncludesEstimate,
   estimate,
+  embedded = false,
 }: Props) {
-  const [liveActive, setLiveActive] = useState(false);
-  const [showEstimateInLive, setShowEstimateInLive] = useState(false);
-
-  const refresh = useCallback(async () => {
-    const res = await fetch(`/api/p/${token}/live`);
-    if (!res.ok) return;
-    const json = (await res.json()) as {
-      active: boolean;
-      state: { showEstimate?: boolean };
-    };
-    setLiveActive(json.active);
-    setShowEstimateInLive(Boolean(json.state?.showEstimate));
-  }, [token]);
-
-  useEffect(() => {
-    void refresh();
-    const t = setInterval(() => void refresh(), 2500);
-    return () => clearInterval(t);
-  }, [refresh]);
-
-  if (!shareIncludesEstimate || !estimate) return null;
-
-  // Live preview mode: hide pricing unless designer turned it on.
-  if (liveActive && !showEstimateInLive) {
+  if (!estimate) {
+    if (!embedded) return null;
     return (
-      <section className="proposal-panel">
-        <h2>Estimate</h2>
-        <p className="muted" style={{ margin: 0 }}>
-          Pricing is hidden during this live preview. Your designer can share
-          the estimate when you&apos;re ready to review numbers.
-        </p>
-      </section>
+      <p className="muted" style={{ margin: 0 }}>
+        No estimate is attached to this link yet. Ask your designer to include
+        it when they share.
+      </p>
     );
   }
 
-  return (
-    <section className="proposal-panel">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h2>Estimate summary</h2>
+  const body = (
+    <>
+      <div className="row" style={{ justifyContent: "space-between", gap: "0.5rem" }}>
+        {embedded ? (
+          <h3 style={{ margin: 0 }}>Estimate</h3>
+        ) : (
+          <h2>Estimate summary</h2>
+        )}
         <strong>{formatMoney(estimate.subtotalCents)}</strong>
       </div>
-      <p className="muted">
+      <p className="muted" style={{ margin: embedded ? "0.35rem 0 0" : undefined }}>
         Indicative takeoff at share time. Final pricing may change.
       </p>
       <div className="proposal-table-wrap">
@@ -92,6 +65,12 @@ export function ProposalEstimateSection({
           </tbody>
         </table>
       </div>
-    </section>
+    </>
   );
+
+  if (embedded) {
+    return <div className="client-live-estimate">{body}</div>;
+  }
+
+  return <section className="proposal-panel">{body}</section>;
 }

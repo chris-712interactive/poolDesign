@@ -13,6 +13,8 @@ import { getWaterlineTilePreviewCanvas } from "@/lib/cad3d/waterlineTileTextures
 type Props = {
   waterlineTileId: string;
   patioMaterialId: string;
+  /** Material swatches only — used beside the 3D still so we don't draw a second pool. */
+  compact?: boolean;
 };
 
 const W = 720;
@@ -54,19 +56,64 @@ function fillPattern(
   }
 }
 
+function paintSwatch(
+  canvas: HTMLCanvasElement | null,
+  src: HTMLCanvasElement | null,
+  fallback: string,
+) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const size = canvas.width;
+  ctx.clearRect(0, 0, size, size);
+  if (src) {
+    const scale = size / 2.2 / src.width;
+    const off = document.createElement("canvas");
+    off.width = Math.max(1, Math.round(src.width * scale));
+    off.height = Math.max(1, Math.round(src.height * scale));
+    const octx = off.getContext("2d")!;
+    octx.imageSmoothingEnabled = true;
+    octx.drawImage(src, 0, 0, off.width, off.height);
+    const pat = ctx.createPattern(off, "repeat");
+    if (pat) {
+      ctx.fillStyle = pat;
+      ctx.fillRect(0, 0, size, size);
+      return;
+    }
+  }
+  ctx.fillStyle = fallback;
+  ctx.fillRect(0, 0, size, size);
+}
+
 /**
- * Accurate patio + waterline combination preview using the same canvas
- * generators as the 3D CAD materials.
+ * Patio + waterline preview. Full scene, or compact material swatches
+ * when shown beside the designer's 3D still.
  */
 export function FinishCombinationPreview({
   waterlineTileId,
   patioMaterialId,
+  compact = false,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const tileSwatchRef = useRef<HTMLCanvasElement | null>(null);
+  const patioSwatchRef = useRef<HTMLCanvasElement | null>(null);
   const tile = getWaterlineTile(waterlineTileId);
   const patio = getPatioFinish(patioMaterialId);
 
   useEffect(() => {
+    if (compact) {
+      paintSwatch(
+        tileSwatchRef.current,
+        getWaterlineTilePreviewCanvas(waterlineTileId),
+        "#4a7a9a",
+      );
+      paintSwatch(
+        patioSwatchRef.current,
+        getPatioFinishPreviewCanvas(patioMaterialId),
+        "#c4b8a8",
+      );
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -169,7 +216,52 @@ export function FinishCombinationPreview({
     ctx.font = "600 11px system-ui, sans-serif";
     ctx.fillText("Patio deck", 22, H - 20);
     ctx.fillText("Waterline band", W - 168, H - 20);
-  }, [waterlineTileId, patioMaterialId]);
+  }, [compact, waterlineTileId, patioMaterialId]);
+
+  const meta = (
+    <div className="client-finish-preview-meta">
+      <div>
+        <span className="muted">Waterline</span>
+        <strong>{tile.name}</strong>
+        <div className="muted" style={{ fontSize: "0.78rem" }}>
+          {WATERLINE_TILE_PATTERN_LABELS[tile.pattern]} · {tile.colorName}
+        </div>
+      </div>
+      <div>
+        <span className="muted">Patio</span>
+        <strong>{patio.name}</strong>
+        <div className="muted" style={{ fontSize: "0.78rem" }}>
+          {PATIO_FINISH_PATTERN_LABELS[patio.pattern]} · {patio.colorName}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (compact) {
+    return (
+      <div
+        className="client-finish-preview is-compact"
+        aria-live="polite"
+        aria-label={`Selected: ${patio.name} patio with ${tile.name} waterline`}
+      >
+        <div className="client-finish-swatches">
+          <canvas
+            ref={tileSwatchRef}
+            className="client-finish-swatch"
+            width={96}
+            height={96}
+          />
+          <canvas
+            ref={patioSwatchRef}
+            className="client-finish-swatch"
+            width={96}
+            height={96}
+          />
+        </div>
+        {meta}
+      </div>
+    );
+  }
 
   return (
     <div className="client-finish-preview" aria-live="polite">
@@ -181,22 +273,7 @@ export function FinishCombinationPreview({
         role="img"
         aria-label={`Preview: ${patio.name} patio with ${tile.name} waterline`}
       />
-      <div className="client-finish-preview-meta">
-        <div>
-          <span className="muted">Waterline</span>
-          <strong>{tile.name}</strong>
-          <div className="muted" style={{ fontSize: "0.78rem" }}>
-            {WATERLINE_TILE_PATTERN_LABELS[tile.pattern]} · {tile.colorName}
-          </div>
-        </div>
-        <div>
-          <span className="muted">Patio</span>
-          <strong>{patio.name}</strong>
-          <div className="muted" style={{ fontSize: "0.78rem" }}>
-            {PATIO_FINISH_PATTERN_LABELS[patio.pattern]} · {patio.colorName}
-          </div>
-        </div>
-      </div>
+      {meta}
     </div>
   );
 }

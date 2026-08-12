@@ -2,9 +2,7 @@ import { prisma } from "@pool-design/db";
 import { type TakeoffResult } from "@pool-design/shared";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { ClientLiveSessionPanel } from "@/components/ClientLiveSessionPanel";
-import { ProposalDesignPreview } from "@/components/ProposalDesignPreview";
-import { ProposalEstimateSection } from "@/components/ProposalEstimateSection";
+import { PublicProposalClient } from "@/components/PublicProposalClient";
 
 type PageProps = { params: Promise<{ token: string }> };
 
@@ -56,59 +54,23 @@ export default async function PublicProposalPage({ params }: PageProps) {
   const project = share.project;
 
   return (
-    <div className="proposal-page">
-      <header className="proposal-hero">
-        <div className="proposal-hero-inner">
-          <div className="proposal-brand">
-            {company.logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={company.logoUrl}
-                alt=""
-                className="proposal-logo"
-              />
-            ) : null}
-            <div>
-              <div className="proposal-company">{company.name}</div>
-              {company.region ? (
-                <div className="proposal-region">{company.region}</div>
-              ) : null}
-            </div>
-          </div>
-          <p className="proposal-eyebrow">Residential proposal</p>
-          <h1>{project.name}</h1>
-          {(project.clientName || project.address) && (
-            <p className="proposal-meta">
-              {[project.clientName, project.address].filter(Boolean).join(" · ")}
-            </p>
-          )}
-        </div>
-      </header>
-
-      <main className="proposal-main">
-        <ProposalDesignPreview
-          token={token}
-          projectName={project.name}
-          initialPreviewImageUrl={share.previewImageUrl}
-          initialPreviewVideoUrl={share.previewVideoUrl}
-        />
-
-        <ClientLiveSessionPanel token={token} />
-
-        <ProposalEstimateSection
-          token={token}
-          shareIncludesEstimate={share.includeEstimate}
-          estimate={estimate}
-        />
-
-        <p className="proposal-footer muted">
-          Shared by {company.name}
-          {share.expiresAt
-            ? ` · Link expires ${share.expiresAt.toLocaleDateString()}`
-            : ""}
-          . Powered by PoolShape.
-        </p>
-      </main>
-    </div>
+    <PublicProposalClient
+      token={token}
+      company={{
+        name: company.name,
+        logoUrl: company.logoUrl,
+        region: company.region,
+      }}
+      project={{
+        name: project.name,
+        clientName: project.clientName,
+        address: project.address,
+      }}
+      initialPreviewImageUrl={share.previewImageUrl}
+      initialPreviewVideoUrl={share.previewVideoUrl}
+      shareIncludesEstimate={share.includeEstimate}
+      estimate={estimate}
+      expiresAt={share.expiresAt ? share.expiresAt.toISOString() : null}
+    />
   );
 }
