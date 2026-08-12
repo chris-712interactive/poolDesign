@@ -2934,9 +2934,9 @@ export function buildSceneModel(
             id: `pool_${body.id}_shelfwater_${f.id}`,
             material: "poolWater",
             outlineMm: closeOutline(f.outline),
-            bottomY: waterTopY - 0.012,
-            height: 0.012,
-            opacity: 0.38,
+            bottomY: waterTopY - 0.01,
+            height: 0.01,
+            opacity: 0.2,
             waterShallow: true,
             select,
           });

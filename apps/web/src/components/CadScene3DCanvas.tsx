@@ -525,6 +525,17 @@ function ExtrudeMesh({
         shape.holes.push(outlineToPath(hole, true));
       }
     }
+    const isShallowWater =
+      desc.waterShallow === true &&
+      (desc.material === "poolWater" || desc.material === "spaWater");
+    // Flat single-face film for sunshelf water — an extruded slab's top+bottom
+    // faces stack in transparency and read as dark navy over the ledge.
+    if (isShallowWater) {
+      const geo = new THREE.ShapeGeometry(shape);
+      geo.rotateX(-Math.PI / 2);
+      geo.translate(0, desc.bottomY + Math.max(0.004, desc.height), 0);
+      return geo;
+    }
     const geo = new THREE.ExtrudeGeometry(shape, {
       depth: Math.max(0.01, desc.height),
       bevelEnabled: false,
@@ -539,7 +550,11 @@ function ExtrudeMesh({
   const isWater =
     desc.material === "poolWater" || desc.material === "spaWater";
   const waterLayer =
-    isWater && desc.height <= 0.04 ? "surface" : isWater ? "volume" : undefined;
+    isWater && (desc.waterShallow || desc.height <= 0.04)
+      ? "surface"
+      : isWater
+        ? "volume"
+        : undefined;
 
   return (
     <group>
