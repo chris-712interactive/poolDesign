@@ -33,12 +33,15 @@ Open [http://localhost:3000](http://localhost:3000) (or the port shown in the te
 - Designer **imperial / metric** setting
 - CAD workspace (design-platform focus): pool/patio/steps/bench/plumbing/library, zoom/pan, vertex edit + move, rotate furniture, measure tool, typed length entry, ortho + 15° snap, design checklist, layers, undo/redo
 - **3D preview** with PNG / orbit clip export
-- **Client share links** (`/p/[token]`) — read-only proposal with still + estimate
+- **Client share links** (`/p/[token]`) — read-only proposal with still + estimate; optional **live finish session**
 - **Estimate / BOM**: automatic takeoffs with starter catalog pricing + company price overrides
-- **Stripe** trial → paid billing (Checkout + Customer Portal)
+- **Builder exports**: printable PDF quote, CSV takeoff, draft permit packet (gated by plan)
+- **Grade walk import**: transect distance + drop → grade samples (phone AR API-ready)
+- **Stripe** trial → Sales (`starter`) / Builder (`pro`) billing (Checkout + Customer Portal)
 - **Team invites** from company admin
 - **Object library**: furniture/amenities filtered by design level; counts roll into the BOM
 - **Deploy:** Vercel + Postgres — [docs/deploy.md](docs/deploy.md)
+- **Roadmap:** [docs/product-roadmap.md](docs/product-roadmap.md)
 
 ### Seed logins
 

@@ -10,6 +10,7 @@ import {
   type CatalogUnit,
   type DesignDocument,
   type EstimateCustomLine,
+  type PlanEntitlements,
   type UnitSystem,
 } from "@pool-design/shared";
 
@@ -20,6 +21,7 @@ type Props = {
   onDesignChange: (next: DesignDocument) => void;
   /** Optional company price-book catalog */
   catalog?: CatalogItem[];
+  entitlements?: PlanEntitlements;
 };
 
 const ADD_CATEGORIES: Array<CatalogCategory | "other"> = [
@@ -70,6 +72,7 @@ export function EstimatePanel({
   unitSystem,
   onDesignChange,
   catalog,
+  entitlements,
 }: Props) {
   const takeoff = useMemo(
     () => buildTakeoff(design, unitSystem, catalog),
@@ -88,6 +91,7 @@ export function EstimatePanel({
   const [addPrice, setAddPrice] = useState("");
   const [addNote, setAddNote] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const hasAutoScope =
     design.poolBodies.length > 0 ||
@@ -110,6 +114,37 @@ export function EstimatePanel({
     } catch {
       setMilestoneState("error");
     }
+  }
+
+  async function openExport(path: string, gated: boolean | undefined) {
+    setExportError(null);
+    if (gated === false) {
+      setExportError(
+        "Upgrade to the Builder plan to export quotes and takeoffs.",
+      );
+      return;
+    }
+    const res = await fetch(path);
+    if (!res.ok) {
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      setExportError(json.error || "Export failed");
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const isCsv = path.includes("takeoff-csv");
+    if (isCsv) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = disposition.includes("filename=")
+        ? disposition.split("filename=")[1]?.replace(/"/g, "") || "takeoff.csv"
+        : "takeoff.csv";
+      a.click();
+    } else {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
   function removeLine(lineKey: string, custom?: boolean) {
@@ -187,7 +222,47 @@ export function EstimatePanel({
             not billed. Remove or add lines as needed.
           </p>
         </div>
-        <div className="row" style={{ gap: "0.5rem" }}>
+        <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={!hasLines}
+            onClick={() =>
+              void openExport(
+                `/api/projects/${projectId}/quote`,
+                entitlements?.pdfQuote,
+              )
+            }
+            title="Open printable quote (Save as PDF from the browser)"
+          >
+            PDF quote
+          </button>
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={!hasLines}
+            onClick={() =>
+              void openExport(
+                `/api/projects/${projectId}/takeoff-csv`,
+                entitlements?.csvTakeoff,
+              )
+            }
+          >
+            CSV export
+          </button>
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={() =>
+              void openExport(
+                `/api/projects/${projectId}/permit-packet`,
+                entitlements?.permitPacket,
+              )
+            }
+            title="Draft permit packet — not PE stamped"
+          >
+            Permit draft
+          </button>
           <button
             type="button"
             className="btn secondary"
@@ -212,6 +287,8 @@ export function EstimatePanel({
           </button>
         </div>
       </div>
+
+      {exportError ? <p className="error">{exportError}</p> : null}
 
       {showAdd && (
         <div

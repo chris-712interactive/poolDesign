@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { planDisplayName } from "@pool-design/shared";
 
 type Props = {
   hasCustomer: boolean;
@@ -46,14 +47,28 @@ export function BillingActions({ hasCustomer, planKey, status }: Props) {
 
   return (
     <div className="stack">
+      <p className="muted" style={{ margin: 0 }}>
+        <strong>Sales</strong> — 3D design, client share, live finish sessions.
+        <br />
+        <strong>Builder</strong> — PDF quotes, CSV takeoffs, grade-walk import,
+        draft permit packets.
+      </p>
       <div className="row" style={{ flexWrap: "wrap" }}>
+        <button
+          type="button"
+          className="btn secondary"
+          disabled={busy !== null}
+          onClick={() => void startCheckout("starter")}
+        >
+          {busy === "checkout" ? "Redirecting…" : "Sales plan"}
+        </button>
         <button
           type="button"
           className="btn"
           disabled={busy !== null}
-          onClick={() => void startCheckout(planKey === "pro" ? "pro" : "starter")}
+          onClick={() => void startCheckout("pro")}
         >
-          {busy === "checkout" ? "Redirecting…" : "Start / upgrade subscription"}
+          {busy === "checkout" ? "Redirecting…" : "Builder plan"}
         </button>
         {hasCustomer ? (
           <button
@@ -67,7 +82,10 @@ export function BillingActions({ hasCustomer, planKey, status }: Props) {
         ) : null}
       </div>
       <p className="muted">
-        Current plan: {planKey} · status: {status}
+        Current plan: {planDisplayName(planKey)} ({planKey}) · status: {status}
+        {status === "trialing"
+          ? " · Trial includes Builder features for evaluation"
+          : ""}
       </p>
       {error ? <p style={{ color: "var(--danger)" }}>{error}</p> : null}
     </div>

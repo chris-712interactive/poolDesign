@@ -28,9 +28,25 @@ export async function PUT(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const body = (await request.json()) as { design?: unknown };
+  const body = (await request.json()) as {
+    design?: unknown;
+    expectedRevision?: number;
+  };
   if (!body.design || typeof body.design !== "object") {
     return NextResponse.json({ error: "Missing design" }, { status: 400 });
+  }
+
+  if (
+    typeof body.expectedRevision === "number" &&
+    body.expectedRevision !== project.designRevision
+  ) {
+    return NextResponse.json(
+      {
+        error: "Design was updated elsewhere. Reload and try again.",
+        designRevision: project.designRevision,
+      },
+      { status: 409 },
+    );
   }
 
   const design = normalizeDesignDocument(body.design as DesignDocument, {
@@ -38,11 +54,12 @@ export async function PUT(
     unitSystem: user.unitSystem,
   });
 
-  await prisma.project.update({
+  const updated = await prisma.project.update({
     where: { id: project.id },
     data: {
       designJson: JSON.stringify(design),
       unitSystem: user.unitSystem,
+      designRevision: { increment: 1 },
     },
   });
 
@@ -64,5 +81,8 @@ export async function PUT(
     });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    designRevision: updated.designRevision,
+  });
 }

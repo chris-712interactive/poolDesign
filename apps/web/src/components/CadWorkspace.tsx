@@ -164,10 +164,13 @@ import {
   type PoolFeature,
   type PoolFeatureKind,
   type PlumbingRun,
+  type PlanEntitlements,
   type UnitSystem,
   type WaterBodyKind,
 } from "@pool-design/shared";
 import { EstimatePanel } from "@/components/EstimatePanel";
+import { GradeWalkPanel } from "@/components/GradeWalkPanel";
+import { LiveSessionHostControls } from "@/components/LiveSessionHostControls";
 import { CadScene3DDynamic } from "@/components/CadScene3DDynamic";
 import type { CadScene3DHandle } from "@/components/CadScene3DCanvas";
 import { ShareProposalButton } from "@/components/ShareProposalButton";
@@ -311,6 +314,7 @@ type Props = {
   unitSystem: UnitSystem;
   initialDesign: DesignDocument;
   catalog?: CatalogItem[];
+  entitlements?: PlanEntitlements;
 };
 
 const CLOSE_TOLERANCE_MM = 150;
@@ -413,7 +417,16 @@ export function CadWorkspace({
   unitSystem,
   initialDesign,
   catalog,
+  entitlements,
 }: Props) {
+  const planEntitlements = entitlements ?? {
+    liveClientSession: true,
+    pdfQuote: true,
+    csvTakeoff: true,
+    permitPacket: true,
+    arGradeImport: true,
+    hqExportUnlimited: true,
+  };
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const scene3dHandleRef = useRef<CadScene3DHandle | null>(null);
   const dragOriginRef = useRef<DesignDocument | null>(null);
@@ -2808,7 +2821,27 @@ export function CadWorkspace({
           <strong>{projectName}</strong>{" "}
           <span className="badge">{DESIGN_LEVEL_LABELS[designLevel]}</span>
         </div>
-        <div className="row">
+        <div className="row" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <LiveSessionHostControls
+            projectId={projectId}
+            entitlements={planEntitlements}
+            onApplyFinishes={(finishes) => {
+              commitDesign({
+                ...design,
+                poolBodies: design.poolBodies.map((b) =>
+                  finishes.waterlineTileId
+                    ? { ...b, waterlineTileId: finishes.waterlineTileId }
+                    : b,
+                ),
+                patios: design.patios.map((p) => {
+                  const all = finishes.patioMaterialById?.["*"];
+                  const one = finishes.patioMaterialById?.[p.id];
+                  const materialId = one ?? all;
+                  return materialId ? { ...p, materialId } : p;
+                }),
+              });
+            }}
+          />
           <ShareProposalButton
             projectId={projectId}
             ensure3d={() => {
@@ -2843,6 +2876,7 @@ export function CadWorkspace({
           unitSystem={unitSystem}
           onDesignChange={commitDesign}
           catalog={catalog}
+          entitlements={planEntitlements}
         />
       ) : (
         <div
@@ -3663,6 +3697,29 @@ export function CadWorkspace({
                     >
                       Delete
                     </button>
+                  </div>
+                )}
+                {(tool === "grade_point" || selectedGradeSample) && (
+                  <div
+                    className="stack"
+                    style={{
+                      marginTop: "0.75rem",
+                      paddingTop: "0.75rem",
+                      borderTop: "1px solid var(--line)",
+                    }}
+                  >
+                    <GradeWalkPanel
+                      projectId={projectId}
+                      design={design}
+                      unitSystem={unitSystem}
+                      entitlements={planEntitlements}
+                      onDesignChange={commitDesign}
+                      defaultOrigin={
+                        selectedGradeSample?.position ??
+                        design.buildings[0]?.outline[0] ??
+                        null
+                      }
+                    />
                   </div>
                 )}
                 {selectedOpening && (

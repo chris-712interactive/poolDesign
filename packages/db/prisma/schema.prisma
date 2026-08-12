@@ -100,13 +100,30 @@ model Project {
   unitSystem  UnitSystem  @default(imperial)
   /** JSON DesignDocument */
   designJson  String      @default("{}")
+  /** Monotonic revision for optimistic save / collab conflict detection */
+  designRevision Int      @default(0)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
-  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  shares  ProjectShare[]
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  shares      ProjectShare[]
+  liveSession ProjectLiveSession?
 
   @@index([companyId])
+}
+
+/** Host-driven kitchen-table live session (finish swaps + approvals). */
+model ProjectLiveSession {
+  id         String   @id @default(cuid())
+  projectId  String   @unique
+  active     Boolean  @default(false)
+  hostUserId String?
+  /** JSON LiveSessionState */
+  stateJson  String   @default("{}")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 /** Public client proposal link (no login required). */

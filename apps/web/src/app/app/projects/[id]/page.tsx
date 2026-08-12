@@ -7,6 +7,7 @@ import { CadWorkspace } from "@/components/CadWorkspace";
 import { SubscriptionBlocked } from "@/components/SubscriptionBlocked";
 import { companyHasAppAccess } from "@/lib/subscription";
 import { catalogWithCompanyPrices } from "@/lib/shares";
+import { entitlementsForCompany } from "@pool-design/shared";
 
 export default async function ProjectCadPage({
   params,
@@ -37,6 +38,7 @@ export default async function ProjectCadPage({
     user.companyId,
     project.designLevel,
   );
+  const entitlements = entitlementsForCompany(user.company);
 
   return (
     <div className="app-shell">
@@ -49,6 +51,7 @@ export default async function ProjectCadPage({
           unitSystem={user.unitSystem}
           initialDesign={design}
           catalog={catalog}
+          entitlements={entitlements}
         />
       </main>
     </div>

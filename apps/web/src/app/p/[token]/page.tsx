@@ -6,6 +6,7 @@ import {
 } from "@pool-design/shared";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { ClientLiveSessionPanel } from "@/components/ClientLiveSessionPanel";
 
 type PageProps = { params: Promise<{ token: string }> };
 
@@ -150,6 +151,8 @@ export default async function PublicProposalPage({ params }: PageProps) {
             </div>
           </section>
         ) : null}
+
+        <ClientLiveSessionPanel token={token} />
 
         <p className="proposal-footer muted">
           Shared by {company.name}
