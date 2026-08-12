@@ -333,6 +333,7 @@ function SelectableMaterial({
   patioFinishId,
   waterlineTileId,
   colorHex,
+  waterShallow,
 }: {
   material: SceneMaterialKey;
   opacity?: number;
@@ -341,6 +342,7 @@ function SelectableMaterial({
   patioFinishId?: string;
   waterlineTileId?: string;
   colorHex?: string;
+  waterShallow?: boolean;
 }) {
   const clippingPlanes = useContext(ClipPlanesContext);
   const textures = useContext(TextureContext);
@@ -383,6 +385,7 @@ function SelectableMaterial({
         selected={selected}
         opacity={opacity}
         spa={material === "spaWater"}
+        shallow={waterShallow}
       />
     );
   }
@@ -553,6 +556,7 @@ function ExtrudeMesh({
           selected={selected}
           waterLayer={waterLayer}
           patioFinishId={desc.patioFinishId}
+          waterShallow={desc.waterShallow}
         />
       </mesh>
       {desc.material === "poolFloor" ? (

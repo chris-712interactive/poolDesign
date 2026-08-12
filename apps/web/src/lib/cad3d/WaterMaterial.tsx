@@ -30,17 +30,21 @@ type WaterLayer = "volume" | "surface";
  * Animated pool / spa water.
  * Surface: physical water with dual scrolling normals, clearcoat, sky reflections.
  * Volume: soft absorption tint so depth reads through the basin.
+ * Shallow: sunshelf / ledge film — thin transmission so less water looks lighter.
  */
 export function WaterMaterial({
   layer,
   selected,
   opacity,
   spa = false,
+  shallow = false,
 }: {
   layer: WaterLayer;
   selected: boolean;
   opacity?: number;
   spa?: boolean;
+  /** ~9″ ledge water — do not use deep-basin attenuation thickness. */
+  shallow?: boolean;
 }) {
   const clippingPlanes = useContext(ClipPlanesContext);
   const textures = useContext(WaterTextureContext);
@@ -56,13 +60,13 @@ export function WaterMaterial({
     const normalMap = textures.normalA.clone();
     const clearcoatNormalMap = textures.normalB.clone();
     // Spa: tighter, busier chop from jet agitation. Pool: broader calm ripples.
-    const rep = spa ? 3.4 : 1.6;
-    const repB = spa ? 2.6 : 1.25;
-    map.repeat.set(spa ? 2.2 : 1.2, spa ? 2.2 : 1.2);
+    const rep = spa ? 3.4 : shallow ? 2.1 : 1.6;
+    const repB = spa ? 2.6 : shallow ? 1.7 : 1.25;
+    map.repeat.set(spa ? 2.2 : shallow ? 1.5 : 1.2, spa ? 2.2 : shallow ? 1.5 : 1.2);
     normalMap.repeat.set(rep, rep);
     clearcoatNormalMap.repeat.set(repB, repB);
     return { map, normalMap, clearcoatNormalMap };
-  }, [textures, layer, spa]);
+  }, [textures, layer, spa, shallow]);
 
   useEffect(
     () => () => {
@@ -102,18 +106,21 @@ export function WaterMaterial({
   });
 
   // Chlorinated residential pool: turquoise body, deeper teal absorption.
-  const baseColor = spa ? "#1a96b4" : "#1290b0";
-  const attenuation = spa ? "#0a6e88" : "#055870";
+  const baseColor = spa ? "#1a96b4" : shallow ? "#5ec8e0" : "#1290b0";
+  const attenuation = spa ? "#0a6e88" : shallow ? "#7ad4ea" : "#055870";
 
   if (layer === "volume") {
     return (
       <meshStandardMaterial
         ref={matRef as RefObject<THREE.MeshStandardMaterial>}
-        color={spa ? "#0e6f88" : "#0a5f78"}
+        color={spa ? "#0e6f88" : shallow ? "#3aa8c4" : "#0a5f78"}
         roughness={0.45}
         metalness={0}
         transparent
-        opacity={Math.min(0.48, Math.max(0.26, opacity ?? 0.34))}
+        opacity={Math.min(
+          shallow ? 0.22 : 0.48,
+          Math.max(shallow ? 0.1 : 0.26, opacity ?? (shallow ? 0.14 : 0.34)),
+        )}
         side={THREE.FrontSide}
         depthWrite={false}
         polygonOffset
@@ -134,28 +141,35 @@ export function WaterMaterial({
       color={baseColor}
       map={maps?.map ?? undefined}
       normalMap={maps?.normalMap ?? undefined}
-      normalScale={spa ? [1.25, 1.25] : [0.7, 0.7]}
+      normalScale={spa ? [1.25, 1.25] : shallow ? [0.45, 0.45] : [0.7, 0.7]}
       clearcoatNormalMap={maps?.clearcoatNormalMap ?? undefined}
-      clearcoatNormalScale={spa ? [1.05, 1.05] : [0.55, 0.55]}
-      roughness={spa ? 0.14 : 0.045}
+      clearcoatNormalScale={
+        spa ? [1.05, 1.05] : shallow ? [0.35, 0.35] : [0.55, 0.55]
+      }
+      roughness={spa ? 0.14 : shallow ? 0.08 : 0.045}
       metalness={0}
       clearcoat={spa ? 0.85 : 1}
-      clearcoatRoughness={spa ? 0.28 : 0.08}
+      clearcoatRoughness={spa ? 0.28 : shallow ? 0.14 : 0.08}
       // Transmission + attenuation = see the floor with depth tint.
-      transmission={spa ? 0.42 : 0.55}
-      thickness={spa ? 0.5 : 1.6}
+      // Shallow ledge: short thickness so ~9″ water stays pale turquoise.
+      transmission={spa ? 0.42 : shallow ? 0.82 : 0.55}
+      thickness={spa ? 0.5 : shallow ? 0.12 : 1.6}
       ior={1.333}
       attenuationColor={attenuation}
-      attenuationDistance={spa ? 1.1 : 2.2}
+      attenuationDistance={spa ? 1.1 : shallow ? 6 : 2.2}
       transparent
-      opacity={Math.min(0.9, Math.max(0.7, opacity ?? 0.82))}
+      opacity={
+        shallow
+          ? Math.min(0.55, Math.max(0.28, opacity ?? 0.38))
+          : Math.min(0.9, Math.max(0.7, opacity ?? 0.82))
+      }
       side={THREE.FrontSide}
-      depthWrite
+      depthWrite={!shallow}
       polygonOffset
       polygonOffsetFactor={-2}
       polygonOffsetUnits={-2}
-      envMapIntensity={spa ? 1.25 : 1.85}
-      specularIntensity={spa ? 0.85 : 1}
+      envMapIntensity={spa ? 1.25 : shallow ? 1.15 : 1.85}
+      specularIntensity={spa ? 0.85 : shallow ? 0.7 : 1}
       specularColor="#d8f0ff"
       emissive={selected ? "#1f8a70" : "#000000"}
       emissiveIntensity={selected ? 0.18 : 0}

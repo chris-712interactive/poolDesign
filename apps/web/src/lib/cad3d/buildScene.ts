@@ -143,6 +143,11 @@ export type ExtrudeDescriptor = {
   opacity?: number;
   /** Patio finish catalog id (when material === "patio"). */
   patioFinishId?: string;
+  /**
+   * Shallow water overlay (sunshelf): use thin transmission so ~9″ of water
+   * reads lighter than the deep end — not the deep-basin thickness model.
+   */
+  waterShallow?: boolean;
 } & Selectable;
 
 export type BoxDescriptor = {
@@ -2918,20 +2923,20 @@ export function buildSceneModel(
         }
 
         // Shallow water on top of each sunshelf (~feature depth).
+        // Thin surface film with waterShallow so ~9″ reads lighter than deep end
+        // (deep-pool transmission thickness was making this look navy).
         for (const f of design.features ?? []) {
           if (f.kind !== "sunshelf" || f.outline.length < 3) continue;
           if (f.poolBodyId && f.poolBodyId !== body.id) continue;
-          const shelfDepthMm = featureDepthMm("sunshelf", f.depthMm);
-          const shelfWaterH = Math.max(0.08, mmToMeters(shelfDepthMm) * 0.95);
-          // Thin surface only — thick shelf water volumes flicker against the ledge.
           meshes.push({
             kind: "extrude",
             id: `pool_${body.id}_shelfwater_${f.id}`,
             material: "poolWater",
             outlineMm: closeOutline(f.outline),
-            bottomY: waterTopY - 0.014,
-            height: 0.014,
-            opacity: 0.55,
+            bottomY: waterTopY - 0.012,
+            height: 0.012,
+            opacity: 0.38,
+            waterShallow: true,
             select,
           });
         }
