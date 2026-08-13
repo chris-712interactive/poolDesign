@@ -563,7 +563,7 @@ function ExtrudeMesh({
       <mesh
         geometry={geometry}
         castShadow={!isWater}
-        receiveShadow={!isWater}
+        receiveShadow
         renderOrder={isWater ? (waterLayer === "surface" ? 3 : 2) : 0}
         {...handlers}
       >
@@ -2552,6 +2552,7 @@ export function CadScene3DCanvas({
         </div>
       ) : null}
       <Canvas
+        shadows
         dpr={[1, 2]}
         camera={{ fov: 45, near: 0.1, far: 2000 }}
         gl={{
