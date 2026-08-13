@@ -32,6 +32,7 @@ import {
   resolveInfinityEdges,
   listInfinityEdgeCandidates,
   infinityTroughPolygon,
+  type SurveyUnderlay,
 } from "@pool-design/shared";
 import { type Viewport, worldToScreen } from "@/lib/cad/math";
 
@@ -65,6 +66,24 @@ export function drawGrid(
     ctx.lineTo(width, y);
     ctx.stroke();
   }
+}
+
+export function drawSurveyUnderlay(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  underlay: SurveyUnderlay,
+  image: CanvasImageSource,
+) {
+  const origin = worldToScreen(underlay.origin, vp);
+  const w = underlay.widthMm * vp.scale;
+  const h = underlay.heightMm * vp.scale;
+  if (w < 2 || h < 2) return;
+  ctx.save();
+  ctx.globalAlpha = underlay.opacity;
+  ctx.translate(origin.x, origin.y);
+  ctx.rotate((underlay.rotationDeg * Math.PI) / 180);
+  ctx.drawImage(image, 0, 0, w, h);
+  ctx.restore();
 }
 
 export function drawPolygon(

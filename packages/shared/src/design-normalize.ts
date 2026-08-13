@@ -114,6 +114,7 @@ import {
   resolvePersonOutfitId,
   resolvePersonSex,
 } from "./person-options";
+import { normalizeSurveyUnderlay } from "./survey-underlay";
 
 const FT = 304.8;
 
@@ -150,6 +151,9 @@ export function normalizeDesignDocument(
   }
   if (!layers.some((l) => l.id === "fence")) {
     layers = [...layers, { id: "fence", name: "fence", visible: true }];
+  }
+  if (!layers.some((l) => l.id === "survey")) {
+    layers = [...layers, { id: "survey", name: "survey", visible: true }];
   }
 
   const normalized: DesignDocument = {
@@ -298,6 +302,7 @@ export function normalizeDesignDocument(
     gradeSamples: normalizeGradeSamples(doc.gradeSamples),
     gradeOptions: normalizeGradeOptions(doc.gradeOptions),
     northDeg: normalizeNorthDeg(doc.northDeg),
+    surveyUnderlay: normalizeSurveyUnderlay(doc.surveyUnderlay),
     buildings: (Array.isArray(doc.buildings) ? doc.buildings : []).map((b) => {
       const stories = Math.max(1, b.stories || 1);
       const ceilingHeightMm = resolveCeilingHeightMm(

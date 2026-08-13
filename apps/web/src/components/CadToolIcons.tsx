@@ -19,7 +19,8 @@ export type DrawToolId =
   | "gate"
   | "plumbing"
   | "place"
-  | "measure";
+  | "measure"
+  | "survey_calibrate";
 
 export type PadEquipToolId =
   | "equip_pad"
@@ -369,6 +370,16 @@ export const TOOL_META: {
     icon: (
       <Svg>
         <path d="M4 18L18 4M8 18h.01M12 14h.01M16 10h.01" />
+      </Svg>
+    ),
+  },
+  {
+    id: "survey_calibrate",
+    label: "Calibrate survey",
+    icon: (
+      <Svg>
+        <rect x="4" y="5" width="16" height="14" rx="1.5" />
+        <path d="M7 15h10M7 12h4" />
       </Svg>
     ),
   },

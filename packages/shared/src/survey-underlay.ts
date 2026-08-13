@@ -1,0 +1,207 @@
+/**
+ * Site-survey underlay placement and two-point scale calibration.
+ * The CAD unit is millimeters; a known printed dimension sets mm per pixel.
+ */
+
+import type { PointMm, SurveyUnderlay } from "./design-model";
+import { normalizeNorthDeg, segmentLengthMm } from "./design-model";
+import { MM_PER_FOOT } from "./units";
+
+/** Initial uncalibrated width — 80′ so a typical plat is on-screen. */
+export const DEFAULT_SURVEY_WIDTH_MM = 80 * MM_PER_FOOT;
+export const DEFAULT_SURVEY_OPACITY = 0.45;
+
+export function storedSurveyImageUrl(
+  url: string | null | undefined,
+): string | null {
+  if (typeof url !== "string" || !url) return null;
+  if (url.startsWith("https://") || url.startsWith("http://")) return url;
+  // Local Docker without Blob may round-trip a data URL; cap size.
+  if (url.startsWith("data:image/") && url.length < 4_000_000) return url;
+  return null;
+}
+
+export function surveyAspectHeightMm(
+  widthMm: number,
+  pixelWidth: number,
+  pixelHeight: number,
+): number {
+  const w = Math.max(1, pixelWidth);
+  return widthMm * (Math.max(1, pixelHeight) / w);
+}
+
+export function createSurveyUnderlay(opts: {
+  imageUrl: string;
+  pixelWidth: number;
+  pixelHeight: number;
+  origin?: PointMm;
+}): SurveyUnderlay {
+  const pixelWidth = Math.max(1, Math.round(opts.pixelWidth));
+  const pixelHeight = Math.max(1, Math.round(opts.pixelHeight));
+  const widthMm = DEFAULT_SURVEY_WIDTH_MM;
+  return {
+    imageUrl: opts.imageUrl,
+    pixelWidth,
+    pixelHeight,
+    widthMm,
+    heightMm: surveyAspectHeightMm(widthMm, pixelWidth, pixelHeight),
+    origin: opts.origin ?? { x: 0, y: 0 },
+    rotationDeg: 0,
+    opacity: DEFAULT_SURVEY_OPACITY,
+    locked: false,
+    calibrated: false,
+  };
+}
+
+/** Local mm on the bitmap (origin at top-left, +X along the top edge). */
+export function worldToSurveyLocal(
+  underlay: SurveyUnderlay,
+  p: PointMm,
+): PointMm {
+  const dx = p.x - underlay.origin.x;
+  const dy = p.y - underlay.origin.y;
+  const rad = (underlay.rotationDeg * Math.PI) / 180;
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  return {
+    x: dx * c + dy * s,
+    y: -dx * s + dy * c,
+  };
+}
+
+export function surveyLocalToWorld(
+  underlay: SurveyUnderlay,
+  local: PointMm,
+): PointMm {
+  const rad = (underlay.rotationDeg * Math.PI) / 180;
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  return {
+    x: underlay.origin.x + local.x * c - local.y * s,
+    y: underlay.origin.y + local.x * s + local.y * c,
+  };
+}
+
+export function pointInSurveyUnderlay(
+  underlay: SurveyUnderlay,
+  p: PointMm,
+): boolean {
+  const local = worldToSurveyLocal(underlay, p);
+  return (
+    local.x >= 0 &&
+    local.y >= 0 &&
+    local.x <= underlay.widthMm &&
+    local.y <= underlay.heightMm
+  );
+}
+
+export function surveyUnderlayCenter(underlay: SurveyUnderlay): PointMm {
+  return surveyLocalToWorld(underlay, {
+    x: underlay.widthMm / 2,
+    y: underlay.heightMm / 2,
+  });
+}
+
+/**
+ * Scale the underlay about `a` so that world distance a→b becomes `knownMm`.
+ * That is how a printed dimension (e.g. 50′) is matched to CAD millimeters.
+ */
+export function calibrateSurveyUnderlay(
+  underlay: SurveyUnderlay,
+  a: PointMm,
+  b: PointMm,
+  knownMm: number,
+): SurveyUnderlay {
+  const d = segmentLengthMm(a, b);
+  if (d < 1e-3 || !(knownMm > 0) || !Number.isFinite(knownMm)) return underlay;
+  const factor = knownMm / d;
+  const widthMm = underlay.widthMm * factor;
+  return {
+    ...underlay,
+    origin: {
+      x: a.x + (underlay.origin.x - a.x) * factor,
+      y: a.y + (underlay.origin.y - a.y) * factor,
+    },
+    widthMm,
+    heightMm: surveyAspectHeightMm(
+      widthMm,
+      underlay.pixelWidth,
+      underlay.pixelHeight,
+    ),
+    calibrated: true,
+  };
+}
+
+export function moveSurveyUnderlay(
+  underlay: SurveyUnderlay,
+  dx: number,
+  dy: number,
+): SurveyUnderlay {
+  return {
+    ...underlay,
+    origin: { x: underlay.origin.x + dx, y: underlay.origin.y + dy },
+  };
+}
+
+/** Rotate about the image center so the sheet stays put. */
+export function rotateSurveyUnderlay(
+  underlay: SurveyUnderlay,
+  deltaDeg: number,
+): SurveyUnderlay {
+  const c0 = surveyUnderlayCenter(underlay);
+  const next: SurveyUnderlay = {
+    ...underlay,
+    rotationDeg: normalizeNorthDeg(underlay.rotationDeg + deltaDeg),
+  };
+  const c1 = surveyUnderlayCenter(next);
+  return {
+    ...next,
+    origin: {
+      x: next.origin.x + (c0.x - c1.x),
+      y: next.origin.y + (c0.y - c1.y),
+    },
+  };
+}
+
+/** Plan millimeters represented by one image pixel (along width). */
+export function surveyMmPerPixel(underlay: SurveyUnderlay): number {
+  return underlay.widthMm / Math.max(1, underlay.pixelWidth);
+}
+
+export function normalizeSurveyUnderlay(
+  raw: SurveyUnderlay | undefined | null,
+): SurveyUnderlay | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const imageUrl = storedSurveyImageUrl(raw.imageUrl);
+  if (!imageUrl) return undefined;
+  const pixelWidth = Math.max(1, Math.round(Number(raw.pixelWidth) || 1));
+  const pixelHeight = Math.max(1, Math.round(Number(raw.pixelHeight) || 1));
+  const widthMm =
+    typeof raw.widthMm === "number" &&
+    Number.isFinite(raw.widthMm) &&
+    raw.widthMm > 0
+      ? raw.widthMm
+      : DEFAULT_SURVEY_WIDTH_MM;
+  const origin =
+    raw.origin &&
+    typeof raw.origin.x === "number" &&
+    typeof raw.origin.y === "number"
+      ? { x: raw.origin.x, y: raw.origin.y }
+      : { x: 0, y: 0 };
+  const opacity =
+    typeof raw.opacity === "number" && Number.isFinite(raw.opacity)
+      ? Math.min(1, Math.max(0.08, raw.opacity))
+      : DEFAULT_SURVEY_OPACITY;
+  return {
+    imageUrl,
+    pixelWidth,
+    pixelHeight,
+    widthMm,
+    heightMm: surveyAspectHeightMm(widthMm, pixelWidth, pixelHeight),
+    origin,
+    rotationDeg: normalizeNorthDeg(raw.rotationDeg),
+    opacity,
+    locked: raw.locked === true,
+    calibrated: raw.calibrated === true,
+  };
+}

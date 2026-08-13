@@ -29,6 +29,8 @@ describe("normalizeDesignDocument", () => {
     assert.ok(next.layers.some((l) => l.id === "house"));
     assert.ok(next.layers.some((l) => l.id === "covers"));
     assert.ok(next.layers.some((l) => l.id === "fence"));
+    assert.ok(next.layers.some((l) => l.id === "survey"));
+    assert.equal(next.surveyUnderlay, undefined);
     assert.deepEqual(next.fences, []);
     assert.equal(next.northDeg, 0);
   });

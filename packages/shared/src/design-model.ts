@@ -672,6 +672,29 @@ export type DesignDocument = {
    * the CAD geometry is not rotated.
    */
   northDeg?: number;
+  /** Calibrated site-survey image underlay for tracing (2D plan). */
+  surveyUnderlay?: SurveyUnderlay;
+};
+
+/** Raster survey / site plan placed in CAD millimeters. */
+export type SurveyUnderlay = {
+  /** http(s) Blob URL, or a short data URL in local-only setups. */
+  imageUrl: string;
+  pixelWidth: number;
+  pixelHeight: number;
+  /** Plan width of the full bitmap (mm). Height follows pixel aspect. */
+  widthMm: number;
+  heightMm: number;
+  /** Plan position of the bitmap's top-left corner (pre-rotation). */
+  origin: PointMm;
+  /** Clockwise degrees in plan space (Y down), about `origin`. */
+  rotationDeg: number;
+  /** 0..1 */
+  opacity: number;
+  /** When true, the underlay cannot be dragged. */
+  locked?: boolean;
+  /** True after a two-point known-length calibration. */
+  calibrated?: boolean;
 };
 
 export function emptyDesignDocument(
@@ -688,6 +711,7 @@ export function emptyDesignDocument(
     "features",
     "equipment",
     "notes",
+    "survey",
   ],
 ): DesignDocument {
   return {

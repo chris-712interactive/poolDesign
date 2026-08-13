@@ -96,6 +96,9 @@ import {
   resizeRectangleOutline,
   offsetClosedOutlineEdge,
   resolveEquipmentConnection,
+  calibrateSurveyUnderlay,
+  moveSurveyUnderlay,
+  pointInSurveyUnderlay,
   stepsRunMm,
   STANDARD_STEP_TREAD_MM,
   segmentLengthMm,
@@ -213,8 +216,10 @@ import {
   drawSpaSpillover,
   drawInfinityEdge,
   drawNorthArrow,
+  drawSurveyUnderlay,
   openingEndpoints,
 } from "@/lib/cad/draw";
+import { SurveyUnderlayPanel } from "@/components/SurveyUnderlayPanel";
 
 type WorkspaceView = "design" | "estimate";
 type DesignMode = "2d" | "3d";
@@ -236,6 +241,10 @@ type Selection =
   | null;
 
 type DragState =
+  | {
+      mode: "survey";
+      last: PointMm;
+    }
   | {
       mode: "pan";
       startX: number;
@@ -451,6 +460,8 @@ export function CadWorkspace({
   );
   designRef.current = design;
   const [measurePoints, setMeasurePoints] = useState<PointMm[]>([]);
+  const [calibratePoints, setCalibratePoints] = useState<PointMm[]>([]);
+  const [surveyImage, setSurveyImage] = useState<HTMLImageElement | null>(null);
   const [past, setPast] = useState<DesignDocument[]>([]);
   const [future, setFuture] = useState<DesignDocument[]>([]);
   const [vp, setVp] = useState<Viewport>(DEFAULT_VIEWPORT);
@@ -633,6 +644,27 @@ export function CadWorkspace({
   }, [selection]);
 
   useEffect(() => {
+    const url = design.surveyUnderlay?.imageUrl;
+    if (!url) {
+      setSurveyImage(null);
+      return;
+    }
+    const img = new Image();
+    if (url.startsWith("http")) img.crossOrigin = "anonymous";
+    let cancelled = false;
+    img.onload = () => {
+      if (!cancelled) setSurveyImage(img);
+    };
+    img.onerror = () => {
+      if (!cancelled) setSurveyImage(null);
+    };
+    img.src = url;
+    return () => {
+      cancelled = true;
+    };
+  }, [design.surveyUnderlay?.imageUrl]);
+
+  useEffect(() => {
     const clearModifiers = () => {
       setShiftDown(false);
       setSpaceDown(false);
@@ -799,6 +831,15 @@ export function CadWorkspace({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     drawGrid(ctx, rect.width, rect.height, vp, unitSystem);
+
+    const survey = design.surveyUnderlay;
+    if (
+      survey &&
+      surveyImage &&
+      layerVisible(design, "survey")
+    ) {
+      drawSurveyUnderlay(ctx, vp, survey, surveyImage);
+    }
 
     if (anyLayerVisible(design, "house", "building")) {
       for (const building of design.buildings ?? []) {
@@ -1000,6 +1041,12 @@ export function CadWorkspace({
       drawMeasure(ctx, vp, measurePoints[0], measurePoints[1], unitSystem);
     }
 
+    if (calibratePoints.length === 1 && previewPoint) {
+      drawMeasure(ctx, vp, calibratePoints[0], previewPoint, unitSystem);
+    } else if (calibratePoints.length >= 2) {
+      drawMeasure(ctx, vp, calibratePoints[0], calibratePoints[1], unitSystem);
+    }
+
     if (
       (tool === "steps" || tool === "bench" || tool === "sunshelf") &&
       draftPoints.length === 1 &&
@@ -1127,6 +1174,8 @@ export function CadWorkspace({
     design,
     draftPoints,
     measurePoints,
+    calibratePoints,
+    surveyImage,
     isPlacingObject,
     placeItem,
     planStoryFilter,
@@ -2137,6 +2186,15 @@ export function CadWorkspace({
       ) {
         dragOriginRef.current = structuredClone(design);
         setDrag({ mode: "move", kind: hit.kind, id: hit.id, last: point });
+      } else if (
+        !hit &&
+        design.surveyUnderlay &&
+        !design.surveyUnderlay.locked &&
+        layerVisible(design, "survey") &&
+        pointInSurveyUnderlay(design.surveyUnderlay, point)
+      ) {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({ mode: "survey", last: worldFromEvent(e, false) });
       }
       return;
     }
@@ -2148,6 +2206,15 @@ export function CadWorkspace({
 
     if (tool === "gate") {
       commitGateOnFence(point);
+      return;
+    }
+
+    if (tool === "survey_calibrate") {
+      if (calibratePoints.length >= 2) {
+        setCalibratePoints([point]);
+      } else {
+        setCalibratePoints((pts) => [...pts, point]);
+      }
       return;
     }
 
@@ -2298,6 +2365,22 @@ export function CadWorkspace({
         panX: drag.originPanX + (local.x - drag.startX),
         panY: drag.originPanY + (local.y - drag.startY),
       }));
+      return;
+    }
+
+    if (drag.mode === "survey") {
+      const dx = raw.x - drag.last.x;
+      const dy = raw.y - drag.last.y;
+      if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return;
+      setDesign((d) =>
+        d.surveyUnderlay
+          ? {
+              ...d,
+              surveyUnderlay: moveSurveyUnderlay(d.surveyUnderlay, dx, dy),
+            }
+          : d,
+      );
+      setDrag({ ...drag, last: raw });
       return;
     }
 
@@ -2783,7 +2866,8 @@ export function CadWorkspace({
       drag?.mode === "rotate" ||
       drag?.mode === "depthStation" ||
       drag?.mode === "spilloverWeir" ||
-      drag?.mode === "infinityWeir"
+      drag?.mode === "infinityWeir" ||
+      drag?.mode === "survey"
     ) {
       let next = designRef.current;
       // After reshaping a spa shell, reflow benches/equipment/plumbing inside.
@@ -2881,6 +2965,7 @@ export function CadWorkspace({
       setDraftPoints([]);
       setLengthBuffer("");
       setMeasurePoints([]);
+      setCalibratePoints([]);
       setSelection(null);
       return;
     }
@@ -2912,6 +2997,29 @@ export function CadWorkspace({
       return;
     }
     if (e.key === "Enter") {
+      if (
+        tool === "survey_calibrate" &&
+        calibratePoints.length >= 2 &&
+        lengthBuffer
+      ) {
+        e.preventDefault();
+        const mm = parseLengthToMm(lengthBuffer, unitSystem);
+        if (mm != null && mm > 0 && design.surveyUnderlay) {
+          commitDesign({
+            ...design,
+            surveyUnderlay: calibrateSurveyUnderlay(
+              design.surveyUnderlay,
+              calibratePoints[0],
+              calibratePoints[1],
+              mm,
+            ),
+          });
+          setCalibratePoints([]);
+          setLengthBuffer("");
+          setTool("select");
+        }
+        return;
+      }
       if (lengthBuffer) {
         e.preventDefault();
         commitTypedLength();
@@ -2931,7 +3039,8 @@ export function CadWorkspace({
 
     // Typed length while drawing
     if (
-      draftPoints.length > 0 &&
+      (draftPoints.length > 0 ||
+        (tool === "survey_calibrate" && calibratePoints.length >= 2)) &&
       (tool === "plumbing" ||
         tool === "fence" ||
         tool === "pool_poly" ||
@@ -2939,7 +3048,8 @@ export function CadWorkspace({
         tool === "pool_rect" ||
         tool === "house_poly" ||
         tool === "house_rect" ||
-        tool === "cover_rect") &&
+        tool === "cover_rect" ||
+        tool === "survey_calibrate") &&
       !e.metaKey &&
       !e.ctrlKey
     ) {
@@ -3012,6 +3122,8 @@ export function CadWorkspace({
                         ? "Pick furniture/fixture, then click to place. R rotates 15°."
                         : tool === "measure"
                           ? "Click two points to measure distance. Esc clears."
+                          : tool === "survey_calibrate"
+                            ? "Click two ends of a printed dimension on the survey, then type that length and Enter."
                           : "Select to move/edit. Drag a side midpoint to stretch it evenly; drag a corner to reshape. Hold Shift on a corner for 90° edges.";
 
   return (
@@ -3239,6 +3351,7 @@ export function CadWorkspace({
                     setDraftPoints([]);
                     setLengthBuffer("");
                     if (next !== "measure") setMeasurePoints([]);
+                    if (next !== "survey_calibrate") setCalibratePoints([]);
                   }}
                   onWaterKind={setWaterKind}
                   onCoverKind={setCoverKind}
@@ -5211,6 +5324,41 @@ export function CadWorkspace({
                     </label>
                   ))}
                 </div>
+                <SurveyUnderlayPanel
+                  projectId={projectId}
+                  design={design}
+                  unitSystem={unitSystem}
+                  calibratePoints={calibratePoints}
+                  onDesignChange={commitDesign}
+                  onStartCalibrate={() => {
+                    setSideTab("layers");
+                    setTool("survey_calibrate");
+                    setCalibratePoints([]);
+                    setLengthBuffer("");
+                  }}
+                  onApplyCalibrate={(knownMm) => {
+                    if (!design.surveyUnderlay || calibratePoints.length < 2) {
+                      return;
+                    }
+                    commitDesign({
+                      ...design,
+                      surveyUnderlay: calibrateSurveyUnderlay(
+                        design.surveyUnderlay,
+                        calibratePoints[0],
+                        calibratePoints[1],
+                        knownMm,
+                      ),
+                    });
+                    setCalibratePoints([]);
+                    setLengthBuffer("");
+                    setTool("select");
+                  }}
+                  onCancelCalibrate={() => {
+                    setCalibratePoints([]);
+                    setLengthBuffer("");
+                    setTool("select");
+                  }}
+                />
                 <div className="field" style={{ marginTop: "1rem" }}>
                   <label htmlFor="site-north">True north</label>
                   <input
