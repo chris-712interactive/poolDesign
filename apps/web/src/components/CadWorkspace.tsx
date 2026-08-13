@@ -3879,6 +3879,11 @@ export function CadWorkspace({
                         design.buildings[0]?.outline[0] ??
                         null
                       }
+                      headingDeg={
+                        selectedGradeSample
+                          ? (selectedGradeSample.rotationDeg ?? 0)
+                          : null
+                      }
                     />
                   </div>
                 )}

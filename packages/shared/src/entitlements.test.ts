@@ -51,9 +51,9 @@ describe("entitlements", () => {
 describe("grade-walk", () => {
   it("places samples along bearing", () => {
     const origin = { x: 0, y: 0 };
-    const p = pointAlongBearing(origin, 0, 3048); // 10 ft east
-    assert.ok(Math.abs(p.x - 3048) < 1e-6);
-    assert.ok(Math.abs(p.y) < 1e-6);
+    const p = pointAlongBearing(origin, 0, 3048); // 10 ft drawing-up
+    assert.ok(Math.abs(p.x) < 1e-6);
+    assert.ok(Math.abs(p.y + 3048) < 1e-6);
 
     const samples = gradeWalkToSamples({
       origin,
@@ -64,7 +64,9 @@ describe("grade-walk", () => {
       ],
     });
     assert.equal(samples.length, 2);
-    assert.ok(Math.abs(samples[1].position.y - 3048) < 1e-6);
+    assert.ok(Math.abs(samples[1].position.x + 3048) < 1e-6);
+    assert.ok(Math.abs(samples[1].position.y) < 1e-6);
+    assert.equal(samples[1].rotationDeg, 90);
     assert.equal(samples[1].dropMm, 457.2);
   });
 

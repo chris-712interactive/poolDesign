@@ -19,8 +19,8 @@ export type GradeWalkImportInput = {
   /** Plan-space origin (typically back of house / FFE reference). */
   origin: PointMm;
   /**
-   * Walk direction in plan degrees.
-   * 0° = +X, 90° = +Y (same convention as other CAD rotations).
+   * Walk direction in plan degrees — same convention as grade-sample
+   * `rotationDeg` / the rotation handle (0° = drawing-up, −Y).
    */
   bearingDeg: number;
   points: GradeWalkPoint[];
@@ -28,9 +28,10 @@ export type GradeWalkImportInput = {
   idPrefix?: string;
 };
 
+/** Unit vector for a CAD grade heading. 0° = drawing-up (−Y), 90° = −X. */
 export function bearingToUnitVector(bearingDeg: number): PointMm {
   const rad = (bearingDeg * Math.PI) / 180;
-  return { x: Math.cos(rad), y: Math.sin(rad) };
+  return { x: -Math.sin(rad), y: -Math.cos(rad) };
 }
 
 export function pointAlongBearing(

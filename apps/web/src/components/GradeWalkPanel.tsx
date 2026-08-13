@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   gradeWalkToSamples,
   mergeGradeWalkSamples,
@@ -17,8 +17,13 @@ type Props = {
   unitSystem: UnitSystem;
   entitlements: PlanEntitlements;
   onDesignChange: (next: DesignDocument) => void;
-  /** Optional default origin (e.g. last click / building centroid). */
+  /** Optional default origin (e.g. selected grade / house corner). */
   defaultOrigin?: PointMm | null;
+  /**
+   * Heading from the selected grade point (`rotationDeg`).
+   * When set, origin + rotation fields follow that sample.
+   */
+  headingDeg?: number | null;
 };
 
 type Row = { distance: string; drop: string };
@@ -41,6 +46,7 @@ export function GradeWalkPanel({
   entitlements,
   onDesignChange,
   defaultOrigin,
+  headingDeg = null,
 }: Props) {
   const [originX, setOriginX] = useState(() =>
     defaultOrigin ? String(mmToDisplay(defaultOrigin.x, unitSystem)) : "0",
@@ -48,7 +54,22 @@ export function GradeWalkPanel({
   const [originY, setOriginY] = useState(() =>
     defaultOrigin ? String(mmToDisplay(defaultOrigin.y, unitSystem)) : "0",
   );
-  const [bearing, setBearing] = useState("90");
+  const [bearing, setBearing] = useState(() =>
+    headingDeg != null && Number.isFinite(headingDeg)
+      ? String(Math.round(((headingDeg % 360) + 360) % 360))
+      : "0",
+  );
+
+  useEffect(() => {
+    if (!defaultOrigin) return;
+    setOriginX(String(mmToDisplay(defaultOrigin.x, unitSystem)));
+    setOriginY(String(mmToDisplay(defaultOrigin.y, unitSystem)));
+  }, [defaultOrigin?.x, defaultOrigin?.y, unitSystem]);
+
+  useEffect(() => {
+    if (headingDeg == null || !Number.isFinite(headingDeg)) return;
+    setBearing(String(Math.round(((headingDeg % 360) + 360) % 360)));
+  }, [headingDeg]);
   const [rows, setRows] = useState<Row[]>([
     { distance: "0", drop: "0" },
     { distance: unitSystem === "metric" ? "3" : "10", drop: unitSystem === "metric" ? "0.15" : "0.5" },
@@ -67,11 +88,12 @@ export function GradeWalkPanel({
         const distanceMm = parseLengthToMm(r.distance, unitSystem);
         const dropMm = parseLengthToMm(r.drop, unitSystem);
         if (distanceMm == null || dropMm == null) return null;
+        if (headingDeg != null && distanceMm < 1e-6) return null;
         return { distanceMm, dropMm };
       })
       .filter(Boolean);
     return points.length;
-  }, [rows, unitSystem]);
+  }, [rows, unitSystem, headingDeg]);
 
   if (!entitlements.arGradeImport) {
     return (
@@ -91,7 +113,7 @@ export function GradeWalkPanel({
     const oy = parseLengthToMm(originY, unitSystem);
     const bearingDeg = Number(bearing);
     if (ox == null || oy == null || !Number.isFinite(bearingDeg)) {
-      setError("Enter a valid origin and bearing.");
+      setError("Enter a valid origin and rotation.");
       return;
     }
     const points = [];
@@ -102,7 +124,13 @@ export function GradeWalkPanel({
         setError("Each row needs distance and drop/rise.");
         return;
       }
+      // Selected grade already occupies distance 0 — don't stack another mark.
+      if (headingDeg != null && distanceMm < 1e-6) continue;
       points.push({ distanceMm, dropMm });
+    }
+    if (!points.length) {
+      setError("Add at least one sample past the origin grade.");
+      return;
     }
     const imported = gradeWalkToSamples({
       origin: { x: ox, y: oy },
@@ -129,13 +157,15 @@ export function GradeWalkPanel({
       const oy = parseLengthToMm(originY, unitSystem);
       const bearingDeg = Number(bearing);
       if (ox == null || oy == null || !Number.isFinite(bearingDeg)) {
-        throw new Error("Enter a valid origin and bearing.");
+        throw new Error("Enter a valid origin and rotation.");
       }
-      const points = rows.map((r) => {
-        const distanceMm = parseLengthToMm(r.distance, unitSystem)!;
-        const dropMm = parseLengthToMm(r.drop, unitSystem)!;
-        return { distanceMm, dropMm };
-      });
+      const points = rows
+        .map((r) => {
+          const distanceMm = parseLengthToMm(r.distance, unitSystem)!;
+          const dropMm = parseLengthToMm(r.drop, unitSystem)!;
+          return { distanceMm, dropMm };
+        })
+        .filter((p) => headingDeg == null || p.distanceMm >= 1e-6);
       const res = await fetch(`/api/projects/${projectId}/grade-walk`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -181,7 +211,7 @@ export function GradeWalkPanel({
           <input value={originY} onChange={(e) => setOriginY(e.target.value)} />
         </div>
         <div className="field" style={{ flex: "1 1 5rem" }}>
-          <label>Bearing °</label>
+          <label>Rotation °</label>
           <input value={bearing} onChange={(e) => setBearing(e.target.value)} />
         </div>
       </div>
