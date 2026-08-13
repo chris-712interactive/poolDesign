@@ -5074,8 +5074,8 @@ export function CadWorkspace({
                     style={{ margin: "0.35rem 0 0", fontSize: "0.78rem" }}
                   >
                     Degrees clockwise from up on this drawing. Rotates the
-                    north arrow only — the plan stays put. Used on the draft
-                    permit site plan.
+                    north arrow and 3D sun (day from the south, sunset from
+                    the west). The plan stays put.
                   </p>
                 </div>
                 {maxPlanStories > 1 && (

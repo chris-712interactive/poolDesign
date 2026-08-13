@@ -8,6 +8,7 @@ import {
   type DesignDocument,
   type PointMm,
   type PoolBody,
+  normalizeNorthDeg,
 } from "./design-model";
 import { getPlaceableItem, isWaterFixtureId } from "./object-library";
 import { isPadEquipmentId } from "./plumbing-route";
@@ -55,6 +56,39 @@ export function metersToMm(m: number): number {
  */
 export function planToWorldXZ(p: PointMm): { x: number; z: number } {
   return { x: mmToMeters(-p.x), z: mmToMeters(-p.y) };
+}
+
+/**
+ * Direction toward a celestial body in Three.js Y-up world.
+ *
+ * `azimuthDeg` is compass degrees clockwise from true north (0=N, 90=E, 180=S, 270=W).
+ * `elevationDeg` is degrees above the horizon.
+ * `northDeg` is site north, clockwise from drawing-up (same as DesignDocument.northDeg).
+ *
+ * At northDeg = 0, drawing-up is +Z (north) and plan-right is −X (east).
+ */
+export function sunWorldDir(
+  azimuthDeg: number,
+  elevationDeg: number,
+  northDeg = 0,
+): { x: number; y: number; z: number } {
+  const az = (azimuthDeg * Math.PI) / 180;
+  const el = (elevationDeg * Math.PI) / 180;
+  const cosEl = Math.cos(el);
+  const east = Math.sin(az) * cosEl;
+  const north = Math.cos(az) * cosEl;
+  const up = Math.sin(el);
+  // north-aligned frame: east → −X, north → +Z
+  const x0 = -east;
+  const z0 = north;
+  const r = (-normalizeNorthDeg(northDeg) * Math.PI) / 180;
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  return {
+    x: x0 * c + z0 * s,
+    y: up,
+    z: -x0 * s + z0 * c,
+  };
 }
 
 export type DesignBoundsMm = {

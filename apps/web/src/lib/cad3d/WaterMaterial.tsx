@@ -448,8 +448,10 @@ export function BasinCausticOverlay({
  */
 export function WaterEnvironment({
   timeOfDay = "day",
+  sunDir,
 }: {
   timeOfDay?: TimeOfDay;
+  sunDir: [number, number, number];
 }) {
   const { gl, scene } = useThree();
   const preset = TIME_OF_DAY_PRESETS[timeOfDay];
@@ -460,7 +462,7 @@ export function WaterEnvironment({
 
     const envScene = new THREE.Scene();
     const skyGeo = new THREE.SphereGeometry(50, 64, 32);
-    const [sx, sy, sz] = preset.env.sunDir;
+    const [sx, sy, sz] = sunDir;
     const [sr, sg, sb] = preset.env.sunColor;
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
@@ -541,7 +543,7 @@ export function WaterEnvironment({
       }
       scene.environmentIntensity = 1;
     };
-  }, [gl, scene, preset, timeOfDay]);
+  }, [gl, scene, preset, timeOfDay, sunDir]);
 
   return null;
 }

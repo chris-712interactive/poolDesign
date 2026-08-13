@@ -16,6 +16,7 @@ import {
   poolAverageDepthMm,
   resolveCeilingHeightMm,
   storyFloorElevationMm,
+  sunWorldDir,
 } from "./scene3d";
 
 describe("scene3d helpers", () => {
@@ -28,6 +29,33 @@ describe("scene3d helpers", () => {
     const p = planToWorldXZ({ x: 2000, y: 1000 });
     assert.equal(p.x, -2);
     assert.equal(p.z, -1);
+  });
+
+  it("places noon sun in the south and sunset in the west relative to site north", () => {
+    const north = sunWorldDir(0, 0, 0);
+    assert.ok(Math.abs(north.x) < 1e-9);
+    assert.ok(Math.abs(north.z - 1) < 1e-9);
+
+    const east = sunWorldDir(90, 0, 0);
+    assert.ok(Math.abs(east.x + 1) < 1e-9);
+    assert.ok(Math.abs(east.z) < 1e-9);
+
+    const south = sunWorldDir(180, 0, 0);
+    assert.ok(Math.abs(south.x) < 1e-9);
+    assert.ok(Math.abs(south.z + 1) < 1e-9);
+
+    const west = sunWorldDir(270, 0, 0);
+    assert.ok(Math.abs(west.x - 1) < 1e-9);
+    assert.ok(Math.abs(west.z) < 1e-9);
+
+    // 90° clockwise from drawing-up → true north is plan-right → 3D −X
+    const northAt90 = sunWorldDir(0, 0, 90);
+    assert.ok(Math.abs(northAt90.x + 1) < 1e-9);
+    assert.ok(Math.abs(northAt90.z) < 1e-9);
+
+    const noonAt90 = sunWorldDir(180, 50, 90);
+    assert.ok(noonAt90.x > 0.4, "noon is south of a plan-right north");
+    assert.ok(noonAt90.y > 0.7);
   });
 
   it("computes building height from stories and ceiling height", () => {

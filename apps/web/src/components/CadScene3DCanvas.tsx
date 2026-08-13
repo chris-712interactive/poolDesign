@@ -84,6 +84,7 @@ import {
   TIME_OF_DAY_ORDER,
   TIME_OF_DAY_PRESETS,
   TimeOfDayContext,
+  lightingForNorth,
   type TimeOfDay,
 } from "@/lib/cad3d/timeOfDay";
 
@@ -2394,6 +2395,10 @@ export function CadScene3DCanvas({
     () => selectionReadouts(design, selection),
     [design, selection],
   );
+  const lighting = useMemo(
+    () => lightingForNorth(tod, design.northDeg ?? 0, model.center),
+    [tod, design.northDeg, model.center],
+  );
 
   const applyPreset = (id: ViewPresetId) => {
     setWalkMode(false);
@@ -2566,12 +2571,15 @@ export function CadScene3DCanvas({
                 <ExportBridge apiRef={exportApi} projectName={projectName} />
                 <SoftShadowSetup />
                 <PresentationBloom timeOfDay={timeOfDay} />
-                <WaterEnvironment timeOfDay={timeOfDay} />
+                <WaterEnvironment
+                  timeOfDay={timeOfDay}
+                  sunDir={lighting.sunDir}
+                />
                 <color attach="background" args={[tod.background]} />
                 <fog attach="fog" args={[tod.fog, tod.fogNear, tod.fogFar]} />
                 {tod.showSky ? (
                   <Sky
-                    sunPosition={tod.sunPosition}
+                    sunPosition={lighting.sunPosition}
                     turbidity={tod.sky.turbidity}
                     rayleigh={tod.sky.rayleigh}
                     mieCoefficient={tod.sky.mieCoefficient}
@@ -2580,7 +2588,7 @@ export function CadScene3DCanvas({
                 ) : null}
                 <ambientLight intensity={tod.ambient} />
                 <SunLight
-                  position={tod.sun.position}
+                  position={lighting.sunWorld}
                   intensity={tod.sun.intensity}
                   color={tod.sun.color}
                   castShadow
@@ -2588,7 +2596,7 @@ export function CadScene3DCanvas({
                   groundSize={model.groundSize}
                 />
                 <directionalLight
-                  position={tod.fill.position}
+                  position={lighting.fillWorld}
                   intensity={tod.fill.intensity}
                   color={tod.fill.color}
                 />
