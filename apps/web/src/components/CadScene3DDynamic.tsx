@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import type { MutableRefObject } from "react";
 import type { DesignDocument } from "@pool-design/shared";
 import type { SceneSelection } from "@/lib/cad3d/buildScene";
-import type { CadScene3DHandle } from "@/components/CadScene3DCanvas";
+import type { CadScene3DHandle } from "@/lib/cad3d/cadScene3dHandle";
 
 const CadScene3DInner = dynamic(
   () =>

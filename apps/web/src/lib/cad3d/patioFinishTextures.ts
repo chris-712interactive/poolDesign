@@ -648,8 +648,16 @@ export function getPatioFinishTexture(finishId: string | undefined): PatioTexPai
   const cached = cache.get(cacheKey);
   if (cached) return cached;
   if (typeof document === "undefined") {
-    const empty = makePair(4, () => {}, 1);
-    return empty;
+    const stub = new THREE.DataTexture(
+      new Uint8Array([200, 200, 200, 255]),
+      1,
+      1,
+    );
+    stub.needsUpdate = true;
+    return {
+      color: stub as unknown as THREE.CanvasTexture,
+      roughness: stub.clone() as unknown as THREE.CanvasTexture,
+    };
   }
   const pair = generators[finish.pattern](finish, 1024);
   cache.set(cacheKey, pair);

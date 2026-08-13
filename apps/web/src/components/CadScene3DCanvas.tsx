@@ -9,6 +9,7 @@ import {
   useState,
   type MutableRefObject,
 } from "react";
+import type { CadScene3DHandle } from "@/lib/cad3d/cadScene3dHandle";
 import { Canvas, ThreeEvent, useThree } from "@react-three/fiber";
 import { Html, OrbitControls, Sky } from "@react-three/drei";
 import * as THREE from "three";
@@ -2223,9 +2224,7 @@ type ExportApi = {
   recordOrbit: () => Promise<void>;
 };
 
-export type CadScene3DHandle = {
-  capturePngDataUrl: () => string | null;
-};
+export type { CadScene3DHandle } from "@/lib/cad3d/cadScene3dHandle";
 
 /** "Kendig Residence Pool" → "kendig_residence_pool" */
 function projectExportSlug(name: string): string {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   DEFAULT_PATIO_FINISH_ID,
   DEFAULT_WATERLINE_TILE_ID,
@@ -9,8 +10,15 @@ import {
 } from "@pool-design/shared";
 import { PatioFinishPicker } from "@/components/PatioFinishPicker";
 import { WaterlineTilePicker } from "@/components/WaterlineTilePicker";
-import { FinishCombinationPreview } from "@/components/FinishCombinationPreview";
 import { ProposalEstimateSection } from "@/components/ProposalEstimateSection";
+
+const FinishCombinationPreview = dynamic(
+  () =>
+    import("@/components/FinishCombinationPreview").then(
+      (m) => m.FinishCombinationPreview,
+    ),
+  { ssr: false },
+);
 
 type LiveTab = "finishes" | "estimate";
 

@@ -172,7 +172,7 @@ import { EstimatePanel } from "@/components/EstimatePanel";
 import { GradeWalkPanel } from "@/components/GradeWalkPanel";
 import { ProjectToolbar } from "@/components/ProjectToolbar";
 import { CadScene3DDynamic } from "@/components/CadScene3DDynamic";
-import type { CadScene3DHandle } from "@/components/CadScene3DCanvas";
+import type { CadScene3DHandle } from "@/lib/cad3d/cadScene3dHandle";
 import { FenceFinishPicker } from "@/components/FenceFinishPicker";
 import { HouseFinishPicker } from "@/components/HouseFinishPicker";
 import { FurnitureFinishPicker } from "@/components/FurnitureFinishPicker";

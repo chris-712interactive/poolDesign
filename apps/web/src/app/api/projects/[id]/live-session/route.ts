@@ -37,6 +37,10 @@ function serialize(session: {
 }) {
   const state = parseLiveSessionState(JSON.parse(session.stateJson || "{}"));
   state.active = session.active;
+  // Keep host poll payloads small — data-URL stills are served to clients via /still.
+  if (state.previewImageUrl?.startsWith("data:")) {
+    state.previewImageUrl = null;
+  }
   return {
     id: session.id,
     active: session.active,

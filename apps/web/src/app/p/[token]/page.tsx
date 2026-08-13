@@ -66,7 +66,7 @@ export default async function PublicProposalPage({ params }: PageProps) {
         clientName: project.clientName,
         address: project.address,
       }}
-      initialPreviewImageUrl={share.previewImageUrl}
+      initialHasPreview={Boolean(share.previewImageUrl)}
       initialPreviewVideoUrl={share.previewVideoUrl}
       shareIncludesEstimate={share.includeEstimate}
       estimate={estimate}

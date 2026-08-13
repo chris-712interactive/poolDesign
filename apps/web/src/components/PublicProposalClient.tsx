@@ -22,18 +22,16 @@ type Props = {
   token: string;
   company: Company;
   project: Project;
-  initialPreviewImageUrl: string | null;
+  initialHasPreview: boolean;
   initialPreviewVideoUrl: string | null;
   shareIncludesEstimate: boolean;
   estimate: TakeoffResult | null;
   expiresAt: string | null;
 };
 
-function stillSrc(url: string | null, rev: string | null): string | null {
-  if (!url) return null;
-  if (!rev || url.startsWith("data:")) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}v=${encodeURIComponent(rev)}`;
+function stillSrc(token: string, rev: string | null): string {
+  const q = rev ? `?v=${encodeURIComponent(rev)}` : "";
+  return `/api/p/${token}/still${q}`;
 }
 
 /**
@@ -44,7 +42,7 @@ export function PublicProposalClient({
   token,
   company,
   project,
-  initialPreviewImageUrl,
+  initialHasPreview,
   initialPreviewVideoUrl,
   shareIncludesEstimate,
   estimate,
@@ -52,9 +50,7 @@ export function PublicProposalClient({
 }: Props) {
   const [liveActive, setLiveActive] = useState(false);
   const [liveState, setLiveState] = useState<LiveSessionState | null>(null);
-  const [previewImageUrl, setPreviewImageUrl] = useState(
-    initialPreviewImageUrl,
-  );
+  const [hasPreview, setHasPreview] = useState(initialHasPreview);
   const [previewRev, setPreviewRev] = useState<string | null>(null);
   const [showEstimateInLive, setShowEstimateInLive] = useState(false);
 
@@ -64,15 +60,18 @@ export function PublicProposalClient({
     const json = (await res.json()) as {
       active: boolean;
       updatedAt?: string | null;
+      hasPreview?: boolean;
       previewImageUrl?: string | null;
       state: LiveSessionState;
     };
     setLiveActive(json.active);
     setLiveState(json.state);
     setShowEstimateInLive(Boolean(json.state?.showEstimate));
-    const next =
-      json.previewImageUrl || json.state?.previewImageUrl || null;
-    if (next) setPreviewImageUrl(next);
+    if (typeof json.hasPreview === "boolean") {
+      setHasPreview(json.hasPreview);
+    } else if (json.previewImageUrl || json.state?.previewImageUrl) {
+      setHasPreview(true);
+    }
     if (json.updatedAt) setPreviewRev(json.updatedAt);
   }, [token]);
 
@@ -120,23 +119,24 @@ export function PublicProposalClient({
             token={token}
             projectName={project.name}
             state={liveState}
-            previewImageUrl={stillSrc(previewImageUrl, previewRev)}
+            previewImageUrl={
+              hasPreview ? stillSrc(token, previewRev) : null
+            }
             showEstimate={showEstimateInLive}
             estimate={shareIncludesEstimate ? estimate : null}
             onPatched={(next) => {
               setLiveState(next);
-              const url = next.previewImageUrl;
-              if (url) {
-                setPreviewImageUrl(url);
-                setPreviewRev(new Date().toISOString());
-              }
+              if (next.previewImageUrl) setHasPreview(true);
+              setPreviewRev(new Date().toISOString());
             }}
           />
         ) : (
           <>
             <ProposalDesignPreview
               projectName={project.name}
-              previewImageUrl={stillSrc(previewImageUrl, previewRev)}
+              previewImageUrl={
+                hasPreview ? stillSrc(token, previewRev) : null
+              }
               previewVideoUrl={initialPreviewVideoUrl}
             />
             {shareIncludesEstimate ? (

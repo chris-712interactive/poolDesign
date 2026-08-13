@@ -22,6 +22,18 @@ async function loadShareSession(token: string) {
   return share;
 }
 
+function publicPreviewUrl(url: string | null): {
+  hasPreview: boolean;
+  previewImageUrl: string | null;
+} {
+  if (!url) return { hasPreview: false, previewImageUrl: null };
+  // Data URLs are served from /api/p/[token]/still — never put them in JSON/RSC.
+  if (url.startsWith("data:")) {
+    return { hasPreview: true, previewImageUrl: null };
+  }
+  return { hasPreview: true, previewImageUrl: url };
+}
+
 function serialize(
   session: {
     id: string;
@@ -40,15 +52,17 @@ function serialize(
   if (session) state.active = session.active;
   const livePreview = state.previewImageUrl || null;
   const sharePreview = sharePreviewImageUrl || null;
-  const previewImageUrl = session?.active
+  const rawPreview = session?.active
     ? livePreview || sharePreview
     : sharePreview || livePreview;
+  const { hasPreview, previewImageUrl } = publicPreviewUrl(rawPreview);
   const stamp = session?.updatedAt ?? shareUpdatedAt ?? null;
   return {
     companyName,
     projectName,
     active: Boolean(session?.active),
     updatedAt: stamp ? stamp.toISOString() : null,
+    hasPreview,
     previewImageUrl,
     state: {
       ...state,
