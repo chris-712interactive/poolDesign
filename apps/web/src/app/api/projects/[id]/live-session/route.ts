@@ -4,6 +4,7 @@ import {
   emptyLiveSessionState,
   parseDesignDocument,
   parseLiveSessionState,
+  storedPreviewUrl,
   type DesignLevel,
   type LiveSessionApproval,
   type LiveSessionFinishes,
@@ -13,6 +14,7 @@ import { getSessionUser } from "@/lib/auth";
 import { requireEntitlement } from "@/lib/subscription";
 import { completeMilestone, newShareToken } from "@/lib/shares";
 import { appBaseUrl } from "@/lib/app-url";
+import { scrubDataUrlStills } from "@/lib/scrub-data-url-stills";
 
 async function getOrCreateSession(projectId: string) {
   const existing = await prisma.projectLiveSession.findUnique({
@@ -37,10 +39,7 @@ function serialize(session: {
 }) {
   const state = parseLiveSessionState(JSON.parse(session.stateJson || "{}"));
   state.active = session.active;
-  // Keep host poll payloads small — data-URL stills are served to clients via /still.
-  if (state.previewImageUrl?.startsWith("data:")) {
-    state.previewImageUrl = null;
-  }
+  state.previewImageUrl = storedPreviewUrl(state.previewImageUrl);
   return {
     id: session.id,
     active: session.active,
@@ -61,11 +60,15 @@ async function ensureClientShare(opts: {
   let latest = await prisma.projectShare.findFirst({
     where: { projectId, revokedAt: null },
     orderBy: { createdAt: "desc" },
+    select: { id: true, token: true },
   });
+
+  const stillUrl = storedPreviewUrl(previewImageUrl);
 
   if (!latest) {
     const project = await prisma.project.findUniqueOrThrow({
       where: { id: projectId },
+      select: { designJson: true, designLevel: true, unitSystem: true },
     });
     const design = parseDesignDocument(
       project.designJson,
@@ -78,15 +81,17 @@ async function ensureClientShare(opts: {
         token: newShareToken(),
         includeEstimate: false,
         designSnapshotJson: JSON.stringify(design),
-        previewImageUrl: previewImageUrl || null,
+        previewImageUrl: stillUrl,
         createdByUserId: userId,
       },
+      select: { id: true, token: true },
     });
     await completeMilestone(companyId, "first_client_share");
-  } else if (previewImageUrl) {
+  } else if (stillUrl) {
     latest = await prisma.projectShare.update({
       where: { id: latest.id },
-      data: { previewImageUrl },
+      data: { previewImageUrl: stillUrl },
+      select: { id: true, token: true },
     });
   }
 
@@ -112,11 +117,13 @@ export async function GET(
   const { id } = await context.params;
   const project = await prisma.project.findFirst({
     where: { id, companyId: user.companyId },
+    select: { id: true },
   });
   if (!project) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  await scrubDataUrlStills();
   const session = await getOrCreateSession(project.id);
   return NextResponse.json(serialize(session));
 }
@@ -137,6 +144,7 @@ export async function POST(
   const { id } = await context.params;
   const project = await prisma.project.findFirst({
     where: { id, companyId: user.companyId },
+    select: { id: true },
   });
   if (!project) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -156,7 +164,8 @@ export async function POST(
     state.active = true;
     state.hostOnlineAt = now;
     if (typeof body.previewImageUrl === "string" && body.previewImageUrl) {
-      state.previewImageUrl = body.previewImageUrl;
+      const stillUrl = storedPreviewUrl(body.previewImageUrl);
+      if (stillUrl) state.previewImageUrl = stillUrl;
     }
     shareLink = await ensureClientShare({
       projectId: project.id,
@@ -202,6 +211,7 @@ export async function PATCH(
   const { id } = await context.params;
   const project = await prisma.project.findFirst({
     where: { id, companyId: user.companyId },
+    select: { id: true },
   });
   if (!project) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -228,13 +238,16 @@ export async function PATCH(
     state.showEstimate = body.showEstimate;
   }
   if (typeof body.previewImageUrl === "string" && body.previewImageUrl) {
-    state.previewImageUrl = body.previewImageUrl;
-    await ensureClientShare({
-      projectId: project.id,
-      companyId: user.companyId,
-      userId: user.id,
-      previewImageUrl: body.previewImageUrl,
-    });
+    const stillUrl = storedPreviewUrl(body.previewImageUrl);
+    if (stillUrl) {
+      state.previewImageUrl = stillUrl;
+      await ensureClientShare({
+        projectId: project.id,
+        companyId: user.companyId,
+        userId: user.id,
+        previewImageUrl: stillUrl,
+      });
+    }
   }
   if (body.finishes) {
     state.finishes = {

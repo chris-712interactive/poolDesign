@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@pool-design/db";
+import { storedPreviewUrl } from "@pool-design/shared";
 
 type RouteContext = { params: Promise<{ token: string }> };
 
@@ -34,7 +35,7 @@ export async function GET(_request: Request, context: RouteContext) {
   return NextResponse.json({
     token: share.token,
     includeEstimate: share.includeEstimate,
-    previewImageUrl: share.previewImageUrl,
+    previewImageUrl: storedPreviewUrl(share.previewImageUrl),
     previewVideoUrl: share.previewVideoUrl,
     createdAt: share.createdAt,
     expiresAt: share.expiresAt,

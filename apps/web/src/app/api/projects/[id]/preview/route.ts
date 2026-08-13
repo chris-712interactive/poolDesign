@@ -5,10 +5,15 @@ import { companyHasAppAccess } from "@/lib/subscription";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
+function localPostgres(): boolean {
+  const url = process.env.DATABASE_URL ?? "";
+  return url.includes("localhost") || url.includes("127.0.0.1");
+}
+
 /**
  * Upload a PNG (or WebP) preview for proposal shares.
- * Uses Vercel Blob when BLOB_READ_WRITE_TOKEN is set; otherwise stores a data URL
- * (fine for local/pilot; prefer Blob in production).
+ * Production always uses Vercel Blob so stills never land in Postgres.
+ * Local Docker Postgres may return a data URL for convenience.
  */
 export async function POST(request: Request, context: RouteContext) {
   const user = await getSessionUser();
@@ -22,6 +27,7 @@ export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const project = await prisma.project.findFirst({
     where: { id, companyId: user.companyId },
+    select: { id: true },
   });
   if (!project) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -75,5 +81,15 @@ export async function POST(request: Request, context: RouteContext) {
     }
   }
 
-  return NextResponse.json({ url: body.dataUrl });
+  if (localPostgres()) {
+    return NextResponse.json({ url: body.dataUrl });
+  }
+
+  return NextResponse.json(
+    {
+      error:
+        "BLOB_READ_WRITE_TOKEN is required so 3D stills are stored in Vercel Blob, not Postgres.",
+    },
+    { status: 503 },
+  );
 }

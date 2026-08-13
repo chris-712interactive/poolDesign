@@ -46,7 +46,7 @@ If the dashboard overrides `vercel.json`, paste the Install/Build commands above
 | `SESSION_SECRET` | Long random string |
 | `NEXT_PUBLIC_APP_URL` | `https://your-domain.com` |
 | `NEXT_PUBLIC_ROOT_DOMAIN` | `your-domain.com` (no protocol) |
-| `BLOB_READ_WRITE_TOKEN` | Optional — Vercel Blob |
+| `BLOB_READ_WRITE_TOKEN` | **Required in production** — Vercel Blob for 3D stills (do not store images in Postgres) |
 | `STRIPE_SECRET_KEY` | Stripe secret |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
 | `STRIPE_PRICE_STARTER_MONTHLY` | Price ID |

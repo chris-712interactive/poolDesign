@@ -3,6 +3,13 @@
  * Synced via DB polling — not full CRDT CAD multiplayer.
  */
 
+/** Persist only http(s) stills. Data URLs must never be stored in Postgres. */
+export function storedPreviewUrl(url: string | null | undefined): string | null {
+  if (typeof url !== "string" || !url) return null;
+  if (url.startsWith("https://") || url.startsWith("http://")) return url;
+  return null;
+}
+
 export type LiveSessionApproval = {
   id: string;
   label: string;
@@ -113,12 +120,9 @@ export function parseLiveSessionState(raw: unknown): LiveSessionState {
     },
     approvals,
     showEstimate: Boolean(o.showEstimate),
-    previewImageUrl:
-      typeof o.previewImageUrl === "string"
-        ? o.previewImageUrl
-        : o.previewImageUrl === null
-          ? null
-          : base.previewImageUrl,
+    previewImageUrl: storedPreviewUrl(
+      typeof o.previewImageUrl === "string" ? o.previewImageUrl : null,
+    ),
     appliedFinishesKey:
       typeof o.appliedFinishesKey === "string"
         ? o.appliedFinishesKey

@@ -1,37 +1,45 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@pool-design/db";
+import { scrubDataUrlStills } from "@/lib/scrub-data-url-stills";
 import {
   emptyLiveSessionState,
   parseLiveSessionState,
+  storedPreviewUrl,
   type LiveSessionApproval,
   type LiveSessionFinishes,
   type LiveSessionState,
 } from "@pool-design/shared";
 
+const liveShareSelect = {
+  id: true,
+  revokedAt: true,
+  expiresAt: true,
+  updatedAt: true,
+  previewImageUrl: true,
+  project: {
+    select: {
+      name: true,
+      liveSession: {
+        select: {
+          id: true,
+          active: true,
+          stateJson: true,
+          updatedAt: true,
+        },
+      },
+      company: { select: { name: true } },
+    },
+  },
+} as const;
+
 async function loadShareSession(token: string) {
   const share = await prisma.projectShare.findUnique({
     where: { token },
-    include: {
-      project: {
-        include: { liveSession: true, company: { select: { name: true } } },
-      },
-    },
+    select: liveShareSelect,
   });
   if (!share || share.revokedAt) return null;
   if (share.expiresAt && share.expiresAt.getTime() < Date.now()) return null;
   return share;
-}
-
-function publicPreviewUrl(url: string | null): {
-  hasPreview: boolean;
-  previewImageUrl: string | null;
-} {
-  if (!url) return { hasPreview: false, previewImageUrl: null };
-  // Data URLs are served from /api/p/[token]/still — never put them in JSON/RSC.
-  if (url.startsWith("data:")) {
-    return { hasPreview: true, previewImageUrl: null };
-  }
-  return { hasPreview: true, previewImageUrl: url };
 }
 
 function serialize(
@@ -50,24 +58,21 @@ function serialize(
     ? parseLiveSessionState(JSON.parse(session.stateJson || "{}"))
     : emptyLiveSessionState();
   if (session) state.active = session.active;
-  const livePreview = state.previewImageUrl || null;
-  const sharePreview = sharePreviewImageUrl || null;
-  const rawPreview = session?.active
+  const livePreview = storedPreviewUrl(state.previewImageUrl);
+  const sharePreview = storedPreviewUrl(sharePreviewImageUrl);
+  const previewImageUrl = session?.active
     ? livePreview || sharePreview
     : sharePreview || livePreview;
-  const { hasPreview, previewImageUrl } = publicPreviewUrl(rawPreview);
+  state.previewImageUrl = previewImageUrl;
   const stamp = session?.updatedAt ?? shareUpdatedAt ?? null;
   return {
     companyName,
     projectName,
     active: Boolean(session?.active),
     updatedAt: stamp ? stamp.toISOString() : null,
-    hasPreview,
+    hasPreview: Boolean(previewImageUrl),
     previewImageUrl,
-    state: {
-      ...state,
-      previewImageUrl,
-    },
+    state,
   };
 }
 
@@ -77,16 +82,18 @@ export async function GET(
   context: { params: Promise<{ token: string }> },
 ) {
   const { token } = await context.params;
+  await scrubDataUrlStills();
   const share = await loadShareSession(token);
   if (!share) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
   return NextResponse.json(
     serialize(
       share.project.liveSession,
       share.project.company.name,
       share.project.name,
-      share.previewImageUrl,
+      storedPreviewUrl(share.previewImageUrl),
       share.updatedAt,
     ),
     {
@@ -137,7 +144,6 @@ export async function PATCH(
         ...(body.finishes.patioMaterialById ?? {}),
       },
     };
-    // New client send — designer should see Apply again.
     state.appliedFinishesKey = null;
   }
   if (body.approval) {
@@ -154,6 +160,12 @@ export async function PATCH(
   session = await prisma.projectLiveSession.update({
     where: { id: session.id },
     data: { stateJson: JSON.stringify(state) },
+    select: {
+      id: true,
+      active: true,
+      stateJson: true,
+      updatedAt: true,
+    },
   });
 
   return NextResponse.json(
@@ -161,7 +173,7 @@ export async function PATCH(
       session,
       share.project.company.name,
       share.project.name,
-      share.previewImageUrl,
+      storedPreviewUrl(share.previewImageUrl),
       share.updatedAt,
     ),
   );

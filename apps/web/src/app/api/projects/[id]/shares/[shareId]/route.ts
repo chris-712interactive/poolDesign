@@ -4,6 +4,7 @@ import {
   buildTakeoff,
   parseDesignDocument,
   parseLiveSessionState,
+  storedPreviewUrl,
   type DesignLevel,
 } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
@@ -89,7 +90,8 @@ export async function PATCH(request: Request, context: RouteContext) {
   } = {};
 
   if (body.previewImageUrl !== undefined) {
-    data.previewImageUrl = body.previewImageUrl;
+    const still = storedPreviewUrl(body.previewImageUrl);
+    if (still) data.previewImageUrl = still;
   }
   if (body.previewVideoUrl !== undefined) {
     data.previewVideoUrl = body.previewVideoUrl;
@@ -122,6 +124,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (typeof data.previewImageUrl === "string" && data.previewImageUrl) {
     const live = await prisma.projectLiveSession.findUnique({
       where: { projectId: project.id },
+      select: { id: true, stateJson: true },
     });
     if (live) {
       const state = parseLiveSessionState(JSON.parse(live.stateJson || "{}"));

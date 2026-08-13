@@ -3,6 +3,7 @@ import { prisma } from "@pool-design/db";
 import {
   buildTakeoff,
   parseDesignDocument,
+  storedPreviewUrl,
   type DesignLevel,
 } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
@@ -41,7 +42,6 @@ export async function GET(_request: Request, context: RouteContext) {
       id: true,
       token: true,
       includeEstimate: true,
-      previewImageUrl: true,
       expiresAt: true,
       createdAt: true,
     },
@@ -111,7 +111,7 @@ export async function POST(request: Request, context: RouteContext) {
       includeEstimate,
       designSnapshotJson: JSON.stringify(design),
       estimateSnapshotJson,
-      previewImageUrl: body.previewImageUrl || null,
+      previewImageUrl: storedPreviewUrl(body.previewImageUrl),
       previewVideoUrl: body.previewVideoUrl || null,
       createdByUserId: user.id,
       expiresAt,
@@ -126,7 +126,7 @@ export async function POST(request: Request, context: RouteContext) {
     token: share.token,
     url: `${appUrl}/p/${share.token}`,
     includeEstimate: share.includeEstimate,
-    previewImageUrl: share.previewImageUrl,
+    previewImageUrl: storedPreviewUrl(share.previewImageUrl),
     expiresAt: share.expiresAt,
   });
 }
