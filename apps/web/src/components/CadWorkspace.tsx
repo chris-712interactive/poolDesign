@@ -5074,8 +5074,8 @@ export function CadWorkspace({
                     style={{ margin: "0.35rem 0 0", fontSize: "0.78rem" }}
                   >
                     Degrees clockwise from up on this drawing. Rotates the
-                    north arrow and 3D sun (day from the south, sunset from
-                    the west). The plan stays put.
+                    north arrow and 3D sun path (sunrise east → noon south →
+                    sunset west). The plan stays put.
                   </p>
                 </div>
                 {maxPlanStories > 1 && (

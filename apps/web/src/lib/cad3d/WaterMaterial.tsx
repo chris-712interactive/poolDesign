@@ -447,7 +447,7 @@ export function BasinCausticOverlay({
  * Rebuilds when the day / sunset / night preset changes.
  */
 export function WaterEnvironment({
-  timeOfDay = "day",
+  timeOfDay = "noon",
   sunDir,
 }: {
   timeOfDay?: TimeOfDay;

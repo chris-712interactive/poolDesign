@@ -24,6 +24,7 @@ import type { BoxDescriptor, SceneSelection } from "@/lib/cad3d/buildScene";
 import { ClipPlanesContext } from "@/lib/cad3d/clipContext";
 import { getFurnitureFinishTexture } from "@/lib/cad3d/furnitureFinishTextures";
 import {
+  isNightTime,
   ledBoostForTimeOfDay,
   useTimeOfDay,
 } from "@/lib/cad3d/timeOfDay";
@@ -148,7 +149,7 @@ function BubblerPlume({
   const landY = waterSurfaceLocalY - 0.01;
   const apexU = 0.4;
   const streamH = Math.max(0.08, peakY - nozzleY);
-  const night = timeOfDay === "night";
+  const night = isNightTime(timeOfDay);
   const spotIntensity = (night ? 9 : 4.5) * ledBoost;
 
   useLayoutEffect(() => {
@@ -637,7 +638,7 @@ function PoolNicheLight({
   const wideTargetRef = useRef<THREE.Object3D>(null);
   const ledColor = useMemo(() => new THREE.Color("#ffe9a8"), []);
   const r = 0.07;
-  const night = timeOfDay === "night";
+  const night = isNightTime(timeOfDay);
   // Spots only — no point lights (those are omni and wash the house).
   const beamDist = night ? 13 : 9;
   const spotIntensity = (night ? 24 : 13) * ledBoost;

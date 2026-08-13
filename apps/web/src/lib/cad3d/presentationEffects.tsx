@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import type { TimeOfDay } from "@/lib/cad3d/timeOfDay";
+import { isGoldenHour, type TimeOfDay } from "@/lib/cad3d/timeOfDay";
 
 /** Soft-looking PCF shadows for the whole canvas. */
 export function SoftShadowSetup() {
@@ -88,7 +88,7 @@ export function PresentationBloom({ timeOfDay }: { timeOfDay: TimeOfDay }) {
     const base = gl.toneMappingExposure;
     if (timeOfDay === "night") {
       gl.toneMappingExposure = Math.min(1.35, base * 1.15);
-    } else if (timeOfDay === "sunset") {
+    } else if (isGoldenHour(timeOfDay)) {
       gl.toneMappingExposure = Math.min(1.2, base * 1.05);
     }
     return () => {

@@ -940,6 +940,10 @@ textarea {
   pointer-events: auto;
 }
 
+.cad-scene3d-toolbar-group[aria-label="Time of day"] .cad-scene3d-tool-btn {
+  padding: 0.28rem 0.45rem;
+}
+
 .cad-scene3d-tool-btn {
   padding: 0.28rem 0.55rem;
   font-size: 0.78rem;

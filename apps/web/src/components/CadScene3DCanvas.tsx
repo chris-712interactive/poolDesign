@@ -2350,7 +2350,7 @@ export function CadScene3DCanvas({
   const [walkMode, setWalkMode] = useState(false);
   const [walkLocked, setWalkLocked] = useState(false);
   const [walkSpawnToken, setWalkSpawnToken] = useState(0);
-  const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>("day");
+  const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>("noon");
   const [presetToken, setPresetToken] = useState(0);
   const [cutOffset, setCutOffset] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
@@ -2475,7 +2475,7 @@ export function CadScene3DCanvas({
               className={`btn secondary cad-scene3d-tool-btn ${timeOfDay === id ? "active" : ""}`}
               onClick={() => setTimeOfDay(id)}
               aria-pressed={timeOfDay === id}
-              title={`${TIME_OF_DAY_PRESETS[id].label} lighting`}
+              title={`${TIME_OF_DAY_PRESETS[id].label} — ${TIME_OF_DAY_PRESETS[id].hint}`}
             >
               {TIME_OF_DAY_PRESETS[id].label}
             </button>
