@@ -109,6 +109,20 @@ export function drawPolygon(
       ctx.fill();
       ctx.stroke();
     }
+    const n = outline.length;
+    for (let i = 0; i < n; i++) {
+      const a = outline[i];
+      const b = outline[(i + 1) % n];
+      const mid = worldToScreen(
+        { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+        vp,
+      );
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#0f5c4a";
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(mid.x - 4, mid.y - 4, 8, 8);
+      ctx.strokeRect(mid.x - 4, mid.y - 4, 8, 8);
+    }
   }
 }
 

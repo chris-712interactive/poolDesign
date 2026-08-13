@@ -94,6 +94,7 @@ import {
   relayoutSpaPackage,
   resetSpaPackage,
   resizeRectangleOutline,
+  offsetClosedOutlineEdge,
   resolveEquipmentConnection,
   stepsRunMm,
   STANDARD_STEP_TREAD_MM,
@@ -256,6 +257,15 @@ type DragState =
       index: number;
     }
   | {
+      mode: "edge";
+      kind: "pool" | "patio" | "building" | "cover" | "feature";
+      id: string;
+      edgeIndex: number;
+      nx: number;
+      ny: number;
+      origin: PointMm;
+    }
+  | {
       mode: "depthStation";
       poolId: string;
       stationId: string;
@@ -320,6 +330,7 @@ type Props = {
 
 const CLOSE_TOLERANCE_MM = 150;
 const VERTEX_HIT_PX = 10;
+const EDGE_HIT_PX = 9;
 
 function newId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -1532,6 +1543,117 @@ export function CadWorkspace({
     return null;
   }
 
+  function hitEdge(
+    point: PointMm,
+  ):
+    | {
+        kind: "pool" | "patio" | "building" | "cover" | "feature";
+        id: string;
+        edgeIndex: number;
+        nx: number;
+        ny: number;
+      }
+    | null {
+    const distTol = EDGE_HIT_PX / vp.scale;
+    const endTol = VERTEX_HIT_PX / vp.scale;
+    const check = (
+      kind: "pool" | "patio" | "building" | "cover" | "feature",
+      id: string,
+      pts: PointMm[],
+    ) => {
+      if (pts.length < 2) return null;
+      let best: {
+        kind: "pool" | "patio" | "building" | "cover" | "feature";
+        id: string;
+        edgeIndex: number;
+        nx: number;
+        ny: number;
+        dist: number;
+      } | null = null;
+      const n = pts.length;
+      for (let i = 0; i < n; i++) {
+        const a = pts[i];
+        const b = pts[(i + 1) % n];
+        const ex = b.x - a.x;
+        const ey = b.y - a.y;
+        const len = Math.hypot(ex, ey);
+        if (len < 1e-6) continue;
+        const t = ((point.x - a.x) * ex + (point.y - a.y) * ey) / (len * len);
+        if (t < 0.18 || t > 0.82) continue;
+        const px = a.x + ex * t;
+        const py = a.y + ey * t;
+        const dist = Math.hypot(point.x - px, point.y - py);
+        if (dist > distTol) continue;
+        if (
+          segmentLengthMm(point, a) <= endTol ||
+          segmentLengthMm(point, b) <= endTol
+        ) {
+          continue;
+        }
+        if (!best || dist < best.dist) {
+          best = {
+            kind,
+            id,
+            edgeIndex: i,
+            nx: -ey / len,
+            ny: ex / len,
+            dist,
+          };
+        }
+      }
+      return best
+        ? {
+            kind: best.kind,
+            id: best.id,
+            edgeIndex: best.edgeIndex,
+            nx: best.nx,
+            ny: best.ny,
+          }
+        : null;
+    };
+    if (selection?.kind === "pool" && selectedPool) {
+      const hit = check("pool", selectedPool.id, selectedPool.outline);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "patio" && selectedPatio) {
+      const hit = check("patio", selectedPatio.id, selectedPatio.outline);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "building" && selectedBuilding) {
+      const hit = check(
+        "building",
+        selectedBuilding.id,
+        selectedBuilding.outline,
+      );
+      if (hit) return hit;
+    }
+    if (selection?.kind === "cover" && selectedCover) {
+      const hit = check("cover", selectedCover.id, selectedCover.outline);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "feature" && selectedFeature) {
+      const hit = check("feature", selectedFeature.id, selectedFeature.outline);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function edgePullCursor(nx: number, ny: number): string {
+    return Math.abs(nx) >= Math.abs(ny) ? "ew-resize" : "ns-resize";
+  }
+
+  function canvasCursor(): string {
+    if (designMode === "3d") return "default";
+    if (spaceDown || drag?.mode === "pan") return "grab";
+    if (drag?.mode === "edge") return edgePullCursor(drag.nx, drag.ny);
+    if (tool === "select" && cursor && !drag) {
+      if (hitVertex(cursor)) return "pointer";
+      const edge = hitEdge(cursor);
+      if (edge) return edgePullCursor(edge.nx, edge.ny);
+    }
+    return "crosshair";
+  }
+
   function hitSpilloverWeir(
     point: PointMm,
   ): {
@@ -1969,6 +2091,12 @@ export function CadWorkspace({
       if (vertex) {
         dragOriginRef.current = structuredClone(design);
         setDrag({ mode: "vertex", ...vertex });
+        return;
+      }
+      const edge = hitEdge(point);
+      if (edge) {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({ mode: "edge", ...edge, origin: point });
         return;
       }
       const hit = hitTest(point);
@@ -2446,6 +2574,72 @@ export function CadWorkspace({
       return;
     }
 
+    if (drag.mode === "edge") {
+      const originDesign = dragOriginRef.current ?? designRef.current;
+      const startPts =
+        drag.kind === "pool"
+          ? originDesign.poolBodies.find((p) => p.id === drag.id)?.outline
+          : drag.kind === "patio"
+            ? originDesign.patios.find((p) => p.id === drag.id)?.outline
+            : drag.kind === "building"
+              ? (originDesign.buildings ?? []).find((b) => b.id === drag.id)
+                  ?.outline
+              : drag.kind === "cover"
+                ? (originDesign.patioCovers ?? []).find((c) => c.id === drag.id)
+                    ?.outline
+                : (originDesign.features ?? []).find((f) => f.id === drag.id)
+                    ?.outline;
+      if (!startPts || startPts.length < 2) return;
+      const dx = snapMm(point.x - drag.origin.x, unitSystem);
+      const dy = snapMm(point.y - drag.origin.y, unitSystem);
+      const along = snapMm(dx * drag.nx + dy * drag.ny, unitSystem);
+      const nextPts = offsetClosedOutlineEdge(startPts, drag.edgeIndex, {
+        x: drag.nx * along,
+        y: drag.ny * along,
+      });
+      setDesign((d) => {
+        if (drag.kind === "pool") {
+          return {
+            ...d,
+            poolBodies: d.poolBodies.map((p) =>
+              p.id === drag.id ? { ...p, outline: nextPts } : p,
+            ),
+          };
+        }
+        if (drag.kind === "patio") {
+          return {
+            ...d,
+            patios: d.patios.map((p) =>
+              p.id === drag.id ? { ...p, outline: nextPts } : p,
+            ),
+          };
+        }
+        if (drag.kind === "building") {
+          return {
+            ...d,
+            buildings: (d.buildings ?? []).map((b) =>
+              b.id === drag.id ? { ...b, outline: nextPts } : b,
+            ),
+          };
+        }
+        if (drag.kind === "cover") {
+          return {
+            ...d,
+            patioCovers: (d.patioCovers ?? []).map((c) =>
+              c.id === drag.id ? { ...c, outline: nextPts } : c,
+            ),
+          };
+        }
+        return {
+          ...d,
+          features: (d.features ?? []).map((f) =>
+            f.id === drag.id ? { ...f, outline: nextPts } : f,
+          ),
+        };
+      });
+      return;
+    }
+
     if (drag.mode === "opening") {
       setDesign((d) => {
         const building = (d.buildings ?? []).find(
@@ -2581,6 +2775,7 @@ export function CadWorkspace({
   function onPointerUp() {
     if (
       drag?.mode === "vertex" ||
+      drag?.mode === "edge" ||
       drag?.mode === "move" ||
       drag?.mode === "opening" ||
       drag?.mode === "gate" ||
@@ -2592,7 +2787,10 @@ export function CadWorkspace({
     ) {
       let next = designRef.current;
       // After reshaping a spa shell, reflow benches/equipment/plumbing inside.
-      if (drag.mode === "vertex" && drag.kind === "pool") {
+      if (
+        (drag.mode === "vertex" || drag.mode === "edge") &&
+        drag.kind === "pool"
+      ) {
         const body = next.poolBodies.find((p) => p.id === drag.id);
         if (body && waterBodyKind(body) === "spa") {
           next = relayoutSpaPackage(next, body);
@@ -2814,7 +3012,7 @@ export function CadWorkspace({
                         ? "Pick furniture/fixture, then click to place. R rotates 15°."
                         : tool === "measure"
                           ? "Click two points to measure distance. Esc clears."
-                          : "Select to move/edit. Hold Shift while dragging a vertex for 90° edges.";
+                          : "Select to move/edit. Drag a side midpoint to stretch it evenly; drag a corner to reshape. Hold Shift on a corner for 90° edges.";
 
   return (
     <div className="stack" style={{ gap: "0.85rem" }}>
@@ -2879,12 +3077,7 @@ export function CadWorkspace({
             <div
               className={`cad-canvas-wrap ${designMode === "3d" ? "cad-canvas-wrap-3d" : ""}`}
               style={{
-                cursor:
-                  designMode === "3d"
-                    ? "default"
-                    : spaceDown || drag?.mode === "pan"
-                      ? "grab"
-                      : "crosshair",
+                cursor: canvasCursor(),
               }}
             >
               {designMode === "3d" ? (

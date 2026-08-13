@@ -728,6 +728,37 @@ export function segmentLengthMm(a: PointMm, b: PointMm): number {
   return Math.hypot(dx, dy);
 }
 
+/**
+ * Offset one edge of a closed outline along its perpendicular.
+ * Both endpoints move by the same amount so the edge stays parallel
+ * (a rectangle stays a rectangle; adjacent sides only change length).
+ */
+export function offsetClosedOutlineEdge(
+  outline: PointMm[],
+  edgeIndex: number,
+  delta: PointMm,
+): PointMm[] {
+  if (outline.length < 2) return outline;
+  const n = outline.length;
+  const i = ((edgeIndex % n) + n) % n;
+  const j = (i + 1) % n;
+  const a = outline[i];
+  const b = outline[j];
+  const ex = b.x - a.x;
+  const ey = b.y - a.y;
+  const len = Math.hypot(ex, ey);
+  if (len < 1e-6) return outline;
+  const nx = -ey / len;
+  const ny = ex / len;
+  const along = delta.x * nx + delta.y * ny;
+  if (Math.abs(along) < 1e-9) return outline;
+  const mx = nx * along;
+  const my = ny * along;
+  return outline.map((p, idx) =>
+    idx === i || idx === j ? { x: p.x + mx, y: p.y + my } : p,
+  );
+}
+
 /** Total polyline length in mm */
 export function polylineLengthMm(points: PointMm[]): number {
   if (points.length < 2) return 0;

@@ -5,6 +5,7 @@ import {
   rectangleFrame,
   resizeRectangleOutline,
 } from "./spa-defaults";
+import { offsetClosedOutlineEdge } from "./design-model";
 
 describe("rectangle outline sizing", () => {
   it("detects and resizes an axis-aligned rect", () => {
@@ -53,5 +54,40 @@ describe("rectangle outline sizing", () => {
     const nf = rectangleFrame(next)!;
     assert.ok(Math.abs(nf.widthMm - 12000) < 2);
     assert.ok(Math.abs(nf.lengthMm - 6000) < 2);
+  });
+});
+
+describe("offsetClosedOutlineEdge", () => {
+  it("pulls a rectangle side without shearing", () => {
+    const outline = [
+      { x: 0, y: 0 },
+      { x: 8000, y: 0 },
+      { x: 8000, y: 4000 },
+      { x: 0, y: 4000 },
+    ];
+    // Right edge, drag right + some along-edge noise
+    const next = offsetClosedOutlineEdge(outline, 1, { x: 1000, y: 400 });
+    assert.equal(next[0].x, 0);
+    assert.equal(next[0].y, 0);
+    assert.equal(next[1].x, 9000);
+    assert.equal(next[1].y, 0);
+    assert.equal(next[2].x, 9000);
+    assert.equal(next[2].y, 4000);
+    assert.equal(next[3].x, 0);
+    assert.equal(next[3].y, 4000);
+  });
+
+  it("lengthens only the dragged side of an L-ish quad", () => {
+    const outline = [
+      { x: 0, y: 0 },
+      { x: 4000, y: 0 },
+      { x: 4000, y: 2000 },
+      { x: 0, y: 2000 },
+    ];
+    const next = offsetClosedOutlineEdge(outline, 2, { x: 0, y: 500 });
+    assert.equal(next[2].y, 2500);
+    assert.equal(next[3].y, 2500);
+    assert.equal(next[0].y, 0);
+    assert.equal(next[1].y, 0);
   });
 });
