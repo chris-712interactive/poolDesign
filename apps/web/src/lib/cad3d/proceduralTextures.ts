@@ -396,6 +396,72 @@ export function makeGroundTexture(): TexPair {
   return pair;
 }
 
+/** Brushed stainless — vertical grain, used for gate hinges / springs / rollers. */
+export function makeBrushedSteelTexture(): TexPair {
+  return canvasPair(256, (cctx, rctx, size) => {
+    const cImg = cctx.createImageData(size, size);
+    const rImg = rctx.createImageData(size, size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const grain = fbm(x / 3.2, y / 90, 201, 4);
+        const fine = valueNoise(x * 1.8, y / 14, 211);
+        const scratch = hash2(x, y >> 2, 219) > 0.994 ? 22 : 0;
+        const n = grain * 0.7 + fine * 0.3;
+        const r = Math.min(255, 168 + n * 48 + scratch);
+        const g = Math.min(255, 172 + n * 46 + scratch * 0.8);
+        const b = Math.min(255, 178 + n * 42 + scratch * 0.5);
+        setPixel(cImg, x, y, r, g, b);
+        const rough = 38 + n * 70 + scratch;
+        setPixel(rImg, x, y, rough, rough, rough);
+      }
+    }
+    cctx.putImageData(cImg, 0, 0);
+    rctx.putImageData(rImg, 0, 0);
+  });
+}
+
+/** Black glass-filled nylon — MagnaLatch-style housing. */
+export function makeGatePolymerTexture(): TexPair {
+  return canvasPair(256, (cctx, rctx, size) => {
+    const cImg = cctx.createImageData(size, size);
+    const rImg = rctx.createImageData(size, size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const peel = fbm(x / 18, y / 18, 301, 4);
+        const flake = hash2(x, y, 307) > 0.988 ? 26 : 0;
+        const base = 22 + peel * 18 + flake;
+        setPixel(cImg, x, y, base, base + 1, base + 3);
+        const rough = 95 + peel * 70 + flake;
+        setPixel(rImg, x, y, rough, rough, rough);
+      }
+    }
+    cctx.putImageData(cImg, 0, 0);
+    rctx.putImageData(rImg, 0, 0);
+  });
+}
+
+/** Glossy safety-orange powder coat — latch release button. */
+export function makeGateButtonTexture(): TexPair {
+  return canvasPair(256, (cctx, rctx, size) => {
+    const cImg = cctx.createImageData(size, size);
+    const rImg = rctx.createImageData(size, size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const peel = fbm(x / 22, y / 22, 401, 3);
+        const dust = hash2(x, y, 409) > 0.992 ? 18 : 0;
+        const r = Math.min(255, 198 + peel * 28 - dust);
+        const g = Math.min(255, 72 + peel * 16 - dust);
+        const b = Math.min(255, 28 + peel * 8);
+        setPixel(cImg, x, y, r, g, b);
+        const rough = 48 + peel * 55 + dust;
+        setPixel(rImg, x, y, rough, rough, rough);
+      }
+    }
+    cctx.putImageData(cImg, 0, 0);
+    rctx.putImageData(rImg, 0, 0);
+  });
+}
+
 /** House stucco. */
 export function makeStuccoTexture(): TexPair {
   return canvasPair(512, (cctx, rctx, size) => {

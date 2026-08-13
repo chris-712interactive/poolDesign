@@ -122,7 +122,10 @@ export type SceneMaterialKey =
   | "fill"
   | "retaining"
   | "fence"
-  | "gate";
+  | "gate"
+  | "gateSteel"
+  | "gateLatch"
+  | "gateButton";
 
 /** Optional presentation toggles for the 3D preview. */
 export type SceneBuildOptions = {
@@ -183,6 +186,11 @@ export type BoxDescriptor = {
   fabricFinishId?: string;
   /** Optional solid color override (e.g. fence powder coat). */
   colorHex?: string;
+  /**
+   * Hardware shape. Default box. `cylinderY` is vertical (hinges/springs);
+   * `cylinderX` is along local width (sliding rollers).
+   */
+  primitive?: "box" | "cylinderY" | "cylinderX";
   /**
    * Pitch around local Z after yaw (radians). Positive raises +local X.
    * Used for fence rails that follow grade (pickets stay plumb separately).
@@ -1823,9 +1831,6 @@ export function selectionReadouts(
   return labels;
 }
 
-const GATE_HARDWARE_STEEL = "#c8ccd0";
-const GATE_LATCH_HOUSING = "#1b1d20";
-const GATE_LATCH_BUTTON = "#d3541a";
 const GATE_LEAF_OFFSET_MM = 28;
 const GATE_SWING_OPEN_RAD = (10 * Math.PI) / 180;
 
@@ -3255,17 +3260,20 @@ export function buildSceneModel(
       position: { x: number; y: number; z: number },
       size: { x: number; y: number; z: number },
       along: { x: number; z: number },
-      colorHex: string,
+      material: SceneMaterialKey,
       select: SceneSelection,
+      primitive: BoxDescriptor["primitive"] = "box",
+      colorHex?: string,
     ) => {
       meshes.push({
         kind: "box",
         id,
-        material: "gate",
+        material,
         position,
         size,
         rotationY: 0,
         axisX: along,
+        primitive,
         colorHex,
         select,
       });
@@ -3378,8 +3386,10 @@ export function buildSceneModel(
             { x: xz.x, y: y0 + h / 2, z: xz.z },
             { x: postSizeM, y: h, z: postSizeM },
             gateWorldBasis(geom.a, geom.b, outward).along,
-            colorHex,
+            "gate",
             gateSelect,
+            "box",
+            colorHex,
           );
         };
         jamb(geom.a, "jambA");
@@ -3473,19 +3483,21 @@ export function buildSceneModel(
               pushGateBox(
                 `gate_${fence.id}_${gate.id}_h${li}_${Math.round(hMm)}`,
                 alongT(stileT, hy, faceOut + 0.018),
-                { x: 0.038, y: 0.085, z: 0.038 },
+                { x: 0.038, y: 0.09, z: 0.038 },
                 along,
-                GATE_HARDWARE_STEEL,
+                "gateSteel",
                 gateSelect,
+                "cylinderY",
               );
               // TruClose-style spring body, also outside.
               pushGateBox(
                 `gate_${fence.id}_${gate.id}_s${li}_${Math.round(hMm)}`,
                 alongT(stileT, hy + 0.04, faceOut + 0.048),
-                { x: 0.03, y: 0.155, z: 0.03 },
+                { x: 0.028, y: 0.16, z: 0.028 },
                 along,
-                GATE_HARDWARE_STEEL,
+                "gateSteel",
                 gateSelect,
+                "cylinderY",
               );
             }
           } else {
@@ -3494,10 +3506,11 @@ export function buildSceneModel(
               pushGateBox(
                 `gate_${fence.id}_${gate.id}_roll_${t}`,
                 alongT(t, yBase + leafHM - 0.03, faceOut + 0.02),
-                { x: 0.055, y: 0.04, z: 0.055 },
+                { x: 0.05, y: 0.048, z: 0.048 },
                 along,
-                GATE_HARDWARE_STEEL,
+                "gateSteel",
                 gateSelect,
+                "cylinderX",
               );
             }
           }
@@ -3511,16 +3524,17 @@ export function buildSceneModel(
             alongT(latchT, latchY, latchFace),
             { x: 0.055, y: 0.2, z: 0.07 },
             along,
-            GATE_LATCH_HOUSING,
+            "gateLatch",
             gateSelect,
           );
           pushGateBox(
             `gate_${fence.id}_${gate.id}_btn${li}`,
             alongT(latchT, latchY + 0.12, latchFace + (latch.face === "outside" ? 0.01 : -0.01)),
-            { x: 0.032, y: 0.04, z: 0.032 },
+            { x: 0.034, y: 0.042, z: 0.034 },
             along,
-            GATE_LATCH_BUTTON,
+            "gateButton",
             gateSelect,
+            "cylinderY",
           );
         });
       }

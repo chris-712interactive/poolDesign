@@ -51,7 +51,10 @@ import { ClipPlanesContext } from "@/lib/cad3d/clipContext";
 import { CatalogObjectMesh } from "@/lib/cad3d/CatalogObjectMesh";
 import { SectionCapMesh } from "@/lib/cad3d/SectionCapMesh";
 import {
+  makeBrushedSteelTexture,
   makeDeckTexture,
+  makeGateButtonTexture,
+  makeGatePolymerTexture,
   makeGroundTexture,
   makePebbleFloorTexture,
   makePlasterTexture,
@@ -92,7 +95,17 @@ type MatDef = {
   color: string;
   roughness: number;
   metalness: number;
-  map?: "plaster" | "pebble" | "tile" | "stone" | "deck" | "ground" | "stucco";
+  map?:
+    | "plaster"
+    | "pebble"
+    | "tile"
+    | "stone"
+    | "deck"
+    | "ground"
+    | "stucco"
+    | "steel"
+    | "gatePolymer"
+    | "gateButton";
   mapRepeat?: [number, number];
   /** Wet / reflective physical extras (coping, tile, glass). */
   clearcoat?: number;
@@ -197,6 +210,33 @@ const MATERIALS: Record<SceneMaterialKey, MatDef> = {
     envMapIntensity: 1.1,
   },
   gate: { color: "#2a2a2c", roughness: 0.5, metalness: 0.4, envMapIntensity: 1.1 },
+  gateSteel: {
+    color: "#ffffff",
+    roughness: 0.28,
+    metalness: 0.96,
+    map: "steel",
+    envMapIntensity: 1.85,
+    clearcoat: 0.18,
+    clearcoatRoughness: 0.22,
+  },
+  gateLatch: {
+    color: "#ffffff",
+    roughness: 0.48,
+    metalness: 0.08,
+    map: "gatePolymer",
+    envMapIntensity: 0.9,
+    clearcoat: 0.28,
+    clearcoatRoughness: 0.35,
+  },
+  gateButton: {
+    color: "#ffffff",
+    roughness: 0.32,
+    metalness: 0.18,
+    map: "gateButton",
+    envMapIntensity: 1.15,
+    clearcoat: 0.55,
+    clearcoatRoughness: 0.18,
+  },
 };
 
 type SceneTextures = {
@@ -207,6 +247,9 @@ type SceneTextures = {
   deck: { color: THREE.CanvasTexture; roughness: THREE.CanvasTexture };
   ground: { color: THREE.CanvasTexture; roughness: THREE.CanvasTexture };
   stucco: { color: THREE.CanvasTexture; roughness: THREE.CanvasTexture };
+  steel: { color: THREE.CanvasTexture; roughness: THREE.CanvasTexture };
+  gatePolymer: { color: THREE.CanvasTexture; roughness: THREE.CanvasTexture };
+  gateButton: { color: THREE.CanvasTexture; roughness: THREE.CanvasTexture };
   water: WaterTextures;
 };
 
@@ -232,6 +275,9 @@ function useSceneTextures(): SceneTextures | null {
       deck: makeDeckTexture(),
       ground: makeGroundTexture(),
       stucco: applyRepeat(makeStuccoTexture(), [4, 3]),
+      steel: applyRepeat(makeBrushedSteelTexture(), [2, 4]),
+      gatePolymer: applyRepeat(makeGatePolymerTexture(), [2, 3]),
+      gateButton: applyRepeat(makeGateButtonTexture(), [2, 2]),
       water: {
         albedo: makeWaterSurfaceTexture(),
         normalA: makeWaterNormalTexture(3),
@@ -613,6 +659,12 @@ function PlainBoxMesh({
     return desc.rotationY;
   }, [desc.axisX, desc.rotationY]);
   const pitchRad = desc.pitchRad ?? 0;
+  const primitive = desc.primitive ?? "box";
+  const cylX = primitive === "cylinderX";
+  const radius = cylX
+    ? Math.max(0.006, Math.min(desc.size.y, desc.size.z) / 2)
+    : Math.max(0.006, Math.min(desc.size.x, desc.size.z) / 2);
+  const cylHeight = cylX ? desc.size.x : desc.size.y;
 
   return (
     <group
@@ -620,12 +672,16 @@ function PlainBoxMesh({
       rotation={[0, rotationY, 0]}
     >
       <mesh
-        rotation={[0, 0, pitchRad]}
+        rotation={cylX ? [0, 0, Math.PI / 2] : [0, 0, pitchRad]}
         castShadow
         receiveShadow
         {...handlers}
       >
-        <boxGeometry args={[desc.size.x, desc.size.y, desc.size.z]} />
+        {primitive === "box" ? (
+          <boxGeometry args={[desc.size.x, desc.size.y, desc.size.z]} />
+        ) : (
+          <cylinderGeometry args={[radius, radius, cylHeight, 20]} />
+        )}
         <SelectableMaterial
           material={desc.material}
           opacity={desc.opacity}
