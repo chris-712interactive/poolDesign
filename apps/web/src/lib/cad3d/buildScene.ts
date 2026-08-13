@@ -66,6 +66,11 @@ import {
   type DepthTransition,
   type DesignDocument,
   type PointMm,
+  gateOutwardNormal,
+  poolGateHingeHeightsMm,
+  poolGateLatchSpec,
+  polygonCentroid,
+  POOL_GATE_GROUND_CLEARANCE_MM,
   type ResolvedSpaSpillover,
   type ResolvedInfinityEdge,
 } from "@pool-design/shared";
@@ -241,6 +246,12 @@ export type FencePanelDescriptor = {
   picketGapM?: number;
   /** Square post size at panel ends (m). Omit for glass / no posts. */
   postSizeM?: number;
+  /** Extra horizontal rail at mid-height (gate leaves). */
+  midRail?: boolean;
+  /** Skip end posts (gate leaf between existing jambs). */
+  omitPosts?: boolean;
+  /** Diagonal brace on the leaf, hinge-bottom to latch-top. */
+  brace?: boolean;
 } & Selectable;
 
 /**
@@ -1812,6 +1823,64 @@ export function selectionReadouts(
   return labels;
 }
 
+const GATE_HARDWARE_STEEL = "#c8ccd0";
+const GATE_LATCH_HOUSING = "#1b1d20";
+const GATE_LATCH_BUTTON = "#d3541a";
+const GATE_LEAF_OFFSET_MM = 28;
+const GATE_SWING_OPEN_RAD = (10 * Math.PI) / 180;
+
+function darkenHex(hex: string, amount = 0.2): string {
+  const h = hex.replace("#", "");
+  if (h.length !== 6) return hex;
+  const n = (i: number) =>
+    Math.max(0, Math.round(parseInt(h.slice(i, i + 2), 16) * (1 - amount)));
+  const p = (v: number) => v.toString(16).padStart(2, "0");
+  return `#${p(n(0))}${p(n(2))}${p(n(4))}`;
+}
+
+function offsetPlan(p: PointMm, n: PointMm, mm: number): PointMm {
+  return { x: p.x + n.x * mm, y: p.y + n.y * mm };
+}
+
+/** Rotate `far` around `hinge` toward `outward` by `rad` (leaf opens away from pool). */
+function swingLeafFar(
+  hinge: PointMm,
+  far: PointMm,
+  outward: PointMm,
+  rad: number,
+): PointMm {
+  const w = Math.hypot(far.x - hinge.x, far.y - hinge.y);
+  if (w < 1) return far;
+  const ux = (far.x - hinge.x) / w;
+  const uy = (far.y - hinge.y) / w;
+  let nx = -uy;
+  let ny = ux;
+  if (nx * outward.x + ny * outward.y < 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  return {
+    x: hinge.x + ux * w * Math.cos(rad) + nx * w * Math.sin(rad),
+    y: hinge.y + uy * w * Math.cos(rad) + ny * w * Math.sin(rad),
+  };
+}
+
+function gateWorldBasis(
+  a: PointMm,
+  b: PointMm,
+  outward: PointMm,
+): { along: { x: number; z: number }; out: { x: number; z: number } } {
+  const wa = planToWorldXZ(a);
+  const wb = planToWorldXZ(b);
+  const lx = wb.x - wa.x;
+  const lz = wb.z - wa.z;
+  const len = Math.hypot(lx, lz) || 1;
+  const along = { x: lx / len, z: lz / len };
+  const ow = { x: -outward.x, z: -outward.y };
+  const olen = Math.hypot(ow.x, ow.z) || 1;
+  return { along, out: { x: ow.x / olen, z: ow.z / olen } };
+}
+
 export function buildSceneModel(
   designInput: DesignDocument,
   options: SceneBuildOptions = {},
@@ -3121,12 +3190,17 @@ export function buildSceneModel(
         opacity?: number;
         thicknessM: number;
         kind: string;
+        liftM?: number;
+        midRail?: boolean;
+        omitPosts?: boolean;
+        brace?: boolean;
       },
     ) => {
       const xz0 = planToWorldXZ(p0);
       const xz1 = planToWorldXZ(p1);
-      const y0 = fenceBaseY(p0);
-      const y1 = fenceBaseY(p1);
+      const lift = opts.liftM ?? 0;
+      const y0 = fenceBaseY(p0) + lift;
+      const y1 = fenceBaseY(p1) + lift;
       const a = { x: xz0.x, y: y0, z: xz0.z };
       const b = { x: xz1.x, y: y1, z: xz1.z };
       let picketWidthM: number | undefined;
@@ -3164,6 +3238,35 @@ export function buildSceneModel(
         picketWidthM,
         picketGapM,
         postSizeM,
+        midRail: opts.midRail,
+        omitPosts: opts.omitPosts,
+        brace: opts.brace,
+        select,
+      });
+    };
+
+    const waterCentroids = (design.poolBodies ?? [])
+      .filter((b) => b.outline.length >= 3)
+      .map((b) => polygonCentroid(b.outline))
+      .filter((c): c is PointMm => Boolean(c));
+
+    const pushGateBox = (
+      id: string,
+      position: { x: number; y: number; z: number },
+      size: { x: number; y: number; z: number },
+      along: { x: number; z: number },
+      colorHex: string,
+      select: SceneSelection,
+    ) => {
+      meshes.push({
+        kind: "box",
+        id,
+        material: "gate",
+        position,
+        size,
+        rotationY: 0,
+        axisX: along,
+        colorHex,
         select,
       });
     };
@@ -3248,21 +3351,178 @@ export function buildSceneModel(
         if (!geom) continue;
         const gateHMm =
           gate.heightMm ?? fence.heightMm ?? defaultFenceHeightMm(fence.kind);
-        const gateHM = Math.max(0.6, mmToMeters(gateHMm));
-        pushRackedPanel(
-          `gate_${fence.id}_${gate.id}`,
-          geom.a,
-          geom.b,
-          gateHM,
-          "gate",
-          { kind: "gate", fenceId: fence.id, id: gate.id },
-          {
+        const clearanceM = mmToMeters(POOL_GATE_GROUND_CLEARANCE_MM);
+        const leafHM = Math.max(0.55, mmToMeters(gateHMm) - clearanceM);
+        const gateSelect: SceneSelection = {
+          kind: "gate",
+          fenceId: fence.id,
+          id: gate.id,
+        };
+        const outward = gateOutwardNormal(geom.a, geom.b, waterCentroids);
+        const leafColor = darkenHex(colorHex, 0.16);
+        const postSizeM =
+          fence.kind === "wood" || fence.kind === "vinyl"
+            ? 0.115
+            : fence.kind === "chain_link"
+              ? 0.06
+              : fence.kind === "glass"
+                ? 0.05
+                : 0.065;
+
+        const jamb = (p: PointMm, tag: string) => {
+          const xz = planToWorldXZ(p);
+          const y0 = fenceBaseY(p);
+          const h = Math.max(leafHM + clearanceM, hM);
+          pushGateBox(
+            `gate_${fence.id}_${gate.id}_${tag}`,
+            { x: xz.x, y: y0 + h / 2, z: xz.z },
+            { x: postSizeM, y: h, z: postSizeM },
+            gateWorldBasis(geom.a, geom.b, outward).along,
             colorHex,
-            opacity: isGlass ? 0.45 : opacity,
-            thicknessM: thickM * 0.85,
-            kind: fence.kind,
-          },
-        );
+            gateSelect,
+          );
+        };
+        jamb(geom.a, "jambA");
+        jamb(geom.b, "jambB");
+
+        const offsetA = offsetPlan(geom.a, outward, GATE_LEAF_OFFSET_MM);
+        const offsetB = offsetPlan(geom.b, outward, GATE_LEAF_OFFSET_MM);
+        const mid = {
+          x: (offsetA.x + offsetB.x) / 2,
+          y: (offsetA.y + offsetB.y) / 2,
+        };
+
+        type Leaf = { a: PointMm; b: PointMm; hingeAtStart: boolean };
+        const leaves: Leaf[] =
+          gate.kind === "double_swing"
+            ? [
+                {
+                  a: offsetA,
+                  b: swingLeafFar(
+                    offsetA,
+                    mid,
+                    outward,
+                    GATE_SWING_OPEN_RAD,
+                  ),
+                  hingeAtStart: true,
+                },
+                {
+                  a: swingLeafFar(
+                    offsetB,
+                    mid,
+                    outward,
+                    GATE_SWING_OPEN_RAD,
+                  ),
+                  b: offsetB,
+                  hingeAtStart: false,
+                },
+              ]
+            : gate.kind === "sliding"
+              ? [{ a: offsetA, b: offsetB, hingeAtStart: true }]
+              : [
+                  {
+                    a: offsetA,
+                    b: swingLeafFar(
+                      offsetA,
+                      offsetB,
+                      outward,
+                      GATE_SWING_OPEN_RAD,
+                    ),
+                    hingeAtStart: true,
+                  },
+                ];
+
+        leaves.forEach((leaf, li) => {
+          pushRackedPanel(
+            `gate_${fence.id}_${gate.id}_leaf${li}`,
+            leaf.a,
+            leaf.b,
+            leafHM,
+            "gate",
+            gateSelect,
+            {
+              colorHex: leafColor,
+              opacity: isGlass ? 0.5 : opacity,
+              thicknessM: thickM * 0.95,
+              kind: fence.kind,
+              liftM: clearanceM,
+              midRail: true,
+              omitPosts: true,
+              brace: gate.kind !== "sliding" && fence.kind !== "glass",
+            },
+          );
+
+          const { along, out } = gateWorldBasis(leaf.a, leaf.b, outward);
+          const wa = planToWorldXZ(leaf.a);
+          const wb = planToWorldXZ(leaf.b);
+          const yBase =
+            (fenceBaseY(leaf.a) + fenceBaseY(leaf.b)) / 2 + clearanceM;
+          const alongT = (t: number, y: number, outM: number) => ({
+            x: wa.x + (wb.x - wa.x) * t + out.x * outM,
+            y,
+            z: wa.z + (wb.z - wa.z) * t + out.z * outM,
+          });
+          const stileT = leaf.hingeAtStart ? 0.06 : 0.94;
+          const latchT = leaf.hingeAtStart ? 0.94 : 0.06;
+          const faceOut = thickM * 0.55;
+
+          if (gate.kind !== "sliding") {
+            for (const hMm of poolGateHingeHeightsMm(gateHMm)) {
+              const hy = yBase + mmToMeters(hMm);
+              // Barrels on the outside face of the hinge stile.
+              pushGateBox(
+                `gate_${fence.id}_${gate.id}_h${li}_${Math.round(hMm)}`,
+                alongT(stileT, hy, faceOut + 0.018),
+                { x: 0.038, y: 0.085, z: 0.038 },
+                along,
+                GATE_HARDWARE_STEEL,
+                gateSelect,
+              );
+              // TruClose-style spring body, also outside.
+              pushGateBox(
+                `gate_${fence.id}_${gate.id}_s${li}_${Math.round(hMm)}`,
+                alongT(stileT, hy + 0.04, faceOut + 0.048),
+                { x: 0.03, y: 0.155, z: 0.03 },
+                along,
+                GATE_HARDWARE_STEEL,
+                gateSelect,
+              );
+            }
+          } else {
+            // Sliding: top rollers on the outside of the upper rail.
+            for (const t of [0.18, 0.5, 0.82]) {
+              pushGateBox(
+                `gate_${fence.id}_${gate.id}_roll_${t}`,
+                alongT(t, yBase + leafHM - 0.03, faceOut + 0.02),
+                { x: 0.055, y: 0.04, z: 0.055 },
+                along,
+                GATE_HARDWARE_STEEL,
+                gateSelect,
+              );
+            }
+          }
+
+          const latch = poolGateLatchSpec(gateHMm);
+          const latchFace =
+            latch.face === "outside" ? faceOut + 0.03 : -(faceOut + 0.03);
+          const latchY = yBase + mmToMeters(latch.heightMm);
+          pushGateBox(
+            `gate_${fence.id}_${gate.id}_latch${li}`,
+            alongT(latchT, latchY, latchFace),
+            { x: 0.055, y: 0.2, z: 0.07 },
+            along,
+            GATE_LATCH_HOUSING,
+            gateSelect,
+          );
+          pushGateBox(
+            `gate_${fence.id}_${gate.id}_btn${li}`,
+            alongT(latchT, latchY + 0.12, latchFace + (latch.face === "outside" ? 0.01 : -0.01)),
+            { x: 0.032, y: 0.04, z: 0.032 },
+            along,
+            GATE_LATCH_BUTTON,
+            gateSelect,
+          );
+        });
       }
     }
   }

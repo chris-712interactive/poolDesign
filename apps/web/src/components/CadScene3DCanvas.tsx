@@ -969,7 +969,7 @@ function FencePanelMesh({
     const nx = -uz;
     const nz = ux;
     const yaw = Math.atan2(-uz, ux);
-    const postSize = desc.postSizeM ?? 0;
+    const postSize = desc.omitPosts ? 0 : (desc.postSizeM ?? 0);
 
     type Post = { x: number; y: number; z: number; h: number; size: number };
     const postList: Post[] = [];
@@ -1084,6 +1084,19 @@ function FencePanelMesh({
         pitch,
         len: railLen,
       },
+      ...(desc.midRail
+        ? [
+            {
+              mid: [
+                midX,
+                midY0 + h * 0.5,
+                midZ,
+              ] as [number, number, number],
+              pitch,
+              len: railLen,
+            },
+          ]
+        : []),
     ];
 
     // Pack pickets edge-to-edge across the clear bay (adjust gap to fill).
@@ -1128,6 +1141,38 @@ function FencePanelMesh({
     };
   }, [geometry]);
 
+  const picketW = desc.picketWidthM ?? 0.045;
+  const braceLen = Math.hypot(
+    desc.b.x - desc.a.x,
+    desc.b.z - desc.a.z,
+  );
+  const braceMesh = desc.brace ? (
+    <mesh
+      position={[
+        (desc.a.x + desc.b.x) / 2,
+        (desc.a.y + desc.b.y) / 2 + desc.heightM / 2,
+        (desc.a.z + desc.b.z) / 2,
+      ]}
+      rotation={[0, yaw, Math.atan2(desc.heightM, braceLen || 1)]}
+      castShadow
+      receiveShadow
+    >
+      <boxGeometry
+        args={[
+          Math.hypot(braceLen, desc.heightM) * 0.88,
+          0.028,
+          Math.max(0.016, desc.thicknessM * 0.55),
+        ]}
+      />
+      <SelectableMaterial
+        material={desc.material}
+        opacity={desc.opacity}
+        selected={selected}
+        colorHex={desc.colorHex}
+      />
+    </mesh>
+  ) : null;
+
   if (geometry) {
     return (
       <group {...handlers}>
@@ -1156,11 +1201,10 @@ function FencePanelMesh({
             />
           </mesh>
         ))}
+        {braceMesh}
       </group>
     );
   }
-
-  const picketW = desc.picketWidthM ?? 0.045;
 
   return (
     <group {...handlers}>
@@ -1219,6 +1263,7 @@ function FencePanelMesh({
           />
         </mesh>
       ))}
+      {braceMesh}
     </group>
   );
 }
