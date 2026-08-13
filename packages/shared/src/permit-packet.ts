@@ -9,6 +9,7 @@ import {
 import type { Building, DesignDocument, PointMm } from "./design-model";
 import {
   fenceKindLabel,
+  normalizeNorthDeg,
   objectFootprint,
   pointInPolygon,
   polygonAreaMm2,
@@ -488,18 +489,24 @@ export function buildPlanOutlineSvg(
     <text x="${bx}" y="${by + 16}" font-size="8" fill="#5a6a60" font-family="ui-sans-serif, system-ui">GRAPHIC SCALE</text>
   </g>`);
 
+  const northDeg = normalizeNorthDeg(design.northDeg);
   const nx = size - 52;
-  const ny = 36;
-  layers.push(`<g class="north">
-    <polygon points="${nx},${ny - 16} ${nx - 7},${ny + 10} ${nx},${ny + 4} ${nx + 7},${ny + 10}" fill="#152018"/>
-    <text x="${nx}" y="${ny + 24}" text-anchor="middle" font-size="11" font-weight="700" font-family="ui-sans-serif, system-ui" fill="#152018">N</text>
+  const ny = 44;
+  layers.push(`<g class="north" transform="translate(${nx} ${ny}) rotate(${northDeg.toFixed(1)})">
+    <polygon points="0,-18 -7,10 0,4 7,10" fill="#152018"/>
+    <text x="0" y="-22" text-anchor="middle" font-size="11" font-weight="700" font-family="ui-sans-serif, system-ui" fill="#152018">N</text>
   </g>`);
+
+  const northNote =
+    northDeg === 0
+      ? "N = drawing up (0°). Confirm true north, property lines, and utilities with survey. A–A = pool section."
+      : `N = ${northDeg.toFixed(0)}° clockwise from drawing-up. Confirm with survey. Property lines and utilities are not in this model. A–A = pool section.`;
 
   layers.push(
     `<text x="24" y="22" font-size="9" fill="#8a1c1c" font-family="ui-sans-serif, system-ui" font-weight="700">DRAFT SITE PLAN — NOT FOR CONSTRUCTION / PERMIT SUBMITTAL</text>`,
   );
   layers.push(
-    `<text x="24" y="36" font-size="8" fill="#5a6a60" font-family="ui-sans-serif, system-ui">N = drawing up (matches 2D plan). Confirm true north, property lines, and utilities with survey. A–A = pool section.</text>`,
+    `<text x="24" y="36" font-size="8" fill="#5a6a60" font-family="ui-sans-serif, system-ui">${esc(northNote)}</text>`,
   );
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${height}" viewBox="0 0 ${size} ${height}" style="background:#f7f4ee">${layers.join("")}</svg>`;

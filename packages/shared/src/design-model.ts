@@ -666,6 +666,12 @@ export type DesignDocument = {
   /** Spot elevations relative to house FFE */
   gradeSamples?: GradeSample[];
   gradeOptions?: DesignGradeOptions;
+  /**
+   * True north relative to the 2D plan, in degrees clockwise from drawing-up.
+   * 0 = north is up on the sheet (default). Rotates the north arrow only —
+   * the CAD geometry is not rotated.
+   */
+  northDeg?: number;
 };
 
 export function emptyDesignDocument(
@@ -704,7 +710,15 @@ export function emptyDesignDocument(
     estimate: { removedLineKeys: [], customLines: [] },
     gradeSamples: [],
     gradeOptions: { retainingTriggerMm: DEFAULT_RETAINING_TRIGGER_MM },
+    northDeg: 0,
   };
+}
+
+/** Wrap a north bearing into 0..360 (0 = drawing-up). */
+export function normalizeNorthDeg(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return ((n % 360) + 360) % 360;
 }
 
 /** Euclidean segment length in mm */

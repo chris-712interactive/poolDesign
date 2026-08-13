@@ -128,7 +128,18 @@ describe("permit packet site plan", () => {
     assert.match(svg, />N</);
     assert.match(svg, /DRAFT SITE PLAN/);
     assert.match(svg, /CLR/);
+    assert.match(svg, /rotate\(0/);
     assert.doesNotMatch(svg, />PROPERTY LINE</);
+  });
+
+  it("rotates the north arrow from drawing-up without rotating the plan", () => {
+    const design = houseAndPool();
+    design.northDeg = 90;
+    const svg = buildPlanOutlineSvg(design, "imperial");
+    assert.match(svg, /rotate\(90/);
+    assert.match(svg, /clockwise from drawing-up/);
+    assert.match(svg, /HOUSE/);
+    assert.match(svg, /POOL/);
   });
 
   it("section sheet is A–A from the depth profile", () => {

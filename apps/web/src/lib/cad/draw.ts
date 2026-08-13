@@ -1561,3 +1561,29 @@ export function drawDraft(
     ctx.fill();
   }
 }
+
+/** Screen-space north arrow. `northDeg` is clockwise from drawing-up. */
+export function drawNorthArrow(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  northDeg = 0,
+) {
+  const cx = width - 28;
+  const cy = 32;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate((northDeg * Math.PI) / 180);
+  ctx.fillStyle = "#152018";
+  ctx.beginPath();
+  ctx.moveTo(0, -16);
+  ctx.lineTo(-6, 10);
+  ctx.lineTo(0, 4);
+  ctx.lineTo(6, 10);
+  ctx.closePath();
+  ctx.fill();
+  ctx.font = "700 11px Source Sans 3, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("N", 0, -22);
+  ctx.restore();
+}

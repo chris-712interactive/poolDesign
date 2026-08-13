@@ -14,6 +14,7 @@ import {
   emptyDesignDocument,
   isFenceKind,
   isGateKind,
+  normalizeNorthDeg,
   type DesignDocument,
   type DesignEstimate,
   type DesignGradeOptions,
@@ -296,6 +297,7 @@ export function normalizeDesignDocument(
     })),
     gradeSamples: normalizeGradeSamples(doc.gradeSamples),
     gradeOptions: normalizeGradeOptions(doc.gradeOptions),
+    northDeg: normalizeNorthDeg(doc.northDeg),
     buildings: (Array.isArray(doc.buildings) ? doc.buildings : []).map((b) => {
       const stories = Math.max(1, b.stories || 1);
       const ceilingHeightMm = resolveCeilingHeightMm(

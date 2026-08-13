@@ -84,6 +84,7 @@ import {
   type PatioGradeStrategy,
   outlineBounds,
   parseLengthToMm,
+  normalizeNorthDeg,
   polygonAreaMm2,
   polygonPerimeterMm,
   polylineLengthMm,
@@ -210,6 +211,7 @@ import {
   drawEdgeLabel,
   drawSpaSpillover,
   drawInfinityEdge,
+  drawNorthArrow,
   openingEndpoints,
 } from "@/lib/cad/draw";
 
@@ -1107,6 +1109,8 @@ export function CadWorkspace({
         28,
       );
     }
+
+    drawNorthArrow(ctx, rect.width, design.northDeg ?? 0);
   }, [
     coverKind,
     design,
@@ -5008,6 +5012,71 @@ export function CadWorkspace({
                       </span>
                     </label>
                   ))}
+                </div>
+                <div className="field" style={{ marginTop: "1rem" }}>
+                  <label htmlFor="site-north">True north</label>
+                  <input
+                    id="site-north"
+                    key={`north-${design.northDeg ?? 0}`}
+                    type="number"
+                    step={15}
+                    defaultValue={Math.round(design.northDeg ?? 0)}
+                    onBlur={(e) => {
+                      const n = Number(e.target.value);
+                      if (!Number.isFinite(n)) return;
+                      const next = normalizeNorthDeg(n);
+                      if (next === normalizeNorthDeg(design.northDeg)) return;
+                      commitDesign({ ...design, northDeg: next });
+                    }}
+                  />
+                  <div className="row" style={{ marginTop: "0.4rem" }}>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() =>
+                        commitDesign({
+                          ...design,
+                          northDeg: normalizeNorthDeg(
+                            (design.northDeg ?? 0) - 15,
+                          ),
+                        })
+                      }
+                    >
+                      −15°
+                    </button>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() =>
+                        commitDesign({
+                          ...design,
+                          northDeg: normalizeNorthDeg(
+                            (design.northDeg ?? 0) + 15,
+                          ),
+                        })
+                      }
+                    >
+                      +15°
+                    </button>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      disabled={normalizeNorthDeg(design.northDeg) === 0}
+                      onClick={() =>
+                        commitDesign({ ...design, northDeg: 0 })
+                      }
+                    >
+                      Drawing up
+                    </button>
+                  </div>
+                  <p
+                    className="muted"
+                    style={{ margin: "0.35rem 0 0", fontSize: "0.78rem" }}
+                  >
+                    Degrees clockwise from up on this drawing. Rotates the
+                    north arrow only — the plan stays put. Used on the draft
+                    permit site plan.
+                  </p>
                 </div>
                 {maxPlanStories > 1 && (
                   <div className="field" style={{ marginTop: "0.85rem" }}>

@@ -30,6 +30,20 @@ describe("normalizeDesignDocument", () => {
     assert.ok(next.layers.some((l) => l.id === "covers"));
     assert.ok(next.layers.some((l) => l.id === "fence"));
     assert.deepEqual(next.fences, []);
+    assert.equal(next.northDeg, 0);
+  });
+
+  it("wraps true-north bearing into 0..360", () => {
+    const raw = {
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [],
+      poolBodies: [],
+      plumbingRuns: [],
+      northDeg: -90,
+    } as unknown as DesignDocument;
+    assert.equal(normalizeDesignDocument(raw).northDeg, 270);
   });
 
   it("defaults spa wall/shell and opening sizes", () => {
