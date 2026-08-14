@@ -1295,9 +1295,18 @@ function nicheLightCenterY(
   return Math.min(maxY, Math.max(minY, target));
 }
 
+function isWallFacingCatalogId(id: string): boolean {
+  return (
+    id === "spa_jet" ||
+    id === "pool_return" ||
+    id === "pool_skimmer" ||
+    id.startsWith("light_")
+  );
+}
+
 /**
- * Vertical center for in-water fixtures so jets / bubblers stay underwater.
- * Returns null when the object should use the default deck/ground placement.
+ * Vertical center for in-water fixtures so they sit on the floor or wall
+ * instead of the deck plane. Returns null for dry-deck / pad equipment.
  */
 function waterFixtureCenterY(
   obj: {
@@ -1314,11 +1323,21 @@ function waterFixtureCenterY(
 ): number | null {
   const id = obj.catalogItemId;
   const isJet = id === "spa_jet";
+  const isReturn = id === "pool_return";
   const isLight = id.startsWith("light_");
   const isSpaBubbler = id === "spa_bubbler";
   const isPoolBubbler = id === "pool_bubbler";
-  const isDrain = id === "spa_drain";
-  if (!isJet && !isLight && !isSpaBubbler && !isPoolBubbler && !isDrain) {
+  const isDrain = id === "spa_drain" || id === "pool_drain";
+  const isSkimmer = id === "pool_skimmer";
+  if (
+    !isJet &&
+    !isReturn &&
+    !isLight &&
+    !isSpaBubbler &&
+    !isPoolBubbler &&
+    !isDrain &&
+    !isSkimmer
+  ) {
     return null;
   }
 
@@ -1329,15 +1348,15 @@ function waterFixtureCenterY(
       : undefined) ??
     opts.spas.find((s) => pointInPolygon(obj.position, s.outline));
 
-  if (spa && (isJet || isLight || isSpaBubbler || isDrain)) {
+  if (spa && (isJet || isLight || isSpaBubbler || id === "spa_drain")) {
     const joinsPool = opts.pools.some((p) =>
       waterBodiesConnected(p.outline, spa.outline),
     );
     const elev = spaElevations(spa, opts.poolWaterTopY, joinsPool);
     const waterDepth = elev.waterTopY - elev.floorY;
-    if (isSpaBubbler || isDrain) {
+    if (isSpaBubbler || id === "spa_drain") {
       // Floor fixtures sit just above the basin floor.
-      return elev.floorY + (isDrain ? 0.02 : 0.028);
+      return elev.floorY + (id === "spa_drain" ? 0.012 : 0.028);
     }
     if (isLight) {
       // Spa niche lights: below the bench / in the footwell (~lower third).
@@ -1355,82 +1374,90 @@ function waterFixtureCenterY(
     );
   }
 
-  if (isPoolBubbler || isJet || isLight) {
-    const onShelf = opts.features.some(
+  const onShelf = opts.features.some(
+    (f) =>
+      f.kind === "sunshelf" &&
+      f.outline.length >= 3 &&
+      pointInPolygon(obj.position, f.outline),
+  );
+
+  // Floor bubblers on a sunshelf sit on the ledge — not wall lights/jets.
+  if (isPoolBubbler && onShelf) {
+    const shelf = opts.features.find(
       (f) =>
         f.kind === "sunshelf" &&
         f.outline.length >= 3 &&
         pointInPolygon(obj.position, f.outline),
-    );
+    )!;
+    const shelfTop =
+      opts.poolWaterTopY -
+      mmToMeters(featureDepthMm("sunshelf", shelf.depthMm));
+    return Math.min(opts.poolWaterTopY - 0.05, shelfTop + 0.022);
+  }
 
-    // Floor bubblers on a sunshelf sit on the ledge — not wall lights/jets.
-    if (isPoolBubbler && onShelf) {
-      const shelf = opts.features.find(
+  const wallLike = isJet || isReturn || isLight || isSkimmer;
+  const pool =
+    (parentId
+      ? opts.pools.find((p) => p.id === parentId)
+      : undefined) ??
+    opts.pools.find((p) => pointInPolygon(obj.position, p.outline)) ??
+    // Wall fixtures sit just inside the shell — still associate with nearest pool.
+    (wallLike
+      ? opts.pools.find((p) => waterBodyKind(p) !== "spa")
+      : undefined);
+  if (pool && waterBodyKind(pool) !== "spa") {
+    const profile = depthProfileForBody(pool);
+    const t = depthTAtPlanPoint(
+      obj.position,
+      profile.originMm,
+      profile.axis,
+      profile.axisLengthMm,
+    );
+    const floorY = -mmToMeters(depthMmAtT(profile.stations, t));
+    if (isPoolBubbler || id === "pool_drain") {
+      return Math.min(opts.poolWaterTopY - 0.04, floorY + 0.01);
+    }
+    if (isSkimmer) {
+      // Weir mouth straddles the operating waterline.
+      return opts.poolWaterTopY;
+    }
+    if (isLight) {
+      const nearShelf = opts.features.some(
         (f) =>
           f.kind === "sunshelf" &&
           f.outline.length >= 3 &&
-          pointInPolygon(obj.position, f.outline),
-      )!;
-      const shelfTop =
-        opts.poolWaterTopY -
-        mmToMeters(featureDepthMm("sunshelf", shelf.depthMm));
-      return Math.min(opts.poolWaterTopY - 0.05, shelfTop + 0.022);
-    }
-
-    const pool =
-      (parentId
-        ? opts.pools.find((p) => p.id === parentId)
-        : undefined) ??
-      opts.pools.find((p) => pointInPolygon(obj.position, p.outline)) ??
-      // Wall fixtures sit just inside the shell — still associate with nearest pool.
-      (isJet || isLight
-        ? opts.pools.find((p) => waterBodyKind(p) !== "spa")
-        : undefined);
-    if (pool && waterBodyKind(pool) !== "spa") {
-      const profile = depthProfileForBody(pool);
-      const t = depthTAtPlanPoint(
-        obj.position,
-        profile.originMm,
-        profile.axis,
-        profile.axisLengthMm,
+          (() => {
+            const b = outlineBounds(f.outline);
+            const dx = Math.max(b.minX - obj.position.x, 0, obj.position.x - b.maxX);
+            const dy = Math.max(b.minY - obj.position.y, 0, obj.position.y - b.maxY);
+            return Math.hypot(dx, dy) < 600;
+          })(),
       );
-      const floorY = -mmToMeters(depthMmAtT(profile.stations, t));
-      if (isPoolBubbler || isDrain) {
-        return Math.min(opts.poolWaterTopY - 0.05, floorY + 0.028);
-      }
-      if (isLight) {
-        // Also treat walls beside a sunshelf as shelf lighting (~4″).
-        const nearShelf = opts.features.some(
-          (f) =>
-            f.kind === "sunshelf" &&
-            f.outline.length >= 3 &&
-            // Within ~2′ of the shelf footprint in plan.
-            (() => {
-              const b = outlineBounds(f.outline);
-              const dx = Math.max(b.minX - obj.position.x, 0, obj.position.x - b.maxX);
-              const dy = Math.max(b.minY - obj.position.y, 0, obj.position.y - b.maxY);
-              return Math.hypot(dx, dy) < 600;
-            })(),
-        );
-        return nicheLightCenterY(opts.poolWaterTopY, floorY, {
-          onShelf: onShelf || nearShelf,
-        });
-      }
-      // Wall jet: mid-water for the local depth.
-      const waterDepth = opts.poolWaterTopY - floorY;
-      const y = floorY + waterDepth * 0.45;
+      return nicheLightCenterY(opts.poolWaterTopY, floorY, {
+        onShelf: onShelf || nearShelf,
+      });
+    }
+    if (isReturn) {
+      // Wall return ~12″ below waterline, clear of the floor.
       return Math.min(
         opts.poolWaterTopY - 0.12,
-        Math.max(floorY + 0.15, y),
+        Math.max(floorY + 0.14, opts.poolWaterTopY - 0.305),
       );
     }
-
-    // Last resort: main-wall niche depth under the freeboard.
-    if (isLight) return opts.poolWaterTopY - LIGHT_BELOW_WATER_MAIN_M;
-    return opts.poolWaterTopY - 0.18;
+    // Wall jet: mid-water for the local depth.
+    const waterDepth = opts.poolWaterTopY - floorY;
+    const y = floorY + waterDepth * 0.45;
+    return Math.min(
+      opts.poolWaterTopY - 0.12,
+      Math.max(floorY + 0.15, y),
+    );
   }
 
-  return null;
+  if (id === "pool_drain") return opts.poolWaterTopY - 1.2;
+  if (isSkimmer) return opts.poolWaterTopY;
+  if (isReturn) return opts.poolWaterTopY - 0.305;
+  if (isLight) return opts.poolWaterTopY - LIGHT_BELOW_WATER_MAIN_M;
+  return opts.poolWaterTopY - 0.18;
 }
 
 /**
@@ -3474,12 +3501,10 @@ export function buildSceneModel(
       obj.catalogItemId.includes("salt");
 
     const planYaw = ((obj.rotationDeg || 0) * Math.PI) / 180;
-    // Plan atan2(dy,dx) → Three yaw so local +Z points toward vessel center.
-    const rotationY =
-      obj.catalogItemId === "spa_jet" ||
-      obj.catalogItemId.startsWith("light_")
-        ? -planYaw - Math.PI / 2
-        : planYaw;
+    // Plan atan2(dy,dx) → Three yaw so local +Z points into the vessel.
+    const rotationY = isWallFacingCatalogId(obj.catalogItemId)
+      ? -planYaw - Math.PI / 2
+      : planYaw;
 
     // Jets / bubblers / underwater lights always sit below the waterline.
     const fixtureY = waterFixtureCenterY(obj, {

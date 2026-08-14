@@ -716,6 +716,9 @@ export function drawRun(
 function isWaterFixture(obj: PlacedObject): boolean {
   return (
     obj.catalogItemId === "spa_drain" ||
+    obj.catalogItemId === "pool_drain" ||
+    obj.catalogItemId === "pool_skimmer" ||
+    obj.catalogItemId === "pool_return" ||
     obj.catalogItemId === "spa_bubbler" ||
     obj.catalogItemId === "pool_bubbler" ||
     obj.catalogItemId === "spa_jet" ||
@@ -821,33 +824,53 @@ export function drawPlacedObject(
           : "#b89620"
         : "#1a6b8a";
     const fill =
-      obj.catalogItemId === "spa_drain"
+      obj.catalogItemId === "spa_drain" || obj.catalogItemId === "pool_drain"
         ? "rgba(26,107,138,0.55)"
-        : isBubbler
-          ? obj.catalogItemId === "pool_bubbler"
-            ? "rgba(26,160,170,0.5)"
-            : "rgba(45,140,160,0.45)"
-          : obj.catalogItemId === "light_color"
-            ? "rgba(140,90,200,0.45)"
-            : obj.catalogItemId === "light_standard"
-              ? "rgba(230,200,80,0.5)"
-              : "rgba(20,90,110,0.5)";
+        : obj.catalogItemId === "pool_skimmer"
+          ? "rgba(40,50,58,0.55)"
+          : isBubbler
+            ? obj.catalogItemId === "pool_bubbler"
+              ? "rgba(26,160,170,0.5)"
+              : "rgba(45,140,160,0.45)"
+            : obj.catalogItemId === "light_color"
+              ? "rgba(140,90,200,0.45)"
+              : obj.catalogItemId === "light_standard"
+                ? "rgba(230,200,80,0.5)"
+                : "rgba(20,90,110,0.5)";
     ctx.fillStyle = fill;
     ctx.strokeStyle = stroke;
     ctx.lineWidth = selected ? 2.5 : 1.5;
     if (preview) ctx.setLineDash([5, 4]);
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    if (obj.catalogItemId === "spa_drain") {
+    if (obj.catalogItemId === "pool_skimmer") {
+      const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
+      ctx.save();
+      ctx.translate(center.x, center.y);
+      ctx.rotate(rad);
+      ctx.beginPath();
+      ctx.rect(-r * 0.35, -r * 1.15, r * 0.7, r * 2.3);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    if (
+      obj.catalogItemId === "spa_drain" ||
+      obj.catalogItemId === "pool_drain"
+    ) {
       ctx.beginPath();
       ctx.moveTo(center.x - r * 0.55, center.y);
       ctx.lineTo(center.x + r * 0.55, center.y);
       ctx.moveTo(center.x, center.y - r * 0.55);
       ctx.lineTo(center.x, center.y + r * 0.55);
       ctx.stroke();
-    } else if (obj.catalogItemId === "spa_jet") {
+    } else if (
+      obj.catalogItemId === "spa_jet" ||
+      obj.catalogItemId === "pool_return"
+    ) {
       const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
       ctx.beginPath();
       ctx.moveTo(

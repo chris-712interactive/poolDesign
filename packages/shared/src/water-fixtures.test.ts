@@ -30,6 +30,8 @@ describe("water wall fixtures", () => {
     assert.equal(isWallWaterFixtureId("light_standard"), true);
     assert.equal(isWallWaterFixtureId("light_color"), true);
     assert.equal(isWallWaterFixtureId("spa_jet"), true);
+    assert.equal(isWallWaterFixtureId("pool_skimmer"), true);
+    assert.equal(isWallWaterFixtureId("pool_return"), true);
     assert.equal(isWallWaterFixtureId("pool_bubbler"), false);
   });
 

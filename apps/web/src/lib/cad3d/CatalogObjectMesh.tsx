@@ -12,6 +12,7 @@ import {
   diningChairSlotsMm,
   diningTableShape,
   isDiningSetId,
+  PATIO_SLAB_THICKNESS_MM,
   resolvePersonOutfitId,
   resolvePersonSex,
 } from "@pool-design/shared";
@@ -717,16 +718,16 @@ function PoolNicheLight({
         position={[0, 0, 0.32]}
       />
       {/* Niche ring flush to wall */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} castShadow>
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.02]} castShadow>
         <cylinderGeometry args={[r, r * 1.05, 0.03, 28]} />
         <Mat color="#3d454c" metalness={0.55} roughness={0.35} selected={selected} />
       </mesh>
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.01]}>
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.01]}>
         <cylinderGeometry args={[r * 0.82, r * 0.82, 0.02, 28]} />
         <Mat color="#6a727a" metalness={0.65} roughness={0.3} selected={selected} />
       </mesh>
-      {/* Lit lens facing into the pool */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.022]}>
+      {/* Lit lens facing into the pool (circleGeometry already faces +Z). */}
+      <mesh position={[0, 0, 0.004]}>
         <circleGeometry args={[r * 0.68, 28]} />
         <meshStandardMaterial
           ref={lensMatRef}
@@ -1187,6 +1188,107 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
         selected={selected}
         groupProps={groupProps}
       />
+    );
+  }
+
+  if (catalogId === "pool_drain") {
+    // VGBA anti-entrapment floor grate, flush to plaster.
+    const r = 0.15;
+    return (
+      <group {...groupProps}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0]} receiveShadow>
+          <circleGeometry args={[r, 32]} />
+          <Mat color="#3a4248" metalness={0.35} roughness={0.55} selected={selected} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]}>
+          <ringGeometry args={[r * 0.82, r * 0.98, 32]} />
+          <Mat color="#6a727a" metalness={0.55} roughness={0.35} selected={selected} />
+        </mesh>
+        {Array.from({ length: 8 }, (_, i) => {
+          const a = (i / 8) * Math.PI * 2;
+          return (
+            <mesh
+              key={i}
+              position={[
+                Math.cos(a) * r * 0.38,
+                0.008,
+                Math.sin(a) * r * 0.38,
+              ]}
+              rotation={[-Math.PI / 2, 0, a]}
+            >
+              <boxGeometry args={[r * 0.72, r * 0.09, 0.007]} />
+              <Mat color="#2a3036" metalness={0.4} roughness={0.45} selected={selected} />
+            </mesh>
+          );
+        })}
+        <mesh position={[0, 0.01, 0]}>
+          <cylinderGeometry args={[r * 0.12, r * 0.12, 0.01, 12]} />
+          <Mat color="#5a6268" metalness={0.5} roughness={0.4} selected={selected} />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (catalogId === "pool_skimmer") {
+    // Recessed weir in the wall at the waterline; lid sits on the deck behind.
+    const deckTop = PATIO_SLAB_THICKNESS_MM / 1000;
+    const lidY = deckTop - desc.position.y + 0.012;
+    return (
+      <group {...groupProps}>
+        {/* Face plate flush to interior plaster (origin is slightly in-water). */}
+        <mesh position={[0, 0, -0.028]} castShadow>
+          <boxGeometry args={[0.24, 0.145, 0.018]} />
+          <Mat color="#d8d2c6" roughness={0.55} selected={selected} />
+        </mesh>
+        {/* Dark throat into the wall */}
+        <mesh position={[0, 0.008, -0.06]}>
+          <boxGeometry args={[0.175, 0.085, 0.07]} />
+          <Mat color="#1a1e22" roughness={0.9} selected={selected} />
+        </mesh>
+        {/* Floating weir door at the waterline */}
+        <mesh
+          position={[0, -0.028, 0.012]}
+          rotation={[-0.38, 0, 0]}
+          castShadow
+        >
+          <boxGeometry args={[0.16, 0.008, 0.055]} />
+          <Mat color="#ece8e0" roughness={0.45} selected={selected} />
+        </mesh>
+        {/* Deck lid behind the wall */}
+        <mesh position={[0, lidY, -0.42]} receiveShadow castShadow>
+          <boxGeometry args={[0.32, 0.018, 0.32]} />
+          <Mat color="#cfc8bb" roughness={0.7} selected={selected} />
+        </mesh>
+        <mesh position={[0, lidY + 0.012, -0.42]}>
+          <boxGeometry args={[0.05, 0.008, 0.09]} />
+          <Mat color="#8a8478" metalness={0.35} roughness={0.45} selected={selected} />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (catalogId === "pool_return") {
+    // Wall return / inlet eyeball, flush to plaster, facing +Z into the pool.
+    const r = 0.028;
+    return (
+      <group {...groupProps}>
+        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.012]} castShadow>
+          <cylinderGeometry args={[r * 1.15, r * 1.2, 0.018, 20]} />
+          <Mat color="#cfc8bb" roughness={0.5} selected={selected} />
+        </mesh>
+        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.002]}>
+          <cylinderGeometry args={[r, r, 0.012, 20]} />
+          <Mat color="#8a9298" metalness={0.55} roughness={0.32} selected={selected} />
+        </mesh>
+        <mesh position={[0, 0, 0.01]} castShadow>
+          <sphereGeometry args={[r * 0.62, 16, 12]} />
+          <Mat color="#6e7882" metalness={0.55} roughness={0.35} selected={selected} />
+        </mesh>
+        <mesh position={[0, 0, 0.028]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[r * 0.16, r * 0.22, 0.02, 12]} />
+          <Mat color="#3d454c" metalness={0.6} selected={selected} />
+        </mesh>
+      </group>
     );
   }
 
