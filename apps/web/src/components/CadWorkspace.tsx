@@ -51,6 +51,8 @@ import {
   insideBoundsFromOutside,
   isPadEquipmentId,
   placeEquipmentPadWithStandardKit,
+  applyPadTransform,
+  rotatePlacedObject,
   isPoolFixtureId,
   isSpaFixtureId,
   isWaterFixtureId,
@@ -2856,9 +2858,7 @@ export function CadWorkspace({
       const snapped = Math.round(angle / 15) * 15;
       setDesign((d) => ({
         ...d,
-        objects: d.objects.map((o) =>
-          o.id === drag.id ? { ...o, rotationDeg: snapped } : o,
-        ),
+        objects: rotatePlacedObject(d.objects, drag.id, snapped),
       }));
       return;
     }
@@ -3339,8 +3339,11 @@ export function CadWorkspace({
           designRef.current = next;
         }
       }
-      // After moving pad gear or water fixtures, re-route body plumbing once.
-      if (drag.mode === "move" && drag.kind === "object") {
+      // After moving/rotating pad gear or water fixtures, re-route once.
+      if (
+        (drag.mode === "move" && drag.kind === "object") ||
+        drag.mode === "rotate"
+      ) {
         const synced = syncPlumbingAfterObjectChange(next, drag.id);
         if (synced !== next) {
           next = synced;
@@ -3427,14 +3430,17 @@ export function CadWorkspace({
     }
     if ((e.key === "r" || e.key === "R") && selectedObject) {
       e.preventDefault();
-      commitDesign({
-        ...design,
-        objects: design.objects.map((o) =>
-          o.id === selectedObject.id
-            ? { ...o, rotationDeg: (o.rotationDeg + 15) % 360 }
-            : o,
+      const objects = rotatePlacedObject(
+        design.objects,
+        selectedObject.id,
+        (selectedObject.rotationDeg || 0) + 15,
+      );
+      commitDesign(
+        syncPlumbingAfterObjectChange(
+          { ...design, objects },
+          selectedObject.id,
         ),
-      });
+      );
       return;
     }
     if ((e.key === "r" || e.key === "R") && selectedGradeSample) {
@@ -5544,19 +5550,19 @@ export function CadWorkspace({
                     key={`${selectedObject.id}-${selectedObject.catalogItemId}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.heightMm}-${selectedObject.rotationDeg}-${selectedObject.frameFinishId}-${selectedObject.fabricFinishId}-${selectedObject.hasLedLight}-${selectedObject.personSex}-${selectedObject.personOutfitId}`}
                     object={selectedObject}
                     unitSystem={unitSystem}
-                    onRotate={(deg) =>
-                      commitDesign({
-                        ...design,
-                        objects: design.objects.map((o) =>
-                          o.id === selectedObject.id
-                            ? {
-                                ...o,
-                                rotationDeg: ((deg % 360) + 360) % 360,
-                              }
-                            : o,
+                    onRotate={(deg) => {
+                      const objects = rotatePlacedObject(
+                        design.objects,
+                        selectedObject.id,
+                        deg,
+                      );
+                      commitDesign(
+                        syncPlumbingAfterObjectChange(
+                          { ...design, objects },
+                          selectedObject.id,
                         ),
-                      })
-                    }
+                      );
+                    }}
                     onDimensions={(widthMm, depthMm) =>
                       commitDesign({
                         ...design,
@@ -7795,6 +7801,16 @@ function translateDesign(
       gradeSamples: (d.gradeSamples ?? []).map((s) =>
         s.id === id ? { ...s, position: shift(s.position) } : s,
       ),
+    };
+  }
+  const moved = d.objects.find((o) => o.id === id);
+  if (moved?.catalogItemId === "equip_pad") {
+    return {
+      ...d,
+      objects: applyPadTransform(d.objects, moved, {
+        ...moved,
+        position: shift(moved.position),
+      }),
     };
   }
   return {

@@ -15,7 +15,7 @@ import type {
   PointMm,
   PoolBody,
 } from "./design-model";
-import { waterBodyKind } from "./design-model";
+import { objectFootprint, pointInPolygon, waterBodyKind } from "./design-model";
 import type { DesignLevel } from "./design-level";
 import { getPlaceableItem } from "./object-library";
 
@@ -548,6 +548,98 @@ export function equipmentLocalToPlan(
     x: obj.position.x - lxMm * cos - lzMm * sin,
     y: obj.position.y + lxMm * sin - lzMm * cos,
   };
+}
+
+/** Inverse of {@link equipmentLocalToPlan}. */
+export function equipmentPlanToLocal(
+  obj: PlacedObject,
+  plan: PointMm,
+): { lx: number; lz: number } {
+  const rad = ((obj.rotationDeg ?? 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = plan.x - obj.position.x;
+  const dy = plan.y - obj.position.y;
+  return {
+    lx: -dx * cos + dy * sin,
+    lz: -dx * sin - dy * cos,
+  };
+}
+
+function distPlan(a: PointMm, b: PointMm): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/**
+ * Pump / filter / heater / salt that belong on this pad (on the slab, or still
+ * nearer this pad than any other after a previous rotate/move).
+ */
+export function padKitOccupants(
+  objects: PlacedObject[],
+  pad: PlacedObject,
+): PlacedObject[] {
+  if (pad.catalogItemId !== "equip_pad") return [];
+  const pads = objects.filter((o) => o.catalogItemId === "equip_pad");
+  const footprint = objectFootprint(pad);
+  const reach =
+    Math.hypot(pad.widthMm / 2, pad.depthMm / 2) + 4 * 304.8;
+  return objects.filter((o) => {
+    if (o.id === pad.id) return false;
+    if (!isPadEquipment(o) || o.catalogItemId === "equip_pad") return false;
+    if (pointInPolygon(o.position, footprint)) return true;
+    let nearest: PlacedObject | null = null;
+    let nearestD = Infinity;
+    for (const p of pads) {
+      const d = distPlan(o.position, p.position);
+      if (d < nearestD) {
+        nearest = p;
+        nearestD = d;
+      }
+    }
+    return nearest?.id === pad.id && nearestD <= reach;
+  });
+}
+
+/**
+ * Move/rotate a pad and keep its kit in the same local slots (and heading).
+ */
+export function applyPadTransform(
+  objects: PlacedObject[],
+  pad: PlacedObject,
+  nextPad: PlacedObject,
+): PlacedObject[] {
+  if (pad.catalogItemId !== "equip_pad") {
+    return objects.map((o) => (o.id === nextPad.id ? nextPad : o));
+  }
+  const occupantIds = new Set(padKitOccupants(objects, pad).map((o) => o.id));
+  const deltaRot =
+    (nextPad.rotationDeg ?? 0) - (pad.rotationDeg ?? 0);
+  return objects.map((o) => {
+    if (o.id === pad.id) return nextPad;
+    if (!occupantIds.has(o.id)) return o;
+    const local = equipmentPlanToLocal(pad, o.position);
+    return {
+      ...o,
+      position: equipmentLocalToPlan(nextPad, local.lx, local.lz),
+      rotationDeg: (o.rotationDeg ?? 0) + deltaRot,
+    };
+  });
+}
+
+/** Set an object's heading; pads carry their kit with them. */
+export function rotatePlacedObject(
+  objects: PlacedObject[],
+  objectId: string,
+  nextRotationDeg: number,
+): PlacedObject[] {
+  const obj = objects.find((o) => o.id === objectId);
+  if (!obj) return objects;
+  const rotationDeg = ((nextRotationDeg % 360) + 360) % 360;
+  const next = { ...obj, rotationDeg };
+  if (obj.catalogItemId === "equip_pad") {
+    return applyPadTransform(objects, obj, next);
+  }
+  return objects.map((o) => (o.id === objectId ? next : o));
 }
 
 /** Two union ports in mesh-local mm for a pad equipment piece. */

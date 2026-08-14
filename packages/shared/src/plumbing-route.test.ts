@@ -15,6 +15,10 @@ import {
   routeOrthoAvoiding,
   syncPlumbingAfterObjectRemoved,
   TRENCH_ELEV_MM,
+  applyPadTransform,
+  equipmentLocalToPlan,
+  equipmentPlanToLocal,
+  rotatePlacedObject,
 } from "./plumbing-route";
 
 const FT = 304.8;
@@ -379,6 +383,51 @@ describe("pad manifold", () => {
     assert.ok(
       synced.plumbingRuns.some((r) => /pump/i.test(r.name) && /filter/i.test(r.name)),
     );
+  });
+
+  it("rotates the pad kit with the slab", () => {
+    const empty = emptyDesignDocument();
+    const { pad, equipment, design } = placeEquipmentPadWithStandardKit(
+      empty,
+      { x: 40 * FT, y: 10 * FT },
+      { rotationDeg: 0 },
+    );
+    const pump = equipment.find((o) => o.catalogItemId === "pump_variable_speed");
+    assert.ok(pump);
+    const local = equipmentPlanToLocal(pad, pump!.position);
+
+    const objects = rotatePlacedObject(design.objects, pad.id, 90);
+    const nextPad = objects.find((o) => o.id === pad.id)!;
+    const nextPump = objects.find((o) => o.id === pump!.id)!;
+    assert.equal(nextPad.rotationDeg, 90);
+    assert.equal(nextPump.rotationDeg, 90);
+    const back = equipmentPlanToLocal(nextPad, nextPump.position);
+    assert.ok(Math.abs(back.lx - local.lx) < 0.5);
+    assert.ok(Math.abs(back.lz - local.lz) < 0.5);
+
+    const localPt = equipmentPlanToLocal(pad, { x: 1234, y: 5678 });
+    const roundTrip = equipmentLocalToPlan(pad, localPt.lx, localPt.lz);
+    assert.ok(Math.abs(roundTrip.x - 1234) < 1e-6);
+    assert.ok(Math.abs(roundTrip.y - 5678) < 1e-6);
+  });
+
+  it("moves the pad kit with the slab", () => {
+    const empty = emptyDesignDocument();
+    const { pad, equipment, design } = placeEquipmentPadWithStandardKit(
+      empty,
+      { x: 10 * FT, y: 10 * FT },
+    );
+    const dx = 6 * FT;
+    const dy = -3 * FT;
+    const objects = applyPadTransform(design.objects, pad, {
+      ...pad,
+      position: { x: pad.position.x + dx, y: pad.position.y + dy },
+    });
+    for (const piece of equipment) {
+      const next = objects.find((o) => o.id === piece.id)!;
+      assert.ok(Math.abs(next.position.x - (piece.position.x + dx)) < 0.5);
+      assert.ok(Math.abs(next.position.y - (piece.position.y + dy)) < 0.5);
+    }
   });
 });
 
