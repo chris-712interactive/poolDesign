@@ -67,6 +67,7 @@ import {
   isDiningSetId,
   isWallWaterFixtureId,
   snapWaterWallFixture,
+  resolvePlacePosition,
   DEFAULT_PERSON_OUTFIT_ID,
   DEFAULT_PERSON_SEX,
   PERSON_OUTFITS,
@@ -785,6 +786,18 @@ export function CadWorkspace({
   const previewPoint = useMemo(() => {
     if (!cursor) return null;
     if (wallFixturePreview) return wallFixturePreview.position;
+    if (
+      isPlacingObject &&
+      placeItem &&
+      draftPoints.length === 0 &&
+      !isWallWaterFixtureId(placeItem.id)
+    ) {
+      return resolvePlacePosition(placeItem.id, cursor, {
+        covers: design.patioCovers,
+        features: design.features,
+        objects: design.objects,
+      });
+    }
     if (draftPoints.length === 0) return cursor;
     // Third click of rect tools: free cursor — depth is perpendicular to first side.
     if (
@@ -812,7 +825,12 @@ export function CadWorkspace({
   }, [
     constrainPoint,
     cursor,
+    design.features,
+    design.objects,
+    design.patioCovers,
     draftPoints,
+    isPlacingObject,
+    placeItem,
     tool,
     vp.scale,
     wallFixturePreview,
@@ -2574,7 +2592,12 @@ export function CadWorkspace({
       const wallSnap = isWallWaterFixtureId(placeItem.id)
         ? snapWaterWallFixture(design.poolBodies, point)
         : null;
-      const placeAt = wallSnap?.position ?? point;
+      const placeAt = wallSnap?.position
+        ?? resolvePlacePosition(placeItem.id, point, {
+          covers: design.patioCovers,
+          features: design.features,
+          objects: design.objects,
+        });
       const parentBodyId = wallSnap?.bodyId
         ? wallSnap.bodyId
         : isWaterFixtureId(placeItem.id)
@@ -3300,6 +3323,29 @@ export function CadWorkspace({
             return;
           }
         }
+        if (
+          obj &&
+          (obj.catalogItemId === "umbrella" ||
+            obj.catalogItemId === "cover_fan" ||
+            obj.catalogItemId === "cover_light" ||
+            obj.catalogItemId === "sunshelf_chaise" ||
+            obj.catalogItemId === "sunshelf_table" ||
+            obj.catalogItemId === "umbrella_sleeve")
+        ) {
+          const snapped = resolvePlacePosition(obj.catalogItemId, point, {
+            covers: designRef.current.patioCovers,
+            features: designRef.current.features,
+            objects: designRef.current.objects.filter((o) => o.id !== drag.id),
+          });
+          setDesign((d) => ({
+            ...d,
+            objects: d.objects.map((o) =>
+              o.id === drag.id ? { ...o, position: snapped } : o,
+            ),
+          }));
+          setDrag({ ...drag, last: point });
+          return;
+        }
       }
       const dx = point.x - drag.last.x;
       const dy = point.y - drag.last.y;
@@ -3582,7 +3628,17 @@ export function CadWorkspace({
                           ? "Click to place the equipment pad — pump, filter, heater, and salt cell are added automatically."
                         : `Click to place ${placeItem?.name ?? "equipment"}. Pools/spas auto-route plumbing to the pad.`
                       : tool === "place"
-                        ? "Pick furniture/fixture, then click to place. R rotates 15°."
+                        ? placeItem?.id === "cover_fan" ||
+                            placeItem?.id === "cover_light"
+                          ? `Click under a roof or pergola to hang ${placeItem?.name ?? "this"}. R rotates 15°.`
+                          : placeItem?.id === "umbrella_sleeve"
+                            ? "Click on a sunshelf / tanning ledge to set a pole holder. Then place a market umbrella nearby to snap it in."
+                            : placeItem?.id === "sunshelf_chaise" ||
+                                placeItem?.id === "sunshelf_table"
+                              ? `Click on a sunshelf / tanning ledge to place ${placeItem?.name ?? "this"}. R rotates 15°.`
+                              : placeItem?.id === "umbrella"
+                                ? "Click to place. Near a sunshelf pole holder, the umbrella snaps into the sleeve."
+                                : "Pick furniture/fixture, then click to place. R rotates 15°."
                         : tool === "measure"
                           ? "Click two points to measure distance. Esc clears."
                           : tool === "survey_calibrate"

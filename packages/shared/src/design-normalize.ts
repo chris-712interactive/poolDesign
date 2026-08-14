@@ -100,6 +100,7 @@ import {
   DINING_CHAIR_CLEARANCE_MM,
   diningSetCatalogId,
 } from "./object-library";
+import { resolvePlacePosition } from "./place-snap";
 import {
   clampOpeningStory,
   defaultObjectHeightMm,
@@ -238,6 +239,12 @@ export function normalizeDesignDocument(
           rotationDeg = snap.rotationDeg;
           parentBodyId = snap.bodyId;
         }
+      } else {
+        position = resolvePlacePosition(catalogItemId, position, {
+          covers: Array.isArray(doc.patioCovers) ? doc.patioCovers : [],
+          features: Array.isArray(doc.features) ? doc.features : [],
+          objects: Array.isArray(doc.objects) ? doc.objects : [],
+        });
       }
 
       let personSex: "female" | "male" | undefined;

@@ -337,6 +337,71 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     layerId: "furniture",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 65000,
+    description:
+      "8′ canopy. Place on deck, or snap into a sunshelf pole holder to sit in the water.",
+  },
+  {
+    id: "sunshelf_chaise",
+    name: "Sunshelf chaise",
+    category: "furniture",
+    /** Low in-water chaise — typical tanning-ledge lounge. */
+    widthMm: 2 * FT,
+    depthMm: 5.5 * FT,
+    heightMm: 14 * IN,
+    layerId: "furniture",
+    levels: ["residential", "commercial", "water_park"],
+    unitPriceCents: 38000,
+    description:
+      "Low-profile chaise for a tanning ledge. Sits on the sunshelf, not the deck.",
+  },
+  {
+    id: "sunshelf_table",
+    name: "Sunshelf drink table",
+    category: "furniture",
+    widthMm: 16 * IN,
+    depthMm: 16 * IN,
+    heightMm: 12 * IN,
+    layerId: "furniture",
+    levels: ["residential", "commercial", "water_park"],
+    unitPriceCents: 12000,
+    description: "Small side table for a sunshelf / tanning ledge.",
+  },
+  {
+    id: "umbrella_sleeve",
+    name: "Sunshelf pole holder",
+    category: "hardscape",
+    widthMm: 6 * IN,
+    depthMm: 6 * IN,
+    heightMm: 8 * IN,
+    layerId: "furniture",
+    levels: ["residential", "commercial", "water_park"],
+    unitPriceCents: 22500,
+    description:
+      "Sleeve set into a tanning ledge so a market umbrella stands in the water.",
+  },
+  {
+    id: "cover_fan",
+    name: "Patio ceiling fan",
+    category: "amenity",
+    widthMm: 52 * IN,
+    depthMm: 52 * IN,
+    heightMm: 14 * IN,
+    layerId: "furniture",
+    levels: ["residential", "commercial"],
+    unitPriceCents: 48500,
+    description: "Hangs from a patio roof or pergola underside.",
+  },
+  {
+    id: "cover_light",
+    name: "Patio roof light",
+    category: "amenity",
+    widthMm: 8 * IN,
+    depthMm: 8 * IN,
+    heightMm: 10 * IN,
+    layerId: "furniture",
+    levels: ["residential", "commercial"],
+    unitPriceCents: 16500,
+    description: "Hanging lantern for a patio roof or pergola.",
   },
   {
     id: "fire_pit",
@@ -405,6 +470,28 @@ export function getPlaceableItem(id: string): PlaceableItem | undefined {
 
 /** Chair pull-out clearance added on each side of a dining tabletop. */
 export const DINING_CHAIR_CLEARANCE_MM = 22 * IN;
+
+/** Ceiling fan / light hung from a patio roof or pergola. */
+export const COVER_ACCESSORY_IDS = ["cover_fan", "cover_light"] as const;
+
+export function isCoverAccessoryId(id: string): boolean {
+  return (COVER_ACCESSORY_IDS as readonly string[]).includes(id);
+}
+
+/** Layout items that prefer a sunshelf / tanning ledge. */
+export const SUNSHELF_LAYOUT_IDS = [
+  "sunshelf_chaise",
+  "sunshelf_table",
+  "umbrella_sleeve",
+] as const;
+
+export function isSunshelfLayoutId(id: string): boolean {
+  return (SUNSHELF_LAYOUT_IDS as readonly string[]).includes(id);
+}
+
+export function isUmbrellaSleeveId(id: string): boolean {
+  return id === "umbrella_sleeve";
+}
 
 export function isDiningSetId(id: string): boolean {
   return (

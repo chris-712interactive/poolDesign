@@ -8,6 +8,7 @@ export * from "./payments";
 export * from "./catalog";
 export * from "./takeoff";
 export * from "./object-library";
+export * from "./place-snap";
 export * from "./water-fixtures";
 export * from "./spa-defaults";
 export * from "./pool-defaults";

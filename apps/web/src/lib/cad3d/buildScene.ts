@@ -13,9 +13,11 @@ import {
   depthTAtPlanPoint,
   designBoundsMm,
   existingGradeDropMm,
+  distToPolygonBoundaryMm,
   featureDepthMm,
   flattenClosedOutline,
   formatLength,
+  isCoverAccessoryId,
   isAxisAlignedRect,
   isRectangularOutline,
   maxDepthMmFromProfile,
@@ -69,6 +71,7 @@ import {
   type BuildingOpeningKind,
   type DepthTransition,
   type DesignDocument,
+  type PatioCover,
   type PointMm,
   gateOutwardNormal,
   poolGateHingeHeightsMm,
@@ -1458,6 +1461,59 @@ function waterFixtureCenterY(
   if (isReturn) return opts.poolWaterTopY - 0.305;
   if (isLight) return opts.poolWaterTopY - LIGHT_BELOW_WATER_MAIN_M;
   return opts.poolWaterTopY - 0.18;
+}
+
+function sunshelfSurfaceY(
+  position: PointMm,
+  features: {
+    kind: string;
+    outline: PointMm[];
+    depthMm?: number;
+  }[],
+  poolWaterTopY: number,
+): number | null {
+  const shelf = features.find(
+    (f) =>
+      f.kind === "sunshelf" &&
+      f.outline.length >= 3 &&
+      pointInPolygon(position, f.outline),
+  );
+  if (!shelf) return null;
+  return (
+    poolWaterTopY - mmToMeters(featureDepthMm("sunshelf", shelf.depthMm))
+  );
+}
+
+function coverAccessoryCenterY(
+  position: PointMm,
+  catalogItemId: string,
+  heightM: number,
+  covers: PatioCover[],
+): number | null {
+  if (!isCoverAccessoryId(catalogItemId)) return null;
+  const h = Math.max(0.08, heightM);
+  let cover =
+    covers.find(
+      (c) => c.outline.length >= 3 && pointInPolygon(position, c.outline),
+    ) ?? null;
+  if (!cover) {
+    let best: { c: PatioCover; d: number } | null = null;
+    for (const c of covers) {
+      if (c.outline.length < 3) continue;
+      const d = distToPolygonBoundaryMm(position, c.outline);
+      if (!best || d < best.d) best = { c, d };
+    }
+    if (best && best.d < 2500) cover = best.c;
+  }
+  const top = mmToMeters(
+    coverHeightMm(
+      cover?.kind === "roof" ? "roof" : "pergola",
+      cover?.heightMm,
+    ),
+  );
+  const slab = mmToMeters(COVER_SLAB_THICKNESS_MM);
+  const hang = catalogItemId === "cover_fan" ? 0.06 : 0.1;
+  return top - slab - hang - h / 2;
 }
 
 /**
@@ -3557,11 +3613,31 @@ export function buildSceneModel(
             poolWaterTopY: waterTopY,
           })
         : null;
+    const coverY = coverAccessoryCenterY(
+      obj.position,
+      obj.catalogItemId,
+      h,
+      design.patioCovers ?? [],
+    );
+    const shelfTopY = sunshelfSurfaceY(
+      obj.position,
+      design.features ?? [],
+      waterTopY,
+    );
+    const shelfY =
+      shelfTopY != null &&
+      !isCoverAccessoryId(obj.catalogItemId) &&
+      fixtureY == null &&
+      !isEquip
+        ? shelfTopY + h / 2
+        : null;
     // Patio furniture / dry-deck scale figures stand on finished deck.
     const deckTopY = mmToMeters(PATIO_SLAB_THICKNESS_MM);
     const y =
       fixtureY ??
+      coverY ??
       personY ??
+      shelfY ??
       (isEquip ? h / 2 : deckTopY + h / 2);
 
     const isBubbler =

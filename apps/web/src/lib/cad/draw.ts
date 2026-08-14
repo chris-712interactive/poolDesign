@@ -9,6 +9,7 @@ import {
   gateEndpoints,
   houseExteriorPlanFill,
   houseExteriorPlanStroke,
+  isCoverAccessoryId,
   isDiningSetId,
   objectFootprint,
   objectPlanSizeMm,
@@ -802,6 +803,78 @@ export function drawPlacedObject(
         center.x + w * 0.35,
         center.y + 3,
       );
+    }
+    return;
+  }
+
+  if (isCoverAccessoryId(obj.catalogItemId) || obj.catalogItemId === "umbrella_sleeve") {
+    const r = Math.max(
+      5,
+      Math.min(obj.widthMm, obj.depthMm) * vp.scale * 0.45,
+    );
+    const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
+    ctx.save();
+    ctx.translate(center.x, center.y);
+    ctx.rotate(rad);
+    if (preview) ctx.setLineDash([5, 4]);
+    ctx.lineWidth = selected ? 2.2 : 1.4;
+    if (obj.catalogItemId === "cover_fan") {
+      ctx.fillStyle = selected || preview
+        ? "rgba(70,90,110,0.35)"
+        : "rgba(70,90,110,0.22)";
+      ctx.strokeStyle = selected || preview ? "#2a3f55" : "#4a6078";
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.ellipse(
+          Math.cos(a) * r * 0.42,
+          Math.sin(a) * r * 0.42,
+          r * 0.38,
+          r * 0.12,
+          a,
+          0,
+          Math.PI * 2,
+        );
+        ctx.stroke();
+      }
+    } else if (obj.catalogItemId === "cover_light") {
+      ctx.fillStyle = selected || preview
+        ? "rgba(230,200,80,0.45)"
+        : "rgba(230,200,80,0.28)";
+      ctx.strokeStyle = selected || preview ? "#8a6a10" : "#b89620";
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      for (const a of [0, Math.PI / 2, Math.PI / 4, (3 * Math.PI) / 4]) {
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * r * 0.55, Math.sin(a) * r * 0.55);
+        ctx.lineTo(Math.cos(a) * r * 1.25, Math.sin(a) * r * 1.25);
+        ctx.stroke();
+      }
+    } else {
+      ctx.fillStyle = selected || preview
+        ? "rgba(138,122,98,0.45)"
+        : "rgba(138,122,98,0.28)";
+      ctx.strokeStyle = selected || preview ? "#5a4a32" : "#8a7a62";
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+    if (selected || preview) {
+      ctx.fillStyle = "rgba(20,32,41,0.8)";
+      ctx.font = "10px Source Sans 3, sans-serif";
+      ctx.fillText(obj.name, center.x + r + 3, center.y + 3);
     }
     return;
   }

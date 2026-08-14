@@ -758,6 +758,143 @@ function PoolNicheLight({
   );
 }
 
+function CoverFanMesh({
+  sx,
+  sy,
+  sz,
+  selected,
+  groupProps,
+  frame,
+}: {
+  sx: number;
+  sy: number;
+  sz: number;
+  selected: boolean;
+  groupProps: {
+    position: [number, number, number];
+    rotation: [number, number, number];
+  } & Record<string, unknown>;
+  frame?: { color?: CanvasTexture; roughness?: CanvasTexture };
+}) {
+  const bladesRef = useRef<THREE.Group>(null);
+  useFrame((_, dt) => {
+    if (bladesRef.current) bladesRef.current.rotation.y += dt * 1.8;
+  });
+  const span = Math.min(sx, sz);
+  const motorR = Math.max(0.06, span * 0.075);
+  return (
+    <group {...groupProps}>
+      <mesh position={[0, sy * 0.4, 0]} castShadow>
+        <cylinderGeometry args={[0.012, 0.012, sy * 0.22, 8]} />
+        <Mat
+          color="#4a5058"
+          metalness={0.5}
+          roughness={0.32}
+          selected={selected}
+        />
+      </mesh>
+      <mesh position={[0, sy * 0.12, 0]} castShadow>
+        <cylinderGeometry args={[motorR, motorR * 0.9, sy * 0.28, 18]} />
+        <Mat
+          map={frame?.color}
+          roughnessMap={frame?.roughness}
+          roughness={0.45}
+          selected={selected}
+        />
+      </mesh>
+      <group ref={bladesRef} position={[0, sy * 0.02, 0]}>
+        {Array.from({ length: 5 }, (_, i) => {
+          const a = (i / 5) * Math.PI * 2;
+          return (
+            <mesh
+              key={i}
+              position={[
+                Math.cos(a) * span * 0.22,
+                0,
+                Math.sin(a) * span * 0.22,
+              ]}
+              rotation={[-0.1, -a, 0.08]}
+              castShadow
+            >
+              <boxGeometry args={[span * 0.4, 0.012, span * 0.1]} />
+              <Mat
+                map={frame?.color}
+                roughnessMap={frame?.roughness}
+                roughness={0.5}
+                selected={selected}
+              />
+            </mesh>
+          );
+        })}
+      </group>
+    </group>
+  );
+}
+
+function CoverLightMesh({
+  sx,
+  sy,
+  sz,
+  selected,
+  groupProps,
+}: {
+  sx: number;
+  sy: number;
+  sz: number;
+  selected: boolean;
+  groupProps: {
+    position: [number, number, number];
+    rotation: [number, number, number];
+  } & Record<string, unknown>;
+}) {
+  const timeOfDay = useTimeOfDay();
+  const night = isNightTime(timeOfDay);
+  const boost = ledBoostForTimeOfDay(timeOfDay);
+  const r = Math.min(sx, sz);
+  return (
+    <group {...groupProps}>
+      <mesh position={[0, sy * 0.42, 0]} castShadow>
+        <cylinderGeometry args={[0.008, 0.008, sy * 0.16, 8]} />
+        <Mat
+          color="#3a3a40"
+          metalness={0.45}
+          roughness={0.35}
+          selected={selected}
+        />
+      </mesh>
+      <mesh position={[0, sy * 0.28, 0]} castShadow>
+        <cylinderGeometry args={[r * 0.28, r * 0.34, sy * 0.1, 14]} />
+        <Mat
+          color="#2a2a30"
+          metalness={0.35}
+          roughness={0.4}
+          selected={selected}
+        />
+      </mesh>
+      <mesh position={[0, 0, 0]} castShadow>
+        <cylinderGeometry args={[r * 0.3, r * 0.26, sy * 0.52, 16]} />
+        <Mat
+          color="#f4e4b8"
+          roughness={0.35}
+          opacity={0.82}
+          selected={selected}
+          emissive="#ffe9a8"
+          emissiveIntensity={night ? 1.15 * boost : 0.12}
+        />
+      </mesh>
+      {night ? (
+        <pointLight
+          position={[0, -sy * 0.08, 0]}
+          color="#ffe9a8"
+          intensity={3.4 * boost}
+          distance={7}
+          decay={2}
+        />
+      ) : null}
+    </group>
+  );
+}
+
 export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   const catalogId = desc.catalogItemId ?? "";
   const { x: sx, y: sy, z: sz } = desc.size;
@@ -806,7 +943,7 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
     );
   }
 
-  if (catalogId === "lounge_chair") {
+  if (catalogId === "lounge_chair" || catalogId === "sunshelf_chaise") {
     const frame = furnTex?.frame;
     const fabric = furnTex?.fabric;
     return (
@@ -1076,6 +1213,97 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
             roughness={0.88}
             selected={selected}
           />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (catalogId === "cover_fan") {
+    return (
+      <CoverFanMesh
+        sx={sx}
+        sy={sy}
+        sz={sz}
+        selected={selected}
+        groupProps={groupProps}
+        frame={furnTex?.frame ?? undefined}
+      />
+    );
+  }
+
+  if (catalogId === "cover_light") {
+    return (
+      <CoverLightMesh
+        sx={sx}
+        sy={sy}
+        sz={sz}
+        selected={selected}
+        groupProps={groupProps}
+      />
+    );
+  }
+
+  if (catalogId === "sunshelf_table") {
+    const r = Math.min(sx, sz);
+    const frame = furnTex?.frame;
+    return (
+      <group {...groupProps}>
+        <mesh position={[0, sy * 0.32, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[r * 0.48, r * 0.48, sy * 0.12, 24]} />
+          <Mat
+            map={frame?.color}
+            roughnessMap={frame?.roughness}
+            roughness={0.45}
+            selected={selected}
+          />
+        </mesh>
+        <mesh position={[0, -sy * 0.05, 0]} castShadow>
+          <cylinderGeometry args={[0.03, 0.04, sy * 0.62, 12]} />
+          <Mat
+            map={frame?.color}
+            roughnessMap={frame?.roughness}
+            roughness={0.5}
+            selected={selected}
+          />
+        </mesh>
+        <mesh position={[0, -sy * 0.42, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[r * 0.22, r * 0.26, 0.03, 16]} />
+          <Mat
+            map={frame?.color}
+            roughnessMap={frame?.roughness}
+            roughness={0.5}
+            selected={selected}
+          />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (catalogId === "umbrella_sleeve") {
+    const r = Math.min(sx, sz) * 0.48;
+    return (
+      <group {...groupProps}>
+        <mesh position={[0, sy * 0.12, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[r, r * 0.92, sy * 0.72, 20]} />
+          <Mat
+            color="#8a7a62"
+            metalness={0.45}
+            roughness={0.4}
+            selected={selected}
+          />
+        </mesh>
+        <mesh position={[0, sy * 0.38, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[r * 0.42, r * 1.05, 24]} />
+          <Mat
+            color="#c4b496"
+            metalness={0.5}
+            roughness={0.35}
+            selected={selected}
+          />
+        </mesh>
+        <mesh position={[0, sy * 0.18, 0]}>
+          <cylinderGeometry args={[r * 0.38, r * 0.34, sy * 0.7, 16]} />
+          <Mat color="#1a1c20" roughness={0.85} selected={selected} />
         </mesh>
       </group>
     );

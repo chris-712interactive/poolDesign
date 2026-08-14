@@ -20,6 +20,16 @@ describe("furniture finishes", () => {
       fabric: true,
       canopy: false,
     });
+    assert.deepEqual(furnitureFinishRoles("sunshelf_chaise"), {
+      frame: true,
+      fabric: true,
+      canopy: false,
+    });
+    assert.deepEqual(furnitureFinishRoles("cover_fan"), {
+      frame: true,
+      fabric: false,
+      canopy: false,
+    });
     assert.deepEqual(furnitureFinishRoles("umbrella"), {
       frame: false,
       fabric: false,

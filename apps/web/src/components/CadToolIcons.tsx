@@ -530,6 +530,16 @@ export function toolGroupForTool(
   }
   if (tool === "place") {
     if (!placeCatalogId) return "furniture";
+    if (placeCatalogId === "cover_fan" || placeCatalogId === "cover_light") {
+      return "cover";
+    }
+    if (
+      placeCatalogId === "sunshelf_chaise" ||
+      placeCatalogId === "sunshelf_table" ||
+      placeCatalogId === "umbrella_sleeve"
+    ) {
+      return "pool";
+    }
     if (
       placeCatalogId === "spa_bubbler" ||
       placeCatalogId === "spa_jet" ||

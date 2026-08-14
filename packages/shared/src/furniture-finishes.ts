@@ -202,12 +202,16 @@ export function furnitureFinishRoles(catalogItemId: string): {
 } {
   if (
     catalogItemId === "lounge_chair" ||
+    catalogItemId === "sunshelf_chaise" ||
     catalogItemId === "sofa_outdoor" ||
     catalogItemId === "dining_table_set" ||
     catalogItemId === "dining_table_rect" ||
     catalogItemId === "dining_table_round"
   ) {
     return { frame: true, fabric: true, canopy: false };
+  }
+  if (catalogItemId === "sunshelf_table" || catalogItemId === "cover_fan") {
+    return { frame: true, fabric: false, canopy: false };
   }
   if (catalogItemId === "umbrella") {
     return { frame: false, fabric: false, canopy: true };

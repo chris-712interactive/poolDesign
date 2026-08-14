@@ -16,6 +16,8 @@ import {
   type ToolRealm,
 } from "@/components/CadToolIcons";
 import {
+  isCoverAccessoryId,
+  isSunshelfLayoutId,
   fenceKindLabel,
   formatMoney,
   gateKindLabel,
@@ -412,6 +414,38 @@ export function CadToolPalette({
                         3-click rectangle: side, then depth. Links to nearest
                         patio when possible.
                       </p>
+                      <strong className="cad-tool-subgroup-label">
+                        Fans & lights
+                      </strong>
+                      <div className="cad-compact-list">
+                        {placeLibrary
+                          .filter((item) => isCoverAccessoryId(item.id))
+                          .map((item) => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className="card-link"
+                              style={{
+                                textAlign: "left",
+                                padding: "0.65rem 0.75rem",
+                                borderColor:
+                                  tool === "place" && placeItemId === item.id
+                                    ? "var(--accent)"
+                                    : undefined,
+                              }}
+                              onClick={() => activatePlace(item.id, "cover")}
+                            >
+                              <strong>{item.name}</strong>
+                              <div
+                                className="muted"
+                                style={{ fontSize: "0.8rem" }}
+                              >
+                                {item.description ?? "Cover"} ·{" "}
+                                {formatMoney(item.unitPriceCents)}
+                              </div>
+                            </button>
+                          ))}
+                      </div>
                     </>
                   )}
 
@@ -570,6 +604,39 @@ export function CadToolPalette({
                             </div>
                           </button>
                         ))}
+                      </div>
+                      <strong className="cad-tool-subgroup-label">
+                        Sunshelf
+                      </strong>
+                      <div className="cad-compact-list">
+                        {placeLibrary
+                          .filter((item) => isSunshelfLayoutId(item.id))
+                          .map((item) => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className="card-link"
+                              style={{
+                                textAlign: "left",
+                                padding: "0.65rem 0.75rem",
+                                borderColor:
+                                  tool === "place" && placeItemId === item.id
+                                    ? "var(--accent)"
+                                    : undefined,
+                              }}
+                              onClick={() => activatePlace(item.id, "pool")}
+                            >
+                              <strong>{item.name}</strong>
+                              <div
+                                className="muted"
+                                style={{ fontSize: "0.8rem" }}
+                              >
+                                {item.category === "furniture"
+                                  ? "Layout only · not billed"
+                                  : `${item.description ?? "Sunshelf"} · ${formatMoney(item.unitPriceCents)}`}
+                              </div>
+                            </button>
+                          ))}
                       </div>
                     </>
                   )}

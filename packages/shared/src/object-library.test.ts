@@ -16,6 +16,10 @@ describe("dining set sizing", () => {
     assert.ok(ids.includes("dining_table_rect"));
     assert.ok(ids.includes("dining_table_round"));
     assert.ok(!ids.includes("dining_table_set"));
+    assert.ok(ids.includes("cover_fan"));
+    assert.ok(ids.includes("cover_light"));
+    assert.ok(ids.includes("sunshelf_chaise"));
+    assert.ok(ids.includes("umbrella_sleeve"));
   });
 
   it("adds chair clearance around the tabletop", () => {

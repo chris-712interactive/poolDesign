@@ -58,6 +58,36 @@ describe("buildTakeoff", () => {
         widthMm: 2 * FT,
         depthMm: 2 * FT,
       },
+      {
+        id: "o4",
+        catalogItemId: "sunshelf_chaise",
+        name: "Sunshelf chaise",
+        position: { x: 0, y: 2000 },
+        rotationDeg: 0,
+        layerId: "furniture",
+        widthMm: 2 * FT,
+        depthMm: 5.5 * FT,
+      },
+      {
+        id: "o5",
+        catalogItemId: "umbrella_sleeve",
+        name: "Pole holder",
+        position: { x: 500, y: 2000 },
+        rotationDeg: 0,
+        layerId: "furniture",
+        widthMm: 150,
+        depthMm: 150,
+      },
+      {
+        id: "o6",
+        catalogItemId: "cover_fan",
+        name: "Patio ceiling fan",
+        position: { x: 3000, y: 0 },
+        rotationDeg: 0,
+        layerId: "furniture",
+        widthMm: 1320,
+        depthMm: 1320,
+      },
     ];
 
     const takeoff = buildTakeoff(design, "imperial");
@@ -65,7 +95,12 @@ describe("buildTakeoff", () => {
     assert.ok(
       !takeoff.lines.some((l) => l.catalogItemId === "dining_table_rect"),
     );
+    assert.ok(
+      !takeoff.lines.some((l) => l.catalogItemId === "sunshelf_chaise"),
+    );
     assert.ok(takeoff.lines.some((l) => l.catalogItemId === "planter"));
+    assert.ok(takeoff.lines.some((l) => l.catalogItemId === "umbrella_sleeve"));
+    assert.ok(takeoff.lines.some((l) => l.catalogItemId === "cover_fan"));
   });
 
   it("honors removed auto lines and custom adds", () => {
