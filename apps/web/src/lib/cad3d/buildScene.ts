@@ -68,6 +68,7 @@ import {
   resolveInfinityEdges,
   infinityOmitIntervals,
   infinityTroughPolygon,
+  siteLineSegments,
   type BuildingOpeningKind,
   type DepthTransition,
   type DesignDocument,
@@ -138,6 +139,8 @@ export type SceneMaterialKey =
 export type SceneBuildOptions = {
   /** Draw underground plumbing tubes (off by default). */
   showPlumbing?: boolean;
+  /** Draw property lines / easements on the ground. */
+  showSiteLines?: boolean;
   /** Omit patio/deck slabs for cutaway review. */
   hideDeck?: boolean;
 };
@@ -406,6 +409,17 @@ export type TerrainDescriptor = {
   heightsM: number[];
 };
 
+/** Survey overlay painted on the ground (property line / easement). */
+export type GroundMarkDescriptor = {
+  kind: "groundMark";
+  id: string;
+  /** World-space samples already lifted onto grade. */
+  points: { x: number; y: number; z: number }[];
+  widthM: number;
+  colorHex: string;
+  opacity?: number;
+};
+
 export type MeshDescriptor =
   | ExtrudeDescriptor
   | BoxDescriptor
@@ -415,7 +429,8 @@ export type MeshDescriptor =
   | TubeDescriptor
   | TerrainDescriptor
   | FencePanelDescriptor
-  | WallPanelDescriptor;
+  | WallPanelDescriptor
+  | GroundMarkDescriptor;
 
 export type SceneModel = {
   center: { x: number; z: number };
@@ -1985,6 +2000,99 @@ function rackedLeafPoint(
   };
 }
 
+type WorldMarkPt = { x: number; y: number; z: number };
+
+function densifyWorldPolyline(
+  plan: PointMm[],
+  closed: boolean,
+  heightAt: (p: PointMm) => number,
+  stepMm = 700,
+): WorldMarkPt[] {
+  const segs = siteLineSegments({
+    id: "",
+    name: "",
+    kind: "property",
+    points: plan,
+    closed,
+  });
+  const out: WorldMarkPt[] = [];
+  const lift = 0.04;
+  for (let s = 0; s < segs.length; s++) {
+    const [a, b] = segs[s];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.max(1, Math.ceil(len / stepMm));
+    const start = s === 0 ? 0 : 1;
+    for (let i = start; i <= n; i++) {
+      const t = i / n;
+      const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      const xz = planToWorldXZ(p);
+      out.push({ x: xz.x, y: heightAt(p) + lift, z: xz.z });
+    }
+  }
+  return out;
+}
+
+function polylineLengthM(pts: WorldMarkPt[]): number {
+  let sum = 0;
+  for (let i = 1; i < pts.length; i++) {
+    sum += Math.hypot(
+      pts[i].x - pts[i - 1].x,
+      pts[i].y - pts[i - 1].y,
+      pts[i].z - pts[i - 1].z,
+    );
+  }
+  return sum;
+}
+
+function pointAlongPolyline(pts: WorldMarkPt[], distM: number): WorldMarkPt {
+  if (pts.length === 0) return { x: 0, y: 0, z: 0 };
+  if (distM <= 0) return pts[0];
+  let remain = distM;
+  for (let i = 1; i < pts.length; i++) {
+    const dx = pts[i].x - pts[i - 1].x;
+    const dy = pts[i].y - pts[i - 1].y;
+    const dz = pts[i].z - pts[i - 1].z;
+    const len = Math.hypot(dx, dy, dz) || 1e-6;
+    if (remain <= len) {
+      const t = remain / len;
+      return {
+        x: pts[i - 1].x + dx * t,
+        y: pts[i - 1].y + dy * t,
+        z: pts[i - 1].z + dz * t,
+      };
+    }
+    remain -= len;
+  }
+  return pts[pts.length - 1];
+}
+
+function dashedWorldChains(
+  pts: WorldMarkPt[],
+  dashM = 0.9,
+  gapM = 0.5,
+): WorldMarkPt[][] {
+  const total = polylineLengthM(pts);
+  if (pts.length < 2 || total < 0.05) return pts.length >= 2 ? [pts] : [];
+  const chains: WorldMarkPt[][] = [];
+  let d = 0;
+  let on = true;
+  while (d < total - 0.04) {
+    const span = on ? dashM : gapM;
+    const d1 = Math.min(total, d + span);
+    if (on) {
+      const samples: WorldMarkPt[] = [pointAlongPolyline(pts, d)];
+      const inner = Math.max(1, Math.ceil((d1 - d) / 0.55));
+      for (let i = 1; i <= inner; i++) {
+        samples.push(pointAlongPolyline(pts, d + ((d1 - d) * i) / inner));
+      }
+      chains.push(samples);
+    }
+    d = d1;
+    on = !on;
+  }
+  return chains.filter((c) => c.length >= 2);
+}
+
 export function buildSceneModel(
   designInput: DesignDocument,
   options: SceneBuildOptions = {},
@@ -3189,6 +3297,53 @@ export function buildSceneModel(
         : {}),
       select: { kind: "run", id: run.id },
     });
+  }
+
+  if (options.showSiteLines) {
+    const deckTopY = mmToMeters(PATIO_SLAB_THICKNESS_MM);
+    const patios = design.patios ?? [];
+    const markY = (plan: PointMm): number => {
+      for (const patio of patios) {
+        if (patio.outline.length >= 3 && pointInPolygon(plan, patio.outline)) {
+          return deckTopY;
+        }
+      }
+      return -mmToMeters(existingGradeDropMm(plan, gradeSamples));
+    };
+    let markI = 0;
+    for (const line of design.siteLines ?? []) {
+      if (line.points.length < 2) continue;
+      const samples = densifyWorldPolyline(
+        line.points,
+        line.closed === true,
+        markY,
+      );
+      if (samples.length < 2) continue;
+      const isEasement = line.kind === "easement";
+      const recordedW = isEasement ? line.widthMm ?? 0 : 0;
+      if (isEasement && recordedW > 8) {
+        meshes.push({
+          kind: "groundMark",
+          id: `siteline_${line.id}_band_${markI++}`,
+          points: samples,
+          widthM: Math.max(0.35, mmToMeters(recordedW)),
+          colorHex: "#6b3fa0",
+          opacity: 0.32,
+        });
+      }
+      const centerWidth = isEasement ? 0.1 : 0.16;
+      const color = isEasement ? "#c9a6f0" : "#e8c547";
+      for (const chain of dashedWorldChains(samples)) {
+        meshes.push({
+          kind: "groundMark",
+          id: `siteline_${line.id}_dash_${markI++}`,
+          points: chain,
+          widthM: centerWidth,
+          colorHex: color,
+          opacity: 0.92,
+        });
+      }
+    }
   }
 
   if (layerVisible(design, "fence")) {

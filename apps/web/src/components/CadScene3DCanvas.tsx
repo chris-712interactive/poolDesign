@@ -42,6 +42,7 @@ import {
   type TubeDescriptor,
   type WallPanelDescriptor,
   type WaterBodyDescriptor,
+  type GroundMarkDescriptor,
 } from "@/lib/cad3d/buildScene";
 import {
   loadCameraPose,
@@ -1879,6 +1880,71 @@ function WaterBodyMesh({
   );
 }
 
+function GroundMarkMesh({ desc }: { desc: GroundMarkDescriptor }) {
+  const clippingPlanes = useContext(ClipPlanesContext);
+  const geometry = useMemo(() => {
+    const pts = desc.points;
+    if (pts.length < 2) return new THREE.BufferGeometry();
+    const hw = Math.max(0.04, desc.widthM) / 2;
+    const verts: number[] = [];
+    const norms: number[] = [];
+    const indices: number[] = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const px = (-dz / len) * hw;
+      const pz = (dx / len) * hw;
+      const base = verts.length / 3;
+      verts.push(
+        a.x + px,
+        a.y,
+        a.z + pz,
+        a.x - px,
+        a.y,
+        a.z - pz,
+        b.x - px,
+        b.y,
+        b.z - pz,
+        b.x + px,
+        b.y,
+        b.z + pz,
+      );
+      for (let k = 0; k < 4; k++) norms.push(0, 1, 0);
+      indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    geo.setAttribute("normal", new THREE.Float32BufferAttribute(norms, 3));
+    geo.setIndex(indices);
+    return geo;
+  }, [desc]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  const opacity = desc.opacity ?? 0.9;
+  const transparent = opacity < 0.99;
+
+  return (
+    <mesh geometry={geometry} renderOrder={4} frustumCulled={false}>
+      <meshStandardMaterial
+        color={desc.colorHex}
+        roughness={0.85}
+        metalness={0}
+        transparent={transparent}
+        opacity={opacity}
+        depthWrite={!transparent}
+        polygonOffset
+        polygonOffsetFactor={-2}
+        polygonOffsetUnits={-2}
+        clippingPlanes={clippingPlanes}
+        clipShadows={clippingPlanes.length > 0}
+      />
+    </mesh>
+  );
+}
+
 function TubeMesh({
   desc,
   selected,
@@ -2016,6 +2082,9 @@ function SceneMeshes({
               onSelect={onSelect}
             />
           );
+        }
+        if (m.kind === "groundMark") {
+          return <GroundMarkMesh key={m.id} desc={m} />;
         }
         return (
           <TubeMesh
@@ -2448,6 +2517,7 @@ export function CadScene3DCanvas({
   exportHandleRef,
 }: Props) {
   const [showPlumbing, setShowPlumbing] = useState(false);
+  const [showSiteLines, setShowSiteLines] = useState(true);
   const [hideDeck, setHideDeck] = useState(false);
   const [viewPreset, setViewPreset] = useState<ViewPresetId>("default");
   const [walkMode, setWalkMode] = useState(false);
@@ -2490,9 +2560,10 @@ export function CadScene3DCanvas({
     () =>
       buildSceneModel(design, {
         showPlumbing,
+        showSiteLines,
         hideDeck: effectiveHideDeck,
       }),
-    [design, showPlumbing, effectiveHideDeck],
+    [design, showPlumbing, showSiteLines, effectiveHideDeck],
   );
   const labels = useMemo(
     () => selectionReadouts(design, selection),
@@ -2607,6 +2678,20 @@ export function CadScene3DCanvas({
             title="Show buried trench plumbing from the pool/spa to the pad"
           >
             Buried pipes
+          </button>
+          <button
+            type="button"
+            className={`btn secondary cad-scene3d-tool-btn ${showSiteLines ? "active" : ""}`}
+            onClick={() => setShowSiteLines((v) => !v)}
+            aria-pressed={showSiteLines}
+            disabled={!(design.siteLines ?? []).some((l) => l.points.length >= 2)}
+            title={
+              (design.siteLines ?? []).some((l) => l.points.length >= 2)
+                ? "Show property lines and easements on the ground"
+                : "Trace a property line or easement in 2D first"
+            }
+          >
+            Lot lines
           </button>
           <button
             type="button"

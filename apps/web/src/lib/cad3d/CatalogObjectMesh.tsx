@@ -852,32 +852,34 @@ function CoverLightMesh({
   const boost = ledBoostForTimeOfDay(timeOfDay);
   const r = Math.min(sx, sz);
   const spotRef = useRef<THREE.SpotLight>(null);
-  const fillRef = useRef<THREE.SpotLight>(null);
-  const spotTargetRef = useRef<THREE.Object3D>(null);
-  const fillTargetRef = useRef<THREE.Object3D>(null);
-  // Spots only — a point light is omni and shines up through the roof
-  // onto the house. Cone is aimed at −Y (patio), never above the soffit.
-  const spotIntensity = (night ? 14 : 0) * boost;
-  const fillIntensity = (night ? 5.5 : 0) * boost;
+  const targetRef = useRef<THREE.Object3D>(null);
+  // Downlight only. Three.js does not occlude lights unless the lamp casts
+  // shadows and the roof is in that shadow map — a point/spot with no
+  // shadows shines through the cover onto the second story.
+  const intensity = (night ? 12 : 0) * boost;
 
   useLayoutEffect(() => {
-    if (spotRef.current && spotTargetRef.current) {
-      spotRef.current.target = spotTargetRef.current;
-    }
-    if (fillRef.current && fillTargetRef.current) {
-      fillRef.current.target = fillTargetRef.current;
-    }
-  }, []);
+    const light = spotRef.current;
+    const target = targetRef.current;
+    if (!light || !target) return;
+    light.target = target;
+    target.updateMatrixWorld();
+    const cam = light.shadow.camera;
+    cam.near = 0.12;
+    cam.far = 8;
+    cam.updateProjectionMatrix();
+    light.shadow.bias = -0.00018;
+    light.shadow.normalBias = 0.025;
+  });
 
   useFrame(() => {
     spotRef.current?.target.updateMatrixWorld();
-    fillRef.current?.target.updateMatrixWorld();
   });
 
   return (
     <group {...groupProps}>
-      <object3D ref={spotTargetRef} position={[0, -10, 0]} />
-      <object3D ref={fillTargetRef} position={[0, -8, 0]} />
+      {/* Sibling target at local −Y so the cone stays on the patio. */}
+      <object3D ref={targetRef} position={[0, -10, 0]} />
       <mesh position={[0, sy * 0.42, 0]} castShadow>
         <cylinderGeometry args={[0.008, 0.008, sy * 0.16, 8]} />
         <Mat
@@ -887,7 +889,6 @@ function CoverLightMesh({
           selected={selected}
         />
       </mesh>
-      {/* Opaque shade — blocks upward glow into the roof / second story. */}
       <mesh position={[0, sy * 0.3, 0]} castShadow>
         <cylinderGeometry args={[r * 0.42, r * 0.36, sy * 0.12, 16]} />
         <Mat
@@ -897,7 +898,11 @@ function CoverLightMesh({
           selected={selected}
         />
       </mesh>
-      <mesh position={[0, sy * 0.36, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow>
+      <mesh
+        position={[0, sy * 0.36, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        castShadow
+      >
         <circleGeometry args={[r * 0.44, 16]} />
         <Mat
           color="#1a1a20"
@@ -914,33 +919,22 @@ function CoverLightMesh({
           opacity={0.82}
           selected={selected}
           emissive="#ffe9a8"
-          emissiveIntensity={night ? 0.85 * boost : 0.12}
+          emissiveIntensity={night ? 0.7 * boost : 0.12}
         />
       </mesh>
-      {night ? (
-        <>
-          <spotLight
-            ref={spotRef}
-            color="#ffe9a8"
-            intensity={spotIntensity}
-            distance={8}
-            decay={1.7}
-            angle={Math.PI / 2.6}
-            penumbra={0.5}
-            position={[0, -sy * 0.32, 0]}
-          />
-          <spotLight
-            ref={fillRef}
-            color="#ffe9a8"
-            intensity={fillIntensity}
-            distance={6.5}
-            decay={1.8}
-            angle={Math.PI / 2.15}
-            penumbra={0.7}
-            position={[0, -sy * 0.32, 0]}
-          />
-        </>
-      ) : null}
+      <spotLight
+        ref={spotRef}
+        color="#ffe9a8"
+        intensity={intensity}
+        distance={7.5}
+        decay={2}
+        angle={Math.PI / 3.4}
+        penumbra={0.45}
+        position={[0, -sy * 0.38, 0]}
+        castShadow={night}
+        shadow-mapSize-width={512}
+        shadow-mapSize-height={512}
+      />
     </group>
   );
 }
