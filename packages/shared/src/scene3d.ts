@@ -137,6 +137,9 @@ export function designBoundsMm(design: DesignDocument): DesignBoundsMm {
   for (const f of design.fences ?? []) {
     include(f.points);
   }
+  for (const line of design.siteLines ?? []) {
+    include(line.points);
+  }
 
   if (!Number.isFinite(minX)) {
     return {

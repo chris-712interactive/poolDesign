@@ -416,6 +416,8 @@ export type GroundMarkDescriptor = {
   /** World-space samples already lifted onto grade. */
   points: { x: number; y: number; z: number }[];
   widthM: number;
+  /** Extrude up so the mark is a curb, not a coplanar decal. */
+  heightM?: number;
   colorHex: string;
   opacity?: number;
 };
@@ -2016,7 +2018,7 @@ function densifyWorldPolyline(
     closed,
   });
   const out: WorldMarkPt[] = [];
-  const lift = 0.04;
+  const lift = 0.03;
   for (let s = 0; s < segs.length; s++) {
     const [a, b] = segs[s];
     const len = Math.hypot(b.x - a.x, b.y - a.y);
@@ -3326,21 +3328,23 @@ export function buildSceneModel(
           kind: "groundMark",
           id: `siteline_${line.id}_band_${markI++}`,
           points: samples,
-          widthM: Math.max(0.35, mmToMeters(recordedW)),
-          colorHex: "#6b3fa0",
-          opacity: 0.32,
+          widthM: Math.max(0.45, mmToMeters(recordedW)),
+          heightM: 0.04,
+          colorHex: "#7b4bb8",
+          opacity: 0.55,
         });
       }
-      const centerWidth = isEasement ? 0.1 : 0.16;
-      const color = isEasement ? "#c9a6f0" : "#e8c547";
-      for (const chain of dashedWorldChains(samples)) {
+      const centerWidth = isEasement ? 0.18 : 0.28;
+      const color = isEasement ? "#e2c8ff" : "#ffd24a";
+      for (const chain of dashedWorldChains(samples, 1.2, 0.45)) {
         meshes.push({
           kind: "groundMark",
           id: `siteline_${line.id}_dash_${markI++}`,
           points: chain,
           widthM: centerWidth,
+          heightM: 0.08,
           colorHex: color,
-          opacity: 0.92,
+          opacity: 1,
         });
       }
     }

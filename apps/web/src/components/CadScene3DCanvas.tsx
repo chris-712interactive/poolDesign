@@ -493,6 +493,7 @@ function SelectableMaterial({
       opacity={opacity ?? 1}
       // Opaque shells keep DoubleSide for cutaways; water uses FrontSide above.
       side={THREE.DoubleSide}
+      shadowSide={THREE.DoubleSide}
       depthWrite={!transparent}
       envMapIntensity={mat.envMapIntensity ?? 0.85}
       emissive={selected ? "#1f8a70" : "#000000"}
@@ -1885,10 +1886,42 @@ function GroundMarkMesh({ desc }: { desc: GroundMarkDescriptor }) {
   const geometry = useMemo(() => {
     const pts = desc.points;
     if (pts.length < 2) return new THREE.BufferGeometry();
-    const hw = Math.max(0.04, desc.widthM) / 2;
+    const hw = Math.max(0.06, desc.widthM) / 2;
+    const h = Math.max(0.03, desc.heightM ?? 0.08);
     const verts: number[] = [];
     const norms: number[] = [];
     const indices: number[] = [];
+
+    const pushTri = (
+      ax: number,
+      ay: number,
+      az: number,
+      bx: number,
+      by: number,
+      bz: number,
+      cx: number,
+      cy: number,
+      cz: number,
+    ) => {
+      const base = verts.length / 3;
+      verts.push(ax, ay, az, bx, by, bz, cx, cy, cz);
+      const e1x = bx - ax;
+      const e1y = by - ay;
+      const e1z = bz - az;
+      const e2x = cx - ax;
+      const e2y = cy - ay;
+      const e2z = cz - az;
+      let nx = e1y * e2z - e1z * e2y;
+      let ny = e1z * e2x - e1x * e2z;
+      let nz = e1x * e2y - e1y * e2x;
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      nx /= nl;
+      ny /= nl;
+      nz /= nl;
+      norms.push(nx, ny, nz, nx, ny, nz, nx, ny, nz);
+      indices.push(base, base + 1, base + 2);
+    };
+
     for (let i = 0; i < pts.length - 1; i++) {
       const a = pts[i];
       const b = pts[i + 1];
@@ -1897,23 +1930,25 @@ function GroundMarkMesh({ desc }: { desc: GroundMarkDescriptor }) {
       const len = Math.hypot(dx, dz) || 1;
       const px = (-dz / len) * hw;
       const pz = (dx / len) * hw;
-      const base = verts.length / 3;
-      verts.push(
-        a.x + px,
-        a.y,
-        a.z + pz,
-        a.x - px,
-        a.y,
-        a.z - pz,
-        b.x - px,
-        b.y,
-        b.z - pz,
-        b.x + px,
-        b.y,
-        b.z + pz,
-      );
-      for (let k = 0; k < 4; k++) norms.push(0, 1, 0);
-      indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      const a0 = { x: a.x + px, y: a.y, z: a.z + pz };
+      const a1 = { x: a.x - px, y: a.y, z: a.z - pz };
+      const b0 = { x: b.x + px, y: b.y, z: b.z + pz };
+      const b1 = { x: b.x - px, y: b.y, z: b.z - pz };
+      const a0t = { x: a0.x, y: a.y + h, z: a0.z };
+      const a1t = { x: a1.x, y: a.y + h, z: a1.z };
+      const b0t = { x: b0.x, y: b.y + h, z: b0.z };
+      const b1t = { x: b1.x, y: b.y + h, z: b1.z };
+      // Top
+      pushTri(a0t.x, a0t.y, a0t.z, b0t.x, b0t.y, b0t.z, b1t.x, b1t.y, b1t.z);
+      pushTri(a0t.x, a0t.y, a0t.z, b1t.x, b1t.y, b1t.z, a1t.x, a1t.y, a1t.z);
+      // Bottom (facing down)
+      pushTri(a0.x, a0.y, a0.z, b1.x, b1.y, b1.z, b0.x, b0.y, b0.z);
+      pushTri(a0.x, a0.y, a0.z, a1.x, a1.y, a1.z, b1.x, b1.y, b1.z);
+      // Sides
+      pushTri(a0.x, a0.y, a0.z, b0.x, b0.y, b0.z, b0t.x, b0t.y, b0t.z);
+      pushTri(a0.x, a0.y, a0.z, b0t.x, b0t.y, b0t.z, a0t.x, a0t.y, a0t.z);
+      pushTri(a1.x, a1.y, a1.z, a1t.x, a1t.y, a1t.z, b1t.x, b1t.y, b1t.z);
+      pushTri(a1.x, a1.y, a1.z, b1t.x, b1t.y, b1t.z, b1.x, b1.y, b1.z);
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
@@ -1923,23 +1958,22 @@ function GroundMarkMesh({ desc }: { desc: GroundMarkDescriptor }) {
   }, [desc]);
 
   useEffect(() => () => geometry.dispose(), [geometry]);
-  const opacity = desc.opacity ?? 0.9;
+  const opacity = desc.opacity ?? 1;
   const transparent = opacity < 0.99;
 
   return (
-    <mesh geometry={geometry} renderOrder={4} frustumCulled={false}>
-      <meshStandardMaterial
+    <mesh geometry={geometry} renderOrder={5} frustumCulled={false} castShadow={false}>
+      <meshBasicMaterial
         color={desc.colorHex}
-        roughness={0.85}
-        metalness={0}
         transparent={transparent}
         opacity={opacity}
         depthWrite={!transparent}
+        side={THREE.DoubleSide}
+        toneMapped={false}
         polygonOffset
-        polygonOffsetFactor={-2}
-        polygonOffsetUnits={-2}
+        polygonOffsetFactor={-4}
+        polygonOffsetUnits={-4}
         clippingPlanes={clippingPlanes}
-        clipShadows={clippingPlanes.length > 0}
       />
     </mesh>
   );

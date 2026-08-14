@@ -851,35 +851,27 @@ function CoverLightMesh({
   const night = isNightTime(timeOfDay);
   const boost = ledBoostForTimeOfDay(timeOfDay);
   const r = Math.min(sx, sz);
-  const spotRef = useRef<THREE.SpotLight>(null);
-  const targetRef = useRef<THREE.Object3D>(null);
-  // Downlight only. Three.js does not occlude lights unless the lamp casts
-  // shadows and the roof is in that shadow map — a point/spot with no
-  // shadows shines through the cover onto the second story.
-  const intensity = (night ? 12 : 0) * boost;
+  const lightRef = useRef<THREE.PointLight>(null);
+  // Omni wash under the roof. Cube-map shadows (and the opaque cover slab)
+  // keep the beam from punching through onto the second story.
+  const intensity = (night ? 11 : 0) * boost;
 
   useLayoutEffect(() => {
-    const light = spotRef.current;
-    const target = targetRef.current;
-    if (!light || !target) return;
-    light.target = target;
-    target.updateMatrixWorld();
+    const light = lightRef.current;
+    if (!light) return;
     const cam = light.shadow.camera;
-    cam.near = 0.12;
-    cam.far = 8;
+    // Fixture hangs ~0.23 m below the soffit. If near ≥ that, the roof is
+    // clipped out of the cube map and light leaks onto the second story.
+    cam.near = 0.05;
+    cam.far = 12;
     cam.updateProjectionMatrix();
-    light.shadow.bias = -0.00018;
-    light.shadow.normalBias = 0.025;
-  });
-
-  useFrame(() => {
-    spotRef.current?.target.updateMatrixWorld();
+    light.shadow.bias = -0.002;
+    light.shadow.normalBias = 0.035;
+    light.shadow.radius = 2;
   });
 
   return (
     <group {...groupProps}>
-      {/* Sibling target at local −Y so the cone stays on the patio. */}
-      <object3D ref={targetRef} position={[0, -10, 0]} />
       <mesh position={[0, sy * 0.42, 0]} castShadow>
         <cylinderGeometry args={[0.008, 0.008, sy * 0.16, 8]} />
         <Mat
@@ -911,7 +903,7 @@ function CoverLightMesh({
           selected={selected}
         />
       </mesh>
-      <mesh position={[0, -sy * 0.04, 0]} castShadow>
+      <mesh position={[0, -sy * 0.04, 0]}>
         <cylinderGeometry args={[r * 0.28, r * 0.24, sy * 0.48, 16]} />
         <Mat
           color="#f4e4b8"
@@ -922,15 +914,13 @@ function CoverLightMesh({
           emissiveIntensity={night ? 0.7 * boost : 0.12}
         />
       </mesh>
-      <spotLight
-        ref={spotRef}
+      <pointLight
+        ref={lightRef}
         color="#ffe9a8"
         intensity={intensity}
-        distance={7.5}
+        distance={9}
         decay={2}
-        angle={Math.PI / 3.4}
-        penumbra={0.45}
-        position={[0, -sy * 0.38, 0]}
+        position={[0, -sy * 0.04, 0]}
         castShadow={night}
         shadow-mapSize-width={512}
         shadow-mapSize-height={512}
