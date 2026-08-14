@@ -70,6 +70,17 @@ describe("grade-walk", () => {
     assert.equal(samples[1].dropMm, 457.2);
   });
 
+  it("maps heading 30° to 11 o'clock and 150° to 7 o'clock", () => {
+    const origin = { x: 0, y: 0 };
+    const at30 = pointAlongBearing(origin, 30, 1000);
+    const at150 = pointAlongBearing(origin, 150, 1000);
+    // 0° = up (−Y); 30° = up-left; 150° = down-left.
+    assert.ok(Math.abs(at30.x + 500) < 1);
+    assert.ok(Math.abs(at30.y + 866.025) < 1);
+    assert.ok(Math.abs(at150.x + 500) < 1);
+    assert.ok(Math.abs(at150.y - 866.025) < 1);
+  });
+
   it("places a walk from a signed plan origin (house corner in −X/−Y)", () => {
     const origin = { x: -1.48 * 304.8, y: -37.61 * 304.8 };
     const samples = gradeWalkToSamples({

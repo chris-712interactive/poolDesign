@@ -16,6 +16,7 @@ import {
   segmentLengthMm,
   siteLineEdgeTag,
   siteLineSegments,
+  bearingToUnitVector,
   type Building,
   type BuildingOpening,
   type FenceGate,
@@ -1059,7 +1060,10 @@ export function drawGradeSample(
 ) {
   const c = worldToScreen(sample.position, vp);
   const r = selected ? 7 : 5.5;
-  const rad = ((sample.rotationDeg || 0) * Math.PI) / 180;
+  // Same heading as the walk / rotation handle (0° = up on the plan).
+  const heading = bearingToUnitVector(sample.rotationDeg || 0);
+  const along =
+    sample.dropMm >= 0 ? heading : { x: -heading.x, y: -heading.y };
   ctx.save();
   ctx.beginPath();
   ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
@@ -1068,26 +1072,20 @@ export function drawGradeSample(
   ctx.strokeStyle = selected ? "#0d3a4a" : "#1a5a6a";
   ctx.lineWidth = selected ? 2.2 : 1.4;
   ctx.stroke();
-  // Drop / rise arrow (oriented by rotationDeg)
-  ctx.save();
-  ctx.translate(c.x, c.y);
-  ctx.rotate(rad);
   ctx.beginPath();
-  if (sample.dropMm >= 0) {
-    ctx.moveTo(0, -12);
-    ctx.lineTo(0, 14);
-    ctx.moveTo(-4, 9);
-    ctx.lineTo(0, 14);
-    ctx.lineTo(4, 9);
-  } else {
-    ctx.moveTo(0, 12);
-    ctx.lineTo(0, -14);
-    ctx.moveTo(-4, -9);
-    ctx.lineTo(0, -14);
-    ctx.lineTo(4, -9);
-  }
+  const tail = 12;
+  const tip = 14;
+  const barb = 5;
+  const hx = along.x * tip;
+  const hy = along.y * tip;
+  const px = -along.y;
+  const py = along.x;
+  ctx.moveTo(c.x - along.x * tail, c.y - along.y * tail);
+  ctx.lineTo(c.x + hx, c.y + hy);
+  ctx.moveTo(c.x + hx - along.x * barb + px * 4, c.y + hy - along.y * barb + py * 4);
+  ctx.lineTo(c.x + hx, c.y + hy);
+  ctx.lineTo(c.x + hx - along.x * barb - px * 4, c.y + hy - along.y * barb - py * 4);
   ctx.stroke();
-  ctx.restore();
   const label =
     sample.dropMm >= 0
       ? `↓ ${formatLength(sample.dropMm, unitSystem)}`
@@ -1099,8 +1097,8 @@ export function drawGradeSample(
   if (selected) {
     const dist = 600 * vp.scale;
     const handle = {
-      x: c.x - Math.sin(rad) * dist,
-      y: c.y - Math.cos(rad) * dist,
+      x: c.x + heading.x * dist,
+      y: c.y + heading.y * dist,
     };
     ctx.strokeStyle = "#1a5a6a";
     ctx.lineWidth = 1.4;

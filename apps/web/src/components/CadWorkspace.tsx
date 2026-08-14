@@ -4112,7 +4112,7 @@ export function CadWorkspace({
                       </button>
                     </div>
                     <div className="field">
-                      <label htmlFor="grade-rot">Rotation (degrees)</label>
+                      <label htmlFor="grade-rot">Walk heading (0° = up)</label>
                       <input
                         id="grade-rot"
                         type="number"

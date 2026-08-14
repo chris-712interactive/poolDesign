@@ -227,10 +227,13 @@ export function GradeWalkPanel({
           <input value={originY} onChange={(e) => setOriginY(e.target.value)} />
         </div>
         <div className="field" style={{ flex: "1 1 5rem" }}>
-          <label>Rotation °</label>
+          <label>Heading ° (0 = up)</label>
           <input value={bearing} onChange={(e) => setBearing(e.target.value)} />
         </div>
       </div>
+      <p className="muted" style={{ margin: 0, fontSize: "0.8rem" }}>
+        0° is up on the plan, 90° is left. The walk follows this heading.
+      </p>
       {rows.map((row, i) => (
         <div key={i} className="row" style={{ gap: "0.5rem" }}>
           <div className="field" style={{ flex: 1 }}>
