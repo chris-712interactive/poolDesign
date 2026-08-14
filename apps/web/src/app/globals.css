@@ -823,10 +823,17 @@ textarea {
   position: absolute;
   left: 0.75rem;
   bottom: 0.65rem;
-  right: 0.75rem;
+  z-index: 2;
   pointer-events: none;
+  width: fit-content;
+  max-width: calc(100% - 1.5rem);
+  padding: 0.35rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(244, 247, 245, 0.94);
+  color: var(--panel-ink);
   font-size: 0.8rem;
-  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.7);
+  font-weight: 600;
+  box-shadow: 0 1px 6px rgba(8, 20, 28, 0.28);
 }
 
 .cad-scene3d-walk-veil {
@@ -938,22 +945,49 @@ textarea {
   flex-wrap: wrap;
   gap: 0.35rem;
   pointer-events: auto;
+  padding: 0.28rem;
+  border-radius: 12px;
+  background: rgba(244, 247, 245, 0.94);
+  box-shadow: 0 1px 6px rgba(8, 20, 28, 0.28);
 }
 
 .cad-scene3d-toolbar-group[aria-label="Time of day"] .cad-scene3d-tool-btn {
   padding: 0.28rem 0.45rem;
 }
 
-.cad-scene3d-tool-btn {
+.cad-scene3d .btn.cad-scene3d-tool-btn {
   padding: 0.28rem 0.55rem;
   font-size: 0.78rem;
   line-height: 1.2;
+  background: #eef2f3;
+  color: var(--panel-ink);
+  border: 1px solid rgba(20, 32, 41, 0.16);
 }
 
-.cad-scene3d-tool-btn.active {
+.cad-scene3d .btn.cad-scene3d-tool-btn:hover:not(:disabled) {
+  background: #fff;
+  color: var(--panel-ink);
+}
+
+.cad-scene3d .btn.cad-scene3d-tool-btn:disabled {
+  opacity: 0.55;
+}
+
+.cad-scene3d .btn.cad-scene3d-tool-btn.active {
   background: #1f5f72;
   color: #fff;
   border-color: #1f5f72;
+}
+
+.cad-scene3d .btn.danger.cad-scene3d-tool-btn {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+.cad-scene3d .btn.danger.cad-scene3d-tool-btn:hover:not(:disabled) {
+  background: #9a2e2e;
+  color: #fff;
 }
 
 .cad-scene3d-label {

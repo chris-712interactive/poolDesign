@@ -2785,7 +2785,7 @@ export function CadScene3DCanvas({
           {walkLocked ? <div className="cad-scene3d-crosshair" aria-hidden /> : null}
         </>
       ) : null}
-      <div className="cad-scene3d-hint muted">
+      <div className="cad-scene3d-hint">
         {walkMode
           ? walkLocked
             ? "WASD move · Shift sprint · Esc release mouse · Walk again to respawn inside"

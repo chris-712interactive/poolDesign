@@ -851,8 +851,33 @@ function CoverLightMesh({
   const night = isNightTime(timeOfDay);
   const boost = ledBoostForTimeOfDay(timeOfDay);
   const r = Math.min(sx, sz);
+  const spotRef = useRef<THREE.SpotLight>(null);
+  const fillRef = useRef<THREE.SpotLight>(null);
+  const spotTargetRef = useRef<THREE.Object3D>(null);
+  const fillTargetRef = useRef<THREE.Object3D>(null);
+  // Spots only — a point light is omni and shines up through the roof
+  // onto the house. Cone is aimed at −Y (patio), never above the soffit.
+  const spotIntensity = (night ? 14 : 0) * boost;
+  const fillIntensity = (night ? 5.5 : 0) * boost;
+
+  useLayoutEffect(() => {
+    if (spotRef.current && spotTargetRef.current) {
+      spotRef.current.target = spotTargetRef.current;
+    }
+    if (fillRef.current && fillTargetRef.current) {
+      fillRef.current.target = fillTargetRef.current;
+    }
+  }, []);
+
+  useFrame(() => {
+    spotRef.current?.target.updateMatrixWorld();
+    fillRef.current?.target.updateMatrixWorld();
+  });
+
   return (
     <group {...groupProps}>
+      <object3D ref={spotTargetRef} position={[0, -10, 0]} />
+      <object3D ref={fillTargetRef} position={[0, -8, 0]} />
       <mesh position={[0, sy * 0.42, 0]} castShadow>
         <cylinderGeometry args={[0.008, 0.008, sy * 0.16, 8]} />
         <Mat
@@ -862,8 +887,9 @@ function CoverLightMesh({
           selected={selected}
         />
       </mesh>
-      <mesh position={[0, sy * 0.28, 0]} castShadow>
-        <cylinderGeometry args={[r * 0.28, r * 0.34, sy * 0.1, 14]} />
+      {/* Opaque shade — blocks upward glow into the roof / second story. */}
+      <mesh position={[0, sy * 0.3, 0]} castShadow>
+        <cylinderGeometry args={[r * 0.42, r * 0.36, sy * 0.12, 16]} />
         <Mat
           color="#2a2a30"
           metalness={0.35}
@@ -871,25 +897,49 @@ function CoverLightMesh({
           selected={selected}
         />
       </mesh>
-      <mesh position={[0, 0, 0]} castShadow>
-        <cylinderGeometry args={[r * 0.3, r * 0.26, sy * 0.52, 16]} />
+      <mesh position={[0, sy * 0.36, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow>
+        <circleGeometry args={[r * 0.44, 16]} />
+        <Mat
+          color="#1a1a20"
+          metalness={0.25}
+          roughness={0.55}
+          selected={selected}
+        />
+      </mesh>
+      <mesh position={[0, -sy * 0.04, 0]} castShadow>
+        <cylinderGeometry args={[r * 0.28, r * 0.24, sy * 0.48, 16]} />
         <Mat
           color="#f4e4b8"
           roughness={0.35}
           opacity={0.82}
           selected={selected}
           emissive="#ffe9a8"
-          emissiveIntensity={night ? 1.15 * boost : 0.12}
+          emissiveIntensity={night ? 0.85 * boost : 0.12}
         />
       </mesh>
       {night ? (
-        <pointLight
-          position={[0, -sy * 0.08, 0]}
-          color="#ffe9a8"
-          intensity={3.4 * boost}
-          distance={7}
-          decay={2}
-        />
+        <>
+          <spotLight
+            ref={spotRef}
+            color="#ffe9a8"
+            intensity={spotIntensity}
+            distance={8}
+            decay={1.7}
+            angle={Math.PI / 2.6}
+            penumbra={0.5}
+            position={[0, -sy * 0.32, 0]}
+          />
+          <spotLight
+            ref={fillRef}
+            color="#ffe9a8"
+            intensity={fillIntensity}
+            distance={6.5}
+            decay={1.8}
+            angle={Math.PI / 2.15}
+            penumbra={0.7}
+            position={[0, -sy * 0.32, 0]}
+          />
+        </>
       ) : null}
     </group>
   );
