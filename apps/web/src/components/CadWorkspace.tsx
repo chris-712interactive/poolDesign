@@ -49,7 +49,6 @@ import {
   gateEndpoints,
   gateKindLabel,
   insideBoundsFromOutside,
-  insideOutlineFromOutside,
   isPadEquipmentId,
   placeEquipmentPadWithStandardKit,
   isPoolFixtureId,
@@ -95,6 +94,11 @@ import {
   resetSpaPackage,
   resizeRectangleOutline,
   offsetClosedOutlineEdge,
+  bulgeFromPoint,
+  bulgeHandlePoint,
+  flattenEdge,
+  insetClosedOutline,
+  pointInPolygon,
   resolveEquipmentConnection,
   calibrateSurveyUnderlay,
   moveSurveyUnderlay,
@@ -284,6 +288,12 @@ type DragState =
       origin: PointMm;
     }
   | {
+      mode: "bulge";
+      kind: "pool" | "patio" | "building" | "cover" | "feature";
+      id: string;
+      edgeIndex: number;
+    }
+  | {
       mode: "depthStation";
       poolId: string;
       stationId: string;
@@ -350,6 +360,16 @@ type Props = {
 const CLOSE_TOLERANCE_MM = 150;
 const VERTEX_HIT_PX = 10;
 const EDGE_HIT_PX = 9;
+const BULGE_HIT_PX = 12;
+
+function isRectDrawTool(tool: Tool): boolean {
+  return (
+    tool === "pool_rect" ||
+    tool === "house_rect" ||
+    tool === "cover_rect" ||
+    tool === "patio_rect"
+  );
+}
 
 function newId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -751,9 +771,7 @@ export function CadWorkspace({
     if (draftPoints.length === 0) return cursor;
     // Third click of rect tools: free cursor — depth is perpendicular to first side.
     if (
-      (tool === "pool_rect" ||
-        tool === "house_rect" ||
-        tool === "cover_rect") &&
+      isRectDrawTool(tool) &&
       draftPoints.length >= 2
     ) {
       return cursor;
@@ -763,12 +781,7 @@ export function CadWorkspace({
 
   const draftSegmentMm = useMemo(() => {
     if (!previewPoint || draftPoints.length === 0) return 0;
-    if (
-      (tool === "pool_rect" ||
-        tool === "house_rect" ||
-        tool === "cover_rect") &&
-      draftPoints.length === 2
-    ) {
+    if (isRectDrawTool(tool) && draftPoints.length === 2) {
       const a = draftPoints[0];
       const b = draftPoints[1];
       const dx = b.x - a.x;
@@ -953,7 +966,7 @@ export function CadWorkspace({
         const wallMm = isSpa
           ? spaWallThicknessMm(pool)
           : poolWallThicknessMm(pool);
-        const inside = insideOutlineFromOutside(pool.outline, wallMm);
+        const inside = insetClosedOutline(pool.outline, wallMm);
         drawPolygon(
           ctx,
           vp,
@@ -1115,9 +1128,7 @@ export function CadWorkspace({
         false,
       );
     } else if (
-      (tool === "pool_rect" ||
-        tool === "house_rect" ||
-        tool === "cover_rect") &&
+      isRectDrawTool(tool) &&
       draftPoints.length >= 1 &&
       previewPoint
     ) {
@@ -1128,6 +1139,8 @@ export function CadWorkspace({
             ? coverKind === "roof"
               ? "#5c5346"
               : "#8a6a3a"
+            : tool === "patio_rect"
+              ? "#8a6a2f"
             : waterKind === "spa"
               ? "#1a6b8a"
               : "#146353";
@@ -1138,6 +1151,8 @@ export function CadWorkspace({
             ? coverKind === "roof"
               ? "rgba(92,83,70,0.28)"
               : "rgba(138,106,58,0.18)"
+            : tool === "patio_rect"
+              ? "rgba(196,165,116,0.28)"
             : waterKind === "spa"
               ? "rgba(26,107,138,0.15)"
               : "rgba(31,138,112,0.15)";
@@ -1187,9 +1202,7 @@ export function CadWorkspace({
       if (
         draftPoints.length > 0 &&
         previewPoint &&
-        tool !== "pool_rect" &&
-        tool !== "house_rect" &&
-        tool !== "cover_rect"
+        !isRectDrawTool(tool)
       ) {
         drawEdgeLabel(
           ctx,
@@ -1464,6 +1477,19 @@ export function CadWorkspace({
     return true;
   }
 
+  function commitPatio(outline: PointMm[]) {
+    const patio: PatioRegion = {
+      id: newId("patio"),
+      name: `Patio ${design.patios.length + 1}`,
+      outline,
+      materialId: DEFAULT_PATIO_FINISH_ID,
+    };
+    commitDesign({ ...design, patios: [...design.patios, patio] });
+    setSelection({ kind: "patio", id: patio.id });
+    setDraftPoints([]);
+    setLengthBuffer("");
+  }
+
   function finishPolygon(kind: "pool" | "patio" | "house") {
     if (draftPoints.length < 3) {
       setDraftPoints([]);
@@ -1474,16 +1500,7 @@ export function CadWorkspace({
     } else if (kind === "house") {
       commitBuilding(draftPoints);
     } else {
-      const patio: PatioRegion = {
-        id: newId("patio"),
-        name: `Patio ${design.patios.length + 1}`,
-        outline: draftPoints,
-        materialId: DEFAULT_PATIO_FINISH_ID,
-      };
-      commitDesign({ ...design, patios: [...design.patios, patio] });
-      setSelection({ kind: "patio", id: patio.id });
-      setDraftPoints([]);
-      setLengthBuffer("");
+      commitPatio(draftPoints);
     }
   }
 
@@ -1609,9 +1626,7 @@ export function CadWorkspace({
 
     // Rect tools: after two corners of one side, typed length = box depth.
     if (
-      (tool === "pool_rect" ||
-        tool === "house_rect" ||
-        tool === "cover_rect") &&
+      isRectDrawTool(tool) &&
       draftPoints.length === 2
     ) {
       const depthPoint = pointAtRectDepth(
@@ -1627,6 +1642,7 @@ export function CadWorkspace({
       );
       if (tool === "house_rect") commitBuilding(outline);
       else if (tool === "cover_rect") commitPatioCover(outline);
+      else if (tool === "patio_rect") commitPatio(outline);
       else commitWaterBody(outline);
       return;
     }
@@ -1751,12 +1767,14 @@ export function CadWorkspace({
         const ey = b.y - a.y;
         const len = Math.hypot(ex, ey);
         if (len < 1e-6) continue;
-        const t = ((point.x - a.x) * ex + (point.y - a.y) * ey) / (len * len);
-        if (t < 0.18 || t > 0.82) continue;
-        const px = a.x + ex * t;
-        const py = a.y + ey * t;
-        const dist = Math.hypot(point.x - px, point.y - py);
+        const samples = flattenEdge(a, b);
+        let dist = Infinity;
+        for (let s = 0; s < samples.length - 1; s++) {
+          dist = Math.min(dist, distToSegment(point, samples[s], samples[s + 1]));
+        }
         if (dist > distTol) continue;
+        const t = ((point.x - a.x) * ex + (point.y - a.y) * ey) / (len * len);
+        if (Math.abs(a.bulge ?? 0) < 1e-6 && (t < 0.18 || t > 0.82)) continue;
         if (
           segmentLengthMm(point, a) <= endTol ||
           segmentLengthMm(point, b) <= endTol
@@ -1811,6 +1829,71 @@ export function CadWorkspace({
     return null;
   }
 
+  function hitBulge(
+    point: PointMm,
+  ):
+    | {
+        kind: "pool" | "patio" | "building" | "cover" | "feature";
+        id: string;
+        edgeIndex: number;
+      }
+    | null {
+    const tol = BULGE_HIT_PX / vp.scale;
+    const idle = 14 / vp.scale;
+    const check = (
+      kind: "pool" | "patio" | "building" | "cover" | "feature",
+      id: string,
+      pts: PointMm[],
+    ) => {
+      if (pts.length < 2) return null;
+      let best: {
+        kind: "pool" | "patio" | "building" | "cover" | "feature";
+        id: string;
+        edgeIndex: number;
+        dist: number;
+      } | null = null;
+      const n = pts.length;
+      for (let i = 0; i < n; i++) {
+        const a = pts[i];
+        const b = pts[(i + 1) % n];
+        const handle = bulgeHandlePoint(a, b, idle);
+        const dist = segmentLengthMm(point, handle);
+        if (dist > tol) continue;
+        if (!best || dist < best.dist) {
+          best = { kind, id, edgeIndex: i, dist };
+        }
+      }
+      return best
+        ? { kind: best.kind, id: best.id, edgeIndex: best.edgeIndex }
+        : null;
+    };
+    if (selection?.kind === "pool" && selectedPool) {
+      const hit = check("pool", selectedPool.id, selectedPool.outline);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "patio" && selectedPatio) {
+      const hit = check("patio", selectedPatio.id, selectedPatio.outline);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "building" && selectedBuilding) {
+      const hit = check(
+        "building",
+        selectedBuilding.id,
+        selectedBuilding.outline,
+      );
+      if (hit) return hit;
+    }
+    if (selection?.kind === "cover" && selectedCover) {
+      const hit = check("cover", selectedCover.id, selectedCover.outline);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "feature" && selectedFeature) {
+      const hit = check("feature", selectedFeature.id, selectedFeature.outline);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
   function edgePullCursor(nx: number, ny: number): string {
     return Math.abs(nx) >= Math.abs(ny) ? "ew-resize" : "ns-resize";
   }
@@ -1819,8 +1902,10 @@ export function CadWorkspace({
     if (designMode === "3d") return "default";
     if (spaceDown || drag?.mode === "pan") return "grab";
     if (drag?.mode === "edge") return edgePullCursor(drag.nx, drag.ny);
+    if (drag?.mode === "bulge") return "pointer";
     if (tool === "select" && cursor && !drag) {
       if (hitVertex(cursor)) return "pointer";
+      if (hitBulge(cursor)) return "pointer";
       const edge = hitEdge(cursor);
       if (edge) return edgePullCursor(edge.nx, edge.ny);
     }
@@ -2279,6 +2364,12 @@ export function CadWorkspace({
         setDrag({ mode: "vertex", ...vertex });
         return;
       }
+      const bulge = hitBulge(point);
+      if (bulge) {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({ mode: "bulge", ...bulge });
+        return;
+      }
       const edge = hitEdge(point);
       if (edge) {
         dragOriginRef.current = structuredClone(design);
@@ -2432,11 +2523,7 @@ export function CadWorkspace({
       return;
     }
 
-    if (
-      tool === "pool_rect" ||
-      tool === "house_rect" ||
-      tool === "cover_rect"
-    ) {
+    if (isRectDrawTool(tool)) {
       setShiftDown(e.shiftKey);
       if (!draftPoints.length) {
         setDraftPoints([point]);
@@ -2455,6 +2542,7 @@ export function CadWorkspace({
       );
       if (tool === "house_rect") commitBuilding(outline);
       else if (tool === "cover_rect") commitPatioCover(outline);
+      else if (tool === "patio_rect") commitPatio(outline);
       else commitWaterBody(outline);
       return;
     }
@@ -2705,7 +2793,9 @@ export function CadWorkspace({
                 ? {
                     ...p,
                     outline: p.outline.map((pt, i) =>
-                      i === drag.index ? snapped : pt,
+                      i === drag.index
+                        ? { ...pt, x: snapped.x, y: snapped.y }
+                        : pt,
                     ),
                   }
                 : p,
@@ -2720,7 +2810,9 @@ export function CadWorkspace({
                 ? {
                     ...p,
                     outline: p.outline.map((pt, i) =>
-                      i === drag.index ? snapped : pt,
+                      i === drag.index
+                        ? { ...pt, x: snapped.x, y: snapped.y }
+                        : pt,
                     ),
                   }
                 : p,
@@ -2735,7 +2827,9 @@ export function CadWorkspace({
                 ? {
                     ...b,
                     outline: b.outline.map((pt, i) =>
-                      i === drag.index ? snapped : pt,
+                      i === drag.index
+                        ? { ...pt, x: snapped.x, y: snapped.y }
+                        : pt,
                     ),
                   }
                 : b,
@@ -2750,7 +2844,9 @@ export function CadWorkspace({
                 ? {
                     ...c,
                     outline: c.outline.map((pt, i) =>
-                      i === drag.index ? snapped : pt,
+                      i === drag.index
+                        ? { ...pt, x: snapped.x, y: snapped.y }
+                        : pt,
                     ),
                   }
                 : c,
@@ -2765,7 +2861,9 @@ export function CadWorkspace({
                 ? {
                     ...f,
                     outline: f.outline.map((pt, i) =>
-                      i === drag.index ? snapped : pt,
+                      i === drag.index
+                        ? { ...pt, x: snapped.x, y: snapped.y }
+                        : pt,
                     ),
                   }
                 : f,
@@ -2780,7 +2878,9 @@ export function CadWorkspace({
                 ? {
                     ...f,
                     points: f.points.map((pt, i) =>
-                      i === drag.index ? snapped : pt,
+                      i === drag.index
+                        ? { ...pt, x: snapped.x, y: snapped.y }
+                        : pt,
                     ),
                   }
                 : f,
@@ -2795,7 +2895,9 @@ export function CadWorkspace({
                 ? {
                     ...l,
                     points: l.points.map((pt, i) =>
-                      i === drag.index ? snapped : pt,
+                      i === drag.index
+                        ? { ...pt, x: snapped.x, y: snapped.y }
+                        : pt,
                     ),
                   }
                 : l,
@@ -2809,10 +2911,81 @@ export function CadWorkspace({
               ? {
                   ...r,
                   points: r.points.map((pt, i) =>
-                    i === drag.index ? snapped : pt,
+                    i === drag.index
+                      ? { ...pt, x: snapped.x, y: snapped.y }
+                      : pt,
                   ),
                 }
               : r,
+          ),
+        };
+      });
+      return;
+    }
+
+    if (drag.mode === "bulge") {
+      const pts =
+        drag.kind === "pool"
+          ? designRef.current.poolBodies.find((p) => p.id === drag.id)?.outline
+          : drag.kind === "patio"
+            ? designRef.current.patios.find((p) => p.id === drag.id)?.outline
+            : drag.kind === "building"
+              ? (designRef.current.buildings ?? []).find((b) => b.id === drag.id)
+                  ?.outline
+              : drag.kind === "cover"
+                ? (designRef.current.patioCovers ?? []).find(
+                    (c) => c.id === drag.id,
+                  )?.outline
+                : (designRef.current.features ?? []).find((f) => f.id === drag.id)
+                    ?.outline;
+      if (!pts || pts.length < 2) return;
+      const a = pts[drag.edgeIndex];
+      const b = pts[(drag.edgeIndex + 1) % pts.length];
+      if (!a || !b) return;
+      const nextBulge = bulgeFromPoint(a, b, raw);
+      const nextPts = pts.map((p, i) => {
+        if (i !== drag.edgeIndex) return p;
+        const next: PointMm = { x: p.x, y: p.y };
+        if (nextBulge !== 0) next.bulge = nextBulge;
+        return next;
+      });
+      setDesign((d) => {
+        if (drag.kind === "pool") {
+          return {
+            ...d,
+            poolBodies: d.poolBodies.map((p) =>
+              p.id === drag.id ? { ...p, outline: nextPts } : p,
+            ),
+          };
+        }
+        if (drag.kind === "patio") {
+          return {
+            ...d,
+            patios: d.patios.map((p) =>
+              p.id === drag.id ? { ...p, outline: nextPts } : p,
+            ),
+          };
+        }
+        if (drag.kind === "building") {
+          return {
+            ...d,
+            buildings: (d.buildings ?? []).map((b) =>
+              b.id === drag.id ? { ...b, outline: nextPts } : b,
+            ),
+          };
+        }
+        if (drag.kind === "cover") {
+          return {
+            ...d,
+            patioCovers: (d.patioCovers ?? []).map((c) =>
+              c.id === drag.id ? { ...c, outline: nextPts } : c,
+            ),
+          };
+        }
+        return {
+          ...d,
+          features: (d.features ?? []).map((f) =>
+            f.id === drag.id ? { ...f, outline: nextPts } : f,
           ),
         };
       });
@@ -3021,6 +3194,7 @@ export function CadWorkspace({
     if (
       drag?.mode === "vertex" ||
       drag?.mode === "edge" ||
+      drag?.mode === "bulge" ||
       drag?.mode === "move" ||
       drag?.mode === "opening" ||
       drag?.mode === "gate" ||
@@ -3034,7 +3208,9 @@ export function CadWorkspace({
       let next = designRef.current;
       // After reshaping a spa shell, reflow benches/equipment/plumbing inside.
       if (
-        (drag.mode === "vertex" || drag.mode === "edge") &&
+        (drag.mode === "vertex" ||
+          drag.mode === "edge" ||
+          drag.mode === "bulge") &&
         drag.kind === "pool"
       ) {
         const body = next.poolBodies.find((p) => p.id === drag.id);
@@ -3196,6 +3372,7 @@ export function CadWorkspace({
         tool === "easement" ||
         tool === "pool_poly" ||
         tool === "patio" ||
+        tool === "patio_rect" ||
         tool === "pool_rect" ||
         tool === "house_poly" ||
         tool === "house_rect" ||
@@ -3251,10 +3428,16 @@ export function CadWorkspace({
                 : "Click two corners for an in-pool steps or bench rectangle."
               : tool === "pool_poly"
                 ? waterKind === "spa"
-                  ? "Trace spa outline. Hold Shift for 90° lines. Close near start."
-                  : "Click pool corners. Hold Shift for 90° lines. Type length + Enter. Close near start."
+                  ? "Trace spa outline. Hold Shift for 90° lines. Close near start. After drawing, drag the circle on an edge to add a curve."
+                  : "Click pool corners. Hold Shift for 90° lines. Type length + Enter. Close near start. After drawing, drag the circle on an edge to add a curve."
                 : tool === "patio"
-                  ? "Click corners. Hold Shift for 90° lines. Type length + Enter. Close near start."
+                  ? "Click corners. Hold Shift for 90° lines. Type length + Enter. Close near start. After drawing, drag the circle on an edge to add a curve."
+                  : tool === "patio_rect"
+                    ? draftPoints.length === 0
+                      ? "Patio: click first corner of one side, then second, then depth."
+                      : draftPoints.length === 1
+                        ? "Second corner of this side (Shift = 90°). Type length + Enter for exact width."
+                        : "Click to set patio depth (or type length + Enter)."
                   : tool === "grade_point"
                     ? "Click to place a grade point. Set drop/rise from house FFE in Properties."
                   : tool === "fence"
@@ -3283,7 +3466,7 @@ export function CadWorkspace({
                               : calibratePoints.length === 1
                                 ? "Click the other end of that dimension."
                                 : "Type the printed length (e.g. 50) and Enter, or Apply scale in Layers."
-                          : "Select to move/edit. Drag a side midpoint to stretch it evenly; drag a corner to reshape. Hold Shift on a corner for 90° edges.";
+                          : "Select to move/edit. Drag a side midpoint to stretch; drag the circle on an edge to curve it; drag a corner to reshape. Hold Shift on a corner for 90° edges.";
 
   return (
     <div className="stack" style={{ gap: "0.85rem" }}>
@@ -3421,9 +3604,7 @@ export function CadWorkspace({
                     <div>
                       {tool === "survey_calibrate"
                         ? "Survey span"
-                        : (tool === "pool_rect" ||
-                              tool === "house_rect" ||
-                              tool === "cover_rect") &&
+                        : isRectDrawTool(tool) &&
                             draftPoints.length === 2
                           ? "Depth"
                           : "Segment"}
@@ -7404,6 +7585,7 @@ function translateDesign(
   unitSystem: UnitSystem,
 ): DesignDocument {
   const shift = (p: PointMm): PointMm => ({
+    ...p,
     x: snapMm(p.x + dx, unitSystem),
     y: snapMm(p.y + dy, unitSystem),
   });
@@ -7562,19 +7744,4 @@ function distToSegment(p: PointMm, a: PointMm, b: PointMm): number {
     Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)),
   );
   return segmentLengthMm(p, { x: a.x + t * dx, y: a.y + t * dy });
-}
-
-function pointInPolygon(point: PointMm, polygon: PointMm[]): boolean {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i].x;
-    const yi = polygon[i].y;
-    const xj = polygon[j].x;
-    const yj = polygon[j].y;
-    const intersect =
-      yi > point.y !== yj > point.y &&
-      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi || 1e-12) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
 }

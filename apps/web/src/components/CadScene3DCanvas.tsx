@@ -17,6 +17,7 @@ import type { DesignDocument, PointMm } from "@pool-design/shared";
 import {
   depthMmAtT,
   depthTAtPlanPoint,
+  flattenClosedOutline,
   mmToMeters,
   planToWorldXZ,
   pointInPolygon,
@@ -320,7 +321,7 @@ function outlineToShape(
   clockwise = false,
 ): THREE.Shape {
   const shape = new THREE.Shape();
-  let pts = ringPts(outlineMm);
+  let pts = flattenClosedOutline(ringPts(outlineMm));
   if (pts.length < 3) return shape;
   const cw = shapeSignedArea(pts) < 0;
   if (cw !== clockwise) pts = [...pts].reverse();
@@ -336,7 +337,7 @@ function outlineToShape(
 
 function outlineToPath(outlineMm: PointMm[], clockwise = true): THREE.Path {
   const path = new THREE.Path();
-  let pts = ringPts(outlineMm);
+  let pts = flattenClosedOutline(ringPts(outlineMm));
   if (pts.length < 3) return path;
   const cw = shapeSignedArea(pts) < 0;
   if (cw !== clockwise) pts = [...pts].reverse();

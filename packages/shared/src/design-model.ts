@@ -2,8 +2,21 @@ import type { CatalogCategory, CatalogUnit } from "./catalog";
 import type { DesignLevel } from "./design-level";
 import { objectPlanSizeMm } from "./object-library";
 import type { UnitSystem } from "./units";
+import {
+  edgeLengthMm,
+  flattenClosedOutline,
+  outlineHasArcs,
+} from "./outline-arcs";
 
-export type PointMm = { x: number; y: number };
+export type PointMm = {
+  x: number;
+  y: number;
+  /**
+   * DXF bulge on the outgoing edge to the next vertex (`tan(sweep/4)`).
+   * Omitted / 0 = straight. Positive = CCW in plan coords, negative = CW.
+   */
+  bulge?: number;
+};
 
 export type DesignLayerId = string;
 
@@ -804,7 +817,7 @@ export function offsetClosedOutlineEdge(
   const mx = nx * along;
   const my = ny * along;
   return outline.map((p, idx) =>
-    idx === i || idx === j ? { x: p.x + mx, y: p.y + my } : p,
+    idx === i || idx === j ? { ...p, x: p.x + mx, y: p.y + my } : p,
   );
 }
 
@@ -818,35 +831,44 @@ export function polylineLengthMm(points: PointMm[]): number {
   return total;
 }
 
-/** Closed polygon perimeter in mm */
+/** Closed polygon perimeter in mm (arc length when an edge has bulge). */
 export function polygonPerimeterMm(points: PointMm[]): number {
   if (points.length < 2) return 0;
-  return (
-    polylineLengthMm(points) +
-    segmentLengthMm(points[points.length - 1], points[0])
-  );
+  if (!outlineHasArcs(points)) {
+    return (
+      polylineLengthMm(points) +
+      segmentLengthMm(points[points.length - 1], points[0])
+    );
+  }
+  let total = 0;
+  for (let i = 0; i < points.length; i++) {
+    total += edgeLengthMm(points[i], points[(i + 1) % points.length]);
+  }
+  return total;
 }
 
-/** Polygon area in mm² (shoelace). Absolute value. */
+/** Polygon area in mm² (shoelace). Absolute value. Arcs are tessellated. */
 export function polygonAreaMm2(points: PointMm[]): number {
-  if (points.length < 3) return 0;
+  const ring = outlineHasArcs(points) ? flattenClosedOutline(points) : points;
+  if (ring.length < 3) return 0;
   let sum = 0;
-  for (let i = 0; i < points.length; i++) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
     sum += a.x * b.y - b.x * a.y;
   }
   return Math.abs(sum) / 2;
 }
 
-/** Point-in-polygon (ray cast). Boundary points may be either side. */
+/** Point-in-polygon (ray cast). Boundary points may be either side. Arcs tessellated. */
 export function pointInPolygon(point: PointMm, polygon: PointMm[]): boolean {
+  const ring = outlineHasArcs(polygon) ? flattenClosedOutline(polygon) : polygon;
   let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i].x;
-    const yi = polygon[i].y;
-    const xj = polygon[j].x;
-    const yj = polygon[j].y;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].x;
+    const yi = ring[i].y;
+    const xj = ring[j].x;
+    const yj = ring[j].y;
     const intersect =
       yi > point.y !== yj > point.y &&
       point.x < ((xj - xi) * (point.y - yi)) / (yj - yi || 1e-12) + xi;
@@ -871,13 +893,14 @@ export function distToPolygonBoundaryMm(
   point: PointMm,
   polygon: PointMm[],
 ): number {
-  if (polygon.length < 2) return Infinity;
+  const ring = outlineHasArcs(polygon) ? flattenClosedOutline(polygon) : polygon;
+  if (ring.length < 2) return Infinity;
   let best = Infinity;
-  for (let i = 0; i < polygon.length; i++) {
+  for (let i = 0; i < ring.length; i++) {
     const d = distPointToSegmentMm(
       point,
-      polygon[i],
-      polygon[(i + 1) % polygon.length],
+      ring[i],
+      ring[(i + 1) % ring.length],
     );
     if (d < best) best = d;
   }

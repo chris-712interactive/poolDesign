@@ -9,11 +9,11 @@ import {
   waterBodyKind,
 } from "./design-model";
 import {
-  insideOutlineFromOutside,
   outlineBounds,
   poolWallThicknessMm,
   spaWallThicknessMm,
 } from "./spa-defaults";
+import { insetClosedOutline } from "./scene3d";
 import { MM_PER_FOOT } from "./units";
 
 const GAL_PER_CU_FT = 7.48052;
@@ -388,7 +388,7 @@ export function waterVolumeMm3(body: PoolBody, stepMm = 300): number {
     waterBodyKind(body) === "spa"
       ? spaWallThicknessMm(body)
       : poolWallThicknessMm(body);
-  const inside = insideOutlineFromOutside(body.outline, wall);
+  const inside = insetClosedOutline(body.outline, wall);
   const ring = inside.length >= 3 ? inside : body.outline;
   if (ring.length < 3) return 0;
 
@@ -425,7 +425,7 @@ export function wetInteriorSurfaceMm2(body: PoolBody): number {
     waterBodyKind(body) === "spa"
       ? spaWallThicknessMm(body)
       : poolWallThicknessMm(body);
-  const inside = insideOutlineFromOutside(body.outline, wall);
+  const inside = insetClosedOutline(body.outline, wall);
   const ring = inside.length >= 3 ? inside : body.outline;
   const floor = polygonAreaMm2(ring);
   const wallDepth =

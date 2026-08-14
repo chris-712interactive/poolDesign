@@ -1,4 +1,5 @@
 import { segmentLengthMm, type PointMm, type PoolBody } from "./design-model";
+import { flattenClosedOutline } from "./outline-arcs";
 import {
   bodyWallThicknessMm,
   outlineBounds,
@@ -40,7 +41,7 @@ export function snapWaterWallFixture(
   let best: WallFixtureSnap | null = null;
 
   for (const body of bodies) {
-    const outline = body.outline;
+    const outline = flattenClosedOutline(body.outline);
     if (!outline || outline.length < 3) continue;
     const wallMm = bodyWallThicknessMm(body);
     // Sit just proud of the interior plaster face.

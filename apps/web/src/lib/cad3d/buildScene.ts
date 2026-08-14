@@ -14,8 +14,8 @@ import {
   designBoundsMm,
   existingGradeDropMm,
   featureDepthMm,
+  flattenClosedOutline,
   formatLength,
-  insideOutlineFromOutside,
   isAxisAlignedRect,
   isRectangularOutline,
   maxDepthMmFromProfile,
@@ -31,6 +31,7 @@ import {
   mmToMeters,
   openingSillMm,
   offsetClosedOutline,
+  insetClosedOutline,
   edgeOutwardNormal,
   planSignedAreaMm2,
   poolWallThicknessMm,
@@ -599,7 +600,11 @@ function pushWallRing(
     normalBiasMm?: number;
   },
 ) {
-  const pts = ringPoints(opts.outlineMm);
+  const pts = ringPoints(
+    opts.edgeOmits?.length
+      ? opts.outlineMm
+      : flattenClosedOutline(opts.outlineMm),
+  );
   if (pts.length < 3) return;
   const thickM = mmToMeters(opts.thicknessMm);
   const biasMm = opts.normalBiasMm ?? 0;
@@ -790,7 +795,7 @@ function pushShelfTopTileBands(
     idPrefix: string;
   },
 ) {
-  const pts = ringPoints(opts.outlineMm);
+  const pts = ringPoints(flattenClosedOutline(opts.outlineMm));
   if (pts.length < 3) return;
   let cx = 0;
   let cy = 0;
@@ -2721,9 +2726,9 @@ export function buildSceneModel(
           spaOutlines.length > 0
             ? clipOutlineByAabbs(outer, spaOutlines)
             : outer;
-        const waterInner = insideOutlineFromOutside(outer, wallT);
+        const waterInner = insetClosedOutline(outer, wallT);
         // Floor extends under the wall thickness so the shell seals (no light leaks).
-        const floorInner = insideOutlineFromOutside(outer, wallT * 0.35);
+        const floorInner = insetClosedOutline(outer, wallT * 0.35);
         const floorOutline =
           spaOutlines.length > 0
             ? clipOutlineByAabbs(floorInner, spaOutlines)

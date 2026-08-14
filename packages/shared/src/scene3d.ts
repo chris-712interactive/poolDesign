@@ -10,10 +10,10 @@ import {
   type PoolBody,
   normalizeNorthDeg,
 } from "./design-model";
+import { flattenClosedOutline, outlineHasArcs } from "./outline-arcs";
 import { getPlaceableItem, isWaterFixtureId } from "./object-library";
 import { isPadEquipmentId } from "./plumbing-route";
 import {
-  insideOutlineFromOutside,
   outlineBounds,
   rectangleFrame,
   spaWallThicknessMm,
@@ -317,7 +317,7 @@ export function spaShellParams(body: PoolBody): {
     wallMm,
     // Preserve explicit 0 (flush with deck); only default when unset.
     shellHeightMm: body.shellHeightMm ?? DEFAULT_SPA_SHELL_HEIGHT_MM,
-    insideOutline: insideOutlineFromOutside(body.outline, wallMm),
+    insideOutline: insetClosedOutline(body.outline, wallMm),
     waterDepthMm: body.depthShallowMm,
   };
 }
@@ -461,7 +461,8 @@ export function offsetClosedOutline(
   outline: PointMm[],
   deltaMm: number,
 ): PointMm[] {
-  const pts = openPlanRing(outline);
+  const src = outlineHasArcs(outline) ? flattenClosedOutline(outline) : outline;
+  const pts = openPlanRing(src);
   if (pts.length < 3 || !Number.isFinite(deltaMm) || Math.abs(deltaMm) < 1e-6) {
     return pts.map((p) => ({ x: p.x, y: p.y }));
   }
@@ -493,4 +494,13 @@ export function offsetClosedOutline(
     out.push({ x: cur.x + ux * d, y: cur.y + uy * d });
   }
   return out;
+}
+
+/** Inset a closed plan outline by wall thickness (arcs tessellated first). */
+export function insetClosedOutline(
+  outline: PointMm[],
+  wallMm: number,
+): PointMm[] {
+  const inset = offsetClosedOutline(outline, -Math.max(0, wallMm));
+  return inset.length >= 3 ? inset : flattenClosedOutline(outline);
 }

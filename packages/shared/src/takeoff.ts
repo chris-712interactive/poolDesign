@@ -20,11 +20,11 @@ import {
   totalRetainingLf,
 } from "./site-grade";
 import {
-  insideOutlineFromOutside,
   poolWallThicknessMm,
   spaShellHeightMm,
   spaWallThicknessMm,
 } from "./spa-defaults";
+import { insetClosedOutline } from "./scene3d";
 import { getWaterlineTile } from "./waterline-tiles";
 import type { UnitSystem } from "./units";
 import { mmToInches } from "./units";
@@ -115,10 +115,10 @@ export function buildTakeoff(
   const pools = design.poolBodies.filter((p) => (p.kind ?? "pool") !== "spa");
   const spas = design.poolBodies.filter((p) => (p.kind ?? "pool") === "spa");
   const spaInsides: PointMm[][] = spas.map((p) =>
-    insideOutlineFromOutside(p.outline, spaWallThicknessMm(p)),
+    insetClosedOutline(p.outline, spaWallThicknessMm(p)),
   );
   const poolInsides: PointMm[][] = pools.map((p) =>
-    insideOutlineFromOutside(p.outline, poolWallThicknessMm(p)),
+    insetClosedOutline(p.outline, poolWallThicknessMm(p)),
   );
   let poolAreaMm2 = poolInsides.reduce(
     (sum, outline) => sum + polygonAreaMm2(outline),

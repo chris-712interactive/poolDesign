@@ -312,13 +312,23 @@ export function CadToolPalette({
                       <div className="cad-icon-toolbar cad-icon-toolbar-3">
                         <button
                           type="button"
+                          className={`tool-icon-btn ${tool === "patio_rect" ? "active" : ""}`}
+                          title="Patio rectangle"
+                          aria-label="Patio rectangle"
+                          onClick={() => activateDraw("patio_rect")}
+                        >
+                          {toolMeta("patio_rect").icon}
+                          <ToolTooltip label="Patio rectangle" />
+                        </button>
+                        <button
+                          type="button"
                           className={`tool-icon-btn ${tool === "patio" ? "active" : ""}`}
-                          title="Draw patio"
-                          aria-label="Draw patio"
+                          title="Patio polygon"
+                          aria-label="Patio polygon"
                           onClick={() => activateDraw("patio")}
                         >
                           {toolMeta("patio").icon}
-                          <ToolTooltip label="Draw patio" />
+                          <ToolTooltip label="Patio polygon" />
                         </button>
                         <button
                           type="button"
@@ -333,7 +343,8 @@ export function CadToolPalette({
                       </div>
                       <p className="muted cad-tool-group-note">
                         Grade points: drop/rise from house FFE. Set patio strategy
-                        for fill and/or retaining.
+                        for fill and/or retaining. After drawing, drag the circle
+                        on an edge to add a curve.
                       </p>
                     </>
                   )}

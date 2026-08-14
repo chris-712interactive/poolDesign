@@ -12,6 +12,7 @@ export type DrawToolId =
   | "steps"
   | "bench"
   | "sunshelf"
+  | "patio_rect"
   | "patio"
   | "grade_point"
   | "property_line"
@@ -308,8 +309,18 @@ export const TOOL_META: {
     ),
   },
   {
+    id: "patio_rect",
+    label: "Patio rectangle",
+    icon: (
+      <Svg>
+        <rect x="4" y="7" width="16" height="10" rx="1.5" />
+        <path d="M4 17h16" />
+      </Svg>
+    ),
+  },
+  {
     id: "patio",
-    label: "Patio",
+    label: "Patio polygon",
     icon: (
       <Svg>
         <path d="M4 18V8l8-3 8 3v10" />
@@ -505,7 +516,8 @@ export function toolGroupForTool(
   placeCatalogId: string | null,
 ): ToolGroupId | null {
   if (isPadEquipTool(tool)) return "pad";
-  if (tool === "patio" || tool === "grade_point") return "patio";
+  if (tool === "patio" || tool === "patio_rect" || tool === "grade_point")
+    return "patio";
   if (tool === "property_line" || tool === "easement") return "site";
   if (tool === "cover_rect") return "cover";
   if (tool === "fence" || tool === "gate") return "fence";

@@ -14,6 +14,9 @@ import {
   objectPlanSizeMm,
   resolveHouseExteriorColor,
   segmentLengthMm,
+  edgeLengthMm,
+  flattenClosedOutline,
+  bulgeHandlePoint,
   siteLineEdgeTag,
   siteLineSegments,
   bearingToUnitVector,
@@ -103,7 +106,8 @@ export function drawPolygon(
 ) {
   if (outline.length < 2) return;
   ctx.beginPath();
-  outline.forEach((p, i) => {
+  const ring = flattenClosedOutline(outline);
+  ring.forEach((p, i) => {
     const c = worldToScreen(p, vp);
     if (i === 0) ctx.moveTo(c.x, c.y);
     else ctx.lineTo(c.x, c.y);
@@ -133,6 +137,7 @@ export function drawPolygon(
       ctx.stroke();
     }
     const n = outline.length;
+    const idleOff = 14 / vp.scale;
     for (let i = 0; i < n; i++) {
       const a = outline[i];
       const b = outline[(i + 1) % n];
@@ -145,6 +150,12 @@ export function drawPolygon(
       ctx.lineWidth = 1.5;
       ctx.fillRect(mid.x - 4, mid.y - 4, 8, 8);
       ctx.strokeRect(mid.x - 4, mid.y - 4, 8, 8);
+      const handle = worldToScreen(bulgeHandlePoint(a, b, idleOff), vp);
+      ctx.fillStyle = Math.abs(a.bulge ?? 0) > 1e-6 ? "#e8f6f2" : "#fff";
+      ctx.beginPath();
+      ctx.arc(handle.x, handle.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
     }
   }
 }
@@ -1617,7 +1628,7 @@ export function drawEdgeLabel(
   b: PointMm,
   unitSystem: UnitSystem,
 ) {
-  const len = segmentLengthMm(a, b);
+  const len = edgeLengthMm(a, b);
   if (len * vp.scale < 28) return;
   const mid = worldToScreen({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, vp);
   ctx.font = "11px Source Sans 3, sans-serif";

@@ -3,6 +3,7 @@ export * from "./design-level";
 export * from "./roles";
 export * from "./milestones";
 export * from "./design-model";
+export * from "./outline-arcs";
 export * from "./payments";
 export * from "./catalog";
 export * from "./takeoff";

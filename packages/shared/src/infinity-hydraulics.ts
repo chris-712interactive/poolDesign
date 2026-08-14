@@ -22,10 +22,8 @@ import {
   waterBodyKind,
 } from "./design-model";
 import { MM_PER_FOOT, MM_PER_INCH } from "./units";
-import {
-  insideOutlineFromOutside,
-  poolWallThicknessMm,
-} from "./spa-defaults";
+import { poolWallThicknessMm } from "./spa-defaults";
+import { insetClosedOutline } from "./scene3d";
 import {
   defaultInfinityTrough,
   resolveInfinityEdges,
@@ -146,7 +144,7 @@ function mmToIn(mm: number): number {
 
 function poolSurfaceSf(pool: PoolBody): number {
   const wall = poolWallThicknessMm(pool);
-  const inside = insideOutlineFromOutside(pool.outline, wall);
+  const inside = insetClosedOutline(pool.outline, wall);
   const areaMm2 = polygonAreaMm2(inside.length >= 3 ? inside : pool.outline);
   return areaMm2 / (MM_PER_FOOT * MM_PER_FOOT);
 }
