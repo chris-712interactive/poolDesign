@@ -14,6 +14,8 @@ export type DrawToolId =
   | "sunshelf"
   | "patio"
   | "grade_point"
+  | "property_line"
+  | "easement"
   | "cover_rect"
   | "fence"
   | "gate"
@@ -37,6 +39,7 @@ export type ToolGroupId =
   | "pad"
   | "furniture"
   | "patio"
+  | "site"
   | "cover"
   | "fence"
   | "pool"
@@ -105,6 +108,18 @@ export const TOOL_GROUPS: {
       <Svg>
         <path d="M4 18V8l8-3 8 3v10" />
         <path d="M4 12h16" />
+      </Svg>
+    ),
+  },
+  {
+    id: "site",
+    realm: "land",
+    label: "Lot lines",
+    hint: "Trace property lines and easements from the survey",
+    icon: (
+      <Svg>
+        <path d="M5 5h14v14H5z" />
+        <path d="M5 12h14M12 5v14" strokeDasharray="3 2" />
       </Svg>
     ),
   },
@@ -314,6 +329,26 @@ export const TOOL_META: {
     ),
   },
   {
+    id: "property_line",
+    label: "Property line",
+    icon: (
+      <Svg>
+        <rect x="5" y="5" width="14" height="14" rx="1" strokeDasharray="3 2" />
+      </Svg>
+    ),
+  },
+  {
+    id: "easement",
+    label: "Easement",
+    icon: (
+      <Svg>
+        <path d="M4 16L16 4" strokeDasharray="3 2" />
+        <path d="M8 20L20 8" strokeDasharray="3 2" />
+        <path d="M4 20h.01M20 4h.01" />
+      </Svg>
+    ),
+  },
+  {
     id: "cover_rect",
     label: "Pergola / patio roof",
     icon: (
@@ -471,6 +506,7 @@ export function toolGroupForTool(
 ): ToolGroupId | null {
   if (isPadEquipTool(tool)) return "pad";
   if (tool === "patio" || tool === "grade_point") return "patio";
+  if (tool === "property_line" || tool === "easement") return "site";
   if (tool === "cover_rect") return "cover";
   if (tool === "fence" || tool === "gate") return "fence";
   if (tool === "plumbing") return "plumbing";

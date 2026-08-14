@@ -115,6 +115,7 @@ import {
   resolvePersonSex,
 } from "./person-options";
 import { normalizeSurveyUnderlay } from "./survey-underlay";
+import { normalizeSiteLines } from "./site-lines";
 
 const FT = 304.8;
 
@@ -154,6 +155,9 @@ export function normalizeDesignDocument(
   }
   if (!layers.some((l) => l.id === "survey")) {
     layers = [...layers, { id: "survey", name: "survey", visible: true }];
+  }
+  if (!layers.some((l) => l.id === "site")) {
+    layers = [...layers, { id: "site", name: "site", visible: true }];
   }
 
   const normalized: DesignDocument = {
@@ -413,6 +417,7 @@ export function normalizeDesignDocument(
     ),
     plumbingRuns: Array.isArray(doc.plumbingRuns) ? doc.plumbingRuns : [],
     fences: normalizeFences(doc.fences),
+    siteLines: normalizeSiteLines(doc.siteLines),
     estimate: normalizeEstimate(doc.estimate),
   };
   // Rebuild auto trenches only when they currently clip a house foundation.

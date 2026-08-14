@@ -488,6 +488,27 @@ export type FenceRun = {
   gates?: FenceGate[];
 };
 
+export type SiteLineKind = "property" | "easement";
+
+export const SITE_LINE_KINDS: SiteLineKind[] = ["property", "easement"];
+
+/**
+ * User-traced lot line or easement from a survey sheet.
+ * Not a recorded plat — confirm bearings/widths with the official survey.
+ */
+export type SiteLine = {
+  id: string;
+  name: string;
+  kind: SiteLineKind;
+  /** Vertices in plan mm. */
+  points: PointMm[];
+  /** When true, last vertex connects back to the first. */
+  closed?: boolean;
+  /** Recorded easement width (mm). Ignored on property lines; 0 = centerline only. */
+  widthMm?: number;
+  notes?: string;
+};
+
 export function fenceKindLabel(kind: FenceKind): string {
   if (kind === "wrought_iron") return "Wrought iron";
   if (kind === "chain_link") return "Chain link";
@@ -661,6 +682,8 @@ export type DesignDocument = {
   features: PoolFeature[];
   /** Property fence runs with optional gates */
   fences?: FenceRun[];
+  /** User-traced lot lines and easements (not an official survey). */
+  siteLines?: SiteLine[];
   /** Optional BOM edits (removed auto lines + custom adds) */
   estimate?: DesignEstimate;
   /** Spot elevations relative to house FFE */
@@ -706,6 +729,7 @@ export function emptyDesignDocument(
     "patio",
     "covers",
     "fence",
+    "site",
     "plumbing",
     "furniture",
     "features",
@@ -731,6 +755,7 @@ export function emptyDesignDocument(
     plumbingRuns: [],
     features: [],
     fences: [],
+    siteLines: [],
     estimate: { removedLineKeys: [], customLines: [] },
     gradeSamples: [],
     gradeOptions: { retainingTriggerMm: DEFAULT_RETAINING_TRIGGER_MM },

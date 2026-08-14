@@ -100,6 +100,9 @@ import {
   moveSurveyUnderlay,
   parseSurveyKnownLengthToMm,
   pointInSurveyUnderlay,
+  createSiteLine,
+  pointNearSiteLine,
+  siteLineLengthMm,
   surveyUnderlayWorldCorners,
   stepsRunMm,
   STANDARD_STEP_TREAD_MM,
@@ -220,6 +223,7 @@ import {
   drawInfinityEdge,
   drawNorthArrow,
   drawSurveyUnderlay,
+  drawSiteLine,
   openingEndpoints,
 } from "@/lib/cad/draw";
 import { SurveyUnderlayPanel } from "@/components/SurveyUnderlayPanel";
@@ -237,6 +241,7 @@ type Selection =
   | { kind: "coverSupport"; coverId: string; id: string }
   | { kind: "run"; id: string }
   | { kind: "fence"; id: string }
+  | { kind: "siteLine"; id: string }
   | { kind: "gate"; fenceId: string; id: string }
   | { kind: "object"; id: string }
   | { kind: "feature"; id: string }
@@ -264,6 +269,7 @@ type DragState =
         | "cover"
         | "run"
         | "fence"
+        | "siteLine"
         | "feature";
       id: string;
       index: number;
@@ -291,6 +297,7 @@ type DragState =
         | "cover"
         | "run"
         | "fence"
+        | "siteLine"
         | "object"
         | "feature"
         | "gradeSample";
@@ -404,6 +411,8 @@ function selectionOnVisibleLayer(
     case "fence":
     case "gate":
       return layerVisible(design, "fence");
+    case "siteLine":
+      return layerVisible(design, "site");
     case "object": {
       const obj = design.objects.find((o) => o.id === sel.id);
       return obj ? objectLayerVisible(design, obj) : false;
@@ -614,6 +623,13 @@ export function CadWorkspace({
         ? (design.fences ?? []).find((f) => f.id === selection.id) ?? null
         : null,
     [design.fences, selection],
+  );
+  const selectedSiteLine = useMemo(
+    () =>
+      selection?.kind === "siteLine"
+        ? (design.siteLines ?? []).find((l) => l.id === selection.id) ?? null
+        : null,
+    [design.siteLines, selection],
   );
   const selectedGate = useMemo(() => {
     if (selection?.kind !== "gate") return null;
@@ -1013,6 +1029,19 @@ export function CadWorkspace({
       }
     }
 
+    if (layerVisible(design, "site")) {
+      for (const line of design.siteLines ?? []) {
+        drawSiteLine(
+          ctx,
+          vp,
+          line,
+          selection?.kind === "siteLine" && selection.id === line.id,
+          unitSystem,
+          selection?.kind === "siteLine" && selection.id === line.id,
+        );
+      }
+    }
+
     for (const obj of design.objects ?? []) {
       if (!objectLayerVisible(design, obj)) continue;
       drawPlacedObject(
@@ -1144,8 +1173,15 @@ export function CadWorkspace({
             ? "#7a6550"
             : tool === "fence"
               ? "#2a2a2c"
-              : "#146353",
-        tool !== "plumbing" && tool !== "fence",
+              : tool === "property_line"
+                ? "#1c2430"
+                : tool === "easement"
+                  ? "#6b3fa0"
+                  : "#146353",
+        tool !== "plumbing" &&
+          tool !== "fence" &&
+          tool !== "property_line" &&
+          tool !== "easement",
         tool === "pool_poly" || tool === "patio" || tool === "house_poly",
       );
       if (
@@ -1499,6 +1535,34 @@ export function CadWorkspace({
     setLengthBuffer("");
   }
 
+  function finishSiteLine(kind: "property" | "easement", closed: boolean) {
+    if (draftPoints.length < 2) {
+      setDraftPoints([]);
+      return;
+    }
+    let layers = design.layers;
+    if (!layers.some((l) => l.id === "site")) {
+      layers = [...layers, { id: "site", name: "site", visible: true }];
+    }
+    const existing = (design.siteLines ?? []).filter((l) => l.kind === kind)
+      .length;
+    const line = createSiteLine({
+      id: newId(kind === "easement" ? "esmt" : "pl"),
+      kind,
+      points: draftPoints,
+      index: existing + 1,
+      closed,
+    });
+    commitDesign({
+      ...design,
+      layers,
+      siteLines: [...(design.siteLines ?? []), line],
+    });
+    setSelection({ kind: "siteLine", id: line.id });
+    setDraftPoints([]);
+    setLengthBuffer("");
+  }
+
   function commitGateOnFence(point: PointMm) {
     const hit = nearestFenceEdge(design.fences ?? [], point, 900);
     if (!hit) return false;
@@ -1531,6 +1595,8 @@ export function CadWorkspace({
   function finishDraft() {
     if (tool === "plumbing") finishPlumbing();
     else if (tool === "fence") finishFence();
+    else if (tool === "property_line") finishSiteLine("property", false);
+    else if (tool === "easement") finishSiteLine("easement", false);
     else if (tool === "pool_poly") finishPolygon("pool");
     else if (tool === "patio") finishPolygon("patio");
     else if (tool === "house_poly") finishPolygon("house");
@@ -1586,6 +1652,7 @@ export function CadWorkspace({
           | "cover"
           | "run"
           | "fence"
+          | "siteLine"
           | "feature";
         id: string;
         index: number;
@@ -1600,6 +1667,7 @@ export function CadWorkspace({
         | "cover"
         | "run"
         | "fence"
+        | "siteLine"
         | "feature",
       id: string,
       pts: PointMm[],
@@ -1635,6 +1703,10 @@ export function CadWorkspace({
     }
     if (selection?.kind === "fence" && selectedFence) {
       const hit = check("fence", selectedFence.id, selectedFence.points);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "siteLine" && selectedSiteLine) {
+      const hit = check("siteLine", selectedSiteLine.id, selectedSiteLine.points);
       if (hit) return hit;
     }
     if (selection?.kind === "feature" && selectedFeature) {
@@ -1923,6 +1995,14 @@ export function CadWorkspace({
         }
       }
     }
+    if (layerVisible(design, "site")) {
+      for (let i = (design.siteLines ?? []).length - 1; i >= 0; i--) {
+        const line = design.siteLines![i];
+        if (pointNearSiteLine(line, point, 160)) {
+          return { kind: "siteLine", id: line.id };
+        }
+      }
+    }
     if (layerVisible(design, "fence")) {
       for (let i = (design.fences ?? []).length - 1; i >= 0; i--) {
         const fence = design.fences![i];
@@ -2072,6 +2152,11 @@ export function CadWorkspace({
       commitDesign({
         ...d,
         fences: (d.fences ?? []).filter((f) => f.id !== sel.id),
+      });
+    } else if (sel.kind === "siteLine") {
+      commitDesign({
+        ...d,
+        siteLines: (d.siteLines ?? []).filter((l) => l.id !== sel.id),
       });
     } else if (sel.kind === "gate") {
       commitDesign({
@@ -2232,6 +2317,7 @@ export function CadWorkspace({
           hit.kind === "cover" ||
           hit.kind === "run" ||
           hit.kind === "fence" ||
+          hit.kind === "siteLine" ||
           hit.kind === "object" ||
           hit.kind === "feature" ||
           hit.kind === "gradeSample")
@@ -2378,7 +2464,9 @@ export function CadWorkspace({
       tool === "patio" ||
       tool === "house_poly" ||
       tool === "plumbing" ||
-      tool === "fence"
+      tool === "fence" ||
+      tool === "property_line" ||
+      tool === "easement"
     ) {
       const from = draftPoints[draftPoints.length - 1] ?? null;
       setShiftDown(e.shiftKey);
@@ -2386,13 +2474,18 @@ export function CadWorkspace({
       if (
         (tool === "pool_poly" ||
           tool === "patio" ||
-          tool === "house_poly") &&
+          tool === "house_poly" ||
+          tool === "property_line" ||
+          tool === "easement") &&
         draftPoints.length >= 3 &&
         segmentLengthMm(next, draftPoints[0]) <= CLOSE_TOLERANCE_MM
       ) {
-        finishPolygon(
-          tool === "patio" ? "patio" : tool === "house_poly" ? "house" : "pool",
-        );
+        if (tool === "property_line") finishSiteLine("property", true);
+        else if (tool === "easement") finishSiteLine("easement", true);
+        else
+          finishPolygon(
+            tool === "patio" ? "patio" : tool === "house_poly" ? "house" : "pool",
+          );
         return;
       }
       setDraftPoints((pts) => [...pts, next]);
@@ -2591,6 +2684,10 @@ export function CadWorkspace({
                       ? (designRef.current.fences ?? []).find(
                           (f) => f.id === drag.id,
                         )?.points
+                      : drag.kind === "siteLine"
+                        ? (designRef.current.siteLines ?? []).find(
+                            (l) => l.id === drag.id,
+                          )?.points
                       : designRef.current.plumbingRuns.find(
                           (r) => r.id === drag.id,
                         )?.points;
@@ -2687,6 +2784,21 @@ export function CadWorkspace({
                     ),
                   }
                 : f,
+            ),
+          };
+        }
+        if (drag.kind === "siteLine") {
+          return {
+            ...d,
+            siteLines: (d.siteLines ?? []).map((l) =>
+              l.id === drag.id
+                ? {
+                    ...l,
+                    points: l.points.map((pt, i) =>
+                      i === drag.index ? snapped : pt,
+                    ),
+                  }
+                : l,
             ),
           };
         }
@@ -3080,6 +3192,8 @@ export function CadWorkspace({
         (tool === "survey_calibrate" && calibratePoints.length >= 2)) &&
       (tool === "plumbing" ||
         tool === "fence" ||
+        tool === "property_line" ||
+        tool === "easement" ||
         tool === "pool_poly" ||
         tool === "patio" ||
         tool === "pool_rect" ||
@@ -3145,6 +3259,10 @@ export function CadWorkspace({
                     ? "Click to place a grade point. Set drop/rise from house FFE in Properties."
                   : tool === "fence"
                     ? `Draw ${fenceKindLabel(fenceKind).toLowerCase()} fence path. Hold Shift for 90°. Finish draft when done. Set color in Properties.`
+                    : tool === "property_line"
+                      ? "Trace the property line from the survey. Hold Shift for 90°. Click near start to close, or Finish for an open run."
+                      : tool === "easement"
+                        ? "Trace the easement centerline from the survey. Hold Shift for 90°. Finish when done; set recorded width in Properties."
                     : tool === "gate"
                       ? `Click a fence segment to place a ${gateKindLabel(gateKind).toLowerCase()} gate. Drag to slide; edit size in Properties.`
                     : tool === "plumbing"
@@ -3240,7 +3358,10 @@ export function CadWorkspace({
                   projectName={projectName}
                   exportHandleRef={scene3dHandleRef}
                   selection={
-                    selection?.kind === "gradeSample" ? null : selection
+                    selection?.kind === "gradeSample" ||
+                    selection?.kind === "siteLine"
+                      ? null
+                      : selection
                   }
                   onSelect={(sel) => {
                     setSelection(sel);
@@ -3261,6 +3382,8 @@ export function CadWorkspace({
                       if (
                         tool === "plumbing" ||
                         tool === "fence" ||
+                        tool === "property_line" ||
+                        tool === "easement" ||
                         tool === "pool_poly" ||
                         tool === "patio" ||
                         tool === "house_poly"
@@ -3332,6 +3455,8 @@ export function CadWorkspace({
                         ? "Run total"
                         : tool === "fence"
                           ? "Fence total"
+                          : tool === "property_line" || tool === "easement"
+                            ? "Line total"
                           : "Path"}
                       :{" "}
                       {draftPoints.length > 0
@@ -3339,6 +3464,11 @@ export function CadWorkspace({
                             polylineLengthMm(draftPoints) + draftSegmentMm,
                             unitSystem,
                           )
+                        : selectedSiteLine
+                          ? formatLength(
+                              siteLineLengthMm(selectedSiteLine),
+                              unitSystem,
+                            )
                         : selectedFence
                           ? formatLength(
                               polylineLengthMm(selectedFence.points),
@@ -3418,17 +3548,24 @@ export function CadWorkspace({
                     tool === "patio" ||
                     tool === "house_poly" ||
                     tool === "plumbing" ||
-                    tool === "fence"
+                    tool === "fence" ||
+                    tool === "property_line" ||
+                    tool === "easement"
                   }
                   finishDraftLabel={
                     tool === "plumbing"
                       ? "Finish run"
                       : tool === "fence"
                         ? "Finish fence"
+                        : tool === "property_line" || tool === "easement"
+                          ? "Finish line"
                         : "Close shape"
                   }
                   canFinishDraft={
-                    tool === "plumbing" || tool === "fence"
+                    tool === "plumbing" ||
+                    tool === "fence" ||
+                    tool === "property_line" ||
+                    tool === "easement"
                       ? draftPoints.length >= 2
                       : draftPoints.length >= 3
                   }
@@ -4887,6 +5024,105 @@ export function CadWorkspace({
                       onClick={deleteSelection}
                     >
                       Delete fence
+                    </button>
+                  </div>
+                )}
+                {selectedSiteLine && (
+                  <div className="stack">
+                    <strong>{selectedSiteLine.name}</strong>
+                    <div className="muted" style={{ fontSize: "0.85rem" }}>
+                      {formatLength(
+                        siteLineLengthMm(selectedSiteLine),
+                        unitSystem,
+                      )}
+                      {selectedSiteLine.closed ? " · closed" : " · open"}
+                    </div>
+                    <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
+                      Traced from the survey. Confirm bearings and widths with
+                      the recorded plat — this is not an official property
+                      survey.
+                    </p>
+                    <div className="field">
+                      <label htmlFor="siteline-name">Name</label>
+                      <input
+                        id="siteline-name"
+                        key={`sl-name-${selectedSiteLine.id}`}
+                        defaultValue={selectedSiteLine.name}
+                        onBlur={(e) => {
+                          const name = e.target.value.trim();
+                          if (!name || name === selectedSiteLine.name) return;
+                          commitDesign({
+                            ...design,
+                            siteLines: (design.siteLines ?? []).map((l) =>
+                              l.id === selectedSiteLine.id ? { ...l, name } : l,
+                            ),
+                          });
+                        }}
+                      />
+                    </div>
+                    <label className="row" style={{ gap: "0.35rem", fontSize: "0.85rem" }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedSiteLine.closed)}
+                        disabled={selectedSiteLine.points.length < 3}
+                        onChange={(e) =>
+                          commitDesign({
+                            ...design,
+                            siteLines: (design.siteLines ?? []).map((l) =>
+                              l.id === selectedSiteLine.id
+                                ? { ...l, closed: e.target.checked }
+                                : l,
+                            ),
+                          })
+                        }
+                      />
+                      Closed loop
+                    </label>
+                    {selectedSiteLine.kind === "easement" ? (
+                      <div className="field">
+                        <label htmlFor="siteline-width">Easement width</label>
+                        <input
+                          id="siteline-width"
+                          key={`sl-w-${selectedSiteLine.id}-${selectedSiteLine.widthMm}`}
+                          defaultValue={
+                            (selectedSiteLine.widthMm ?? 0) > 0
+                              ? formatLength(selectedSiteLine.widthMm ?? 0, unitSystem)
+                              : ""
+                          }
+                          placeholder={unitSystem === "metric" ? "e.g. 3" : "e.g. 10'"}
+                          onBlur={(e) => {
+                            const raw = e.target.value.trim();
+                            if (!raw) {
+                              commitDesign({
+                                ...design,
+                                siteLines: (design.siteLines ?? []).map((l) =>
+                                  l.id === selectedSiteLine.id
+                                    ? { ...l, widthMm: 0 }
+                                    : l,
+                                ),
+                              });
+                              return;
+                            }
+                            const mm = parseSurveyKnownLengthToMm(raw, unitSystem);
+                            if (mm == null || mm < 0) return;
+                            commitDesign({
+                              ...design,
+                              siteLines: (design.siteLines ?? []).map((l) =>
+                                l.id === selectedSiteLine.id
+                                  ? { ...l, widthMm: mm }
+                                  : l,
+                              ),
+                            });
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
+                    >
+                      Delete
                     </button>
                   </div>
                 )}
@@ -7158,6 +7394,7 @@ function translateDesign(
     | "cover"
     | "run"
     | "fence"
+    | "siteLine"
     | "object"
     | "feature"
     | "gradeSample",
@@ -7233,6 +7470,14 @@ function translateDesign(
       ...d,
       fences: (d.fences ?? []).map((f) =>
         f.id === id ? { ...f, points: f.points.map(shift) } : f,
+      ),
+    };
+  }
+  if (kind === "siteLine") {
+    return {
+      ...d,
+      siteLines: (d.siteLines ?? []).map((l) =>
+        l.id === id ? { ...l, points: l.points.map(shift) } : l,
       ),
     };
   }

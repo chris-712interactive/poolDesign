@@ -14,10 +14,13 @@ import {
   objectPlanSizeMm,
   resolveHouseExteriorColor,
   segmentLengthMm,
+  siteLineEdgeTag,
+  siteLineSegments,
   type Building,
   type BuildingOpening,
   type FenceGate,
   type FenceRun,
+  type SiteLine,
   type GradeSample,
   type PatioCover,
   type PlacedObject,
@@ -466,6 +469,73 @@ export function drawFence(
       ctx.fill();
       ctx.stroke();
     }
+  }
+  ctx.restore();
+}
+
+export function drawSiteLine(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  line: SiteLine,
+  selected: boolean,
+  unitSystem: UnitSystem,
+  showVertices: boolean,
+) {
+  const segs = siteLineSegments(line);
+  if (segs.length === 0) return;
+  const isEasement = line.kind === "easement";
+  const stroke = selected ? "#0f5c4a" : isEasement ? "#6b3fa0" : "#1c2430";
+  const tag = siteLineEdgeTag(line.kind);
+
+  ctx.save();
+  if (isEasement && (line.widthMm ?? 0) > 8) {
+    ctx.strokeStyle = selected
+      ? "rgba(15,92,74,0.22)"
+      : "rgba(107,63,160,0.2)";
+    ctx.lineWidth = Math.max(4, (line.widthMm ?? 0) * vp.scale);
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "miter";
+    ctx.beginPath();
+    line.points.forEach((p, i) => {
+      const c = worldToScreen(p, vp);
+      if (i === 0) ctx.moveTo(c.x, c.y);
+      else ctx.lineTo(c.x, c.y);
+    });
+    if (line.closed) ctx.closePath();
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = selected ? 3 : isEasement ? 2.25 : 2.5;
+  ctx.setLineDash(isEasement ? [7, 5] : [12, 7]);
+  ctx.beginPath();
+  line.points.forEach((p, i) => {
+    const c = worldToScreen(p, vp);
+    if (i === 0) ctx.moveTo(c.x, c.y);
+    else ctx.lineTo(c.x, c.y);
+  });
+  if (line.closed) ctx.closePath();
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  for (const [a, b] of segs) {
+    drawEdgeLabel(ctx, vp, a, b, unitSystem);
+    const mid = worldToScreen({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, vp);
+    ctx.font = "700 10px Source Sans 3, sans-serif";
+    ctx.fillStyle = stroke;
+    ctx.fillText(tag, mid.x + 6, mid.y + 12);
+  }
+
+  const verts = showVertices ? line.points : [];
+  for (const p of verts) {
+    const c = worldToScreen(p, vp);
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = "#0f5c4a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
   }
   ctx.restore();
 }

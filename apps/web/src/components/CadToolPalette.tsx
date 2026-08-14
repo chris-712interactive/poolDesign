@@ -157,6 +157,10 @@ export function CadToolPalette({
         ? `Click a fence run to place a ${gateKindLabel(gateKind).toLowerCase()} gate.`
         : tool === "fence"
           ? `Draw a ${fenceKindLabel(fenceKind).toLowerCase()} fence path. Finish when ready.`
+          : tool === "property_line"
+            ? "Trace the lot line from the survey. Close near start, or Finish for an open run."
+            : tool === "easement"
+              ? "Trace the easement centerline. Set the recorded width in Properties."
           : tool === "cover_rect"
             ? coverKind === "roof"
               ? "Patio roof: side, then depth."
@@ -330,6 +334,39 @@ export function CadToolPalette({
                       <p className="muted cad-tool-group-note">
                         Grade points: drop/rise from house FFE. Set patio strategy
                         for fill and/or retaining.
+                      </p>
+                    </>
+                  )}
+
+                  {group.id === "site" && (
+                    <>
+                      <div className="cad-icon-toolbar cad-icon-toolbar-2">
+                        <button
+                          type="button"
+                          className={`tool-icon-btn ${tool === "property_line" ? "active" : ""}`}
+                          title="Property line"
+                          aria-label="Property line"
+                          onClick={() => activateDraw("property_line")}
+                        >
+                          {toolMeta("property_line").icon}
+                          <ToolTooltip label="Property line" />
+                        </button>
+                        <button
+                          type="button"
+                          className={`tool-icon-btn ${tool === "easement" ? "active" : ""}`}
+                          title="Easement"
+                          aria-label="Easement"
+                          onClick={() => activateDraw("easement")}
+                        >
+                          {toolMeta("easement").icon}
+                          <ToolTooltip label="Easement" />
+                        </button>
+                      </div>
+                      <p className="muted cad-tool-group-note">
+                        Trace from the calibrated survey. Click near the start to
+                        close a loop. Set easement width in Properties. Confirm
+                        with the recorded plat — these are not official survey
+                        lines.
                       </p>
                     </>
                   )}
