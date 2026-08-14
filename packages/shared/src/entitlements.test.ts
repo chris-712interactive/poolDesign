@@ -70,6 +70,19 @@ describe("grade-walk", () => {
     assert.equal(samples[1].dropMm, 457.2);
   });
 
+  it("places a walk from a signed plan origin (house corner in −X/−Y)", () => {
+    const origin = { x: -1.48 * 304.8, y: -37.61 * 304.8 };
+    const samples = gradeWalkToSamples({
+      origin,
+      bearingDeg: 150,
+      points: [{ distanceMm: 0, dropMm: 0 }],
+    });
+    assert.equal(samples.length, 1);
+    assert.ok(Math.abs(samples[0].position.x - origin.x) < 1e-6);
+    assert.ok(Math.abs(samples[0].position.y - origin.y) < 1e-6);
+    assert.equal(samples[0].rotationDeg, 150);
+  });
+
   it("replaces prior ar_grade samples when requested", () => {
     const existing = [
       { id: "grade_manual", position: { x: 1, y: 1 }, dropMm: 100 },

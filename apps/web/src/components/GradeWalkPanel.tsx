@@ -28,10 +28,24 @@ type Props = {
 
 type Row = { distance: string; drop: string };
 
-function parseLengthToMm(raw: string, unitSystem: UnitSystem): number | null {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return null;
+/** Plan X/Y and drop/rise — signed feet or meters from the labeled fields. */
+function parseSignedDisplayToMm(
+  raw: string,
+  unitSystem: UnitSystem,
+): number | null {
+  const n = Number(raw.trim());
+  if (!Number.isFinite(n)) return null;
   return unitSystem === "metric" ? n * 1000 : n * 304.8;
+}
+
+/** Walk distance along the transect — must be ≥ 0. */
+function parseDistanceToMm(
+  raw: string,
+  unitSystem: UnitSystem,
+): number | null {
+  const mm = parseSignedDisplayToMm(raw, unitSystem);
+  if (mm == null || mm < 0) return null;
+  return mm;
 }
 
 /**
@@ -85,8 +99,8 @@ export function GradeWalkPanel({
   const previewCount = useMemo(() => {
     const points = rows
       .map((r) => {
-        const distanceMm = parseLengthToMm(r.distance, unitSystem);
-        const dropMm = parseLengthToMm(r.drop, unitSystem);
+        const distanceMm = parseDistanceToMm(r.distance, unitSystem);
+        const dropMm = parseSignedDisplayToMm(r.drop, unitSystem);
         if (distanceMm == null || dropMm == null) return null;
         if (headingDeg != null && distanceMm < 1e-6) return null;
         return { distanceMm, dropMm };
@@ -109,8 +123,8 @@ export function GradeWalkPanel({
   async function applyLocal() {
     setError(null);
     setMessage(null);
-    const ox = parseLengthToMm(originX, unitSystem);
-    const oy = parseLengthToMm(originY, unitSystem);
+    const ox = parseSignedDisplayToMm(originX, unitSystem);
+    const oy = parseSignedDisplayToMm(originY, unitSystem);
     const bearingDeg = Number(bearing);
     if (ox == null || oy == null || !Number.isFinite(bearingDeg)) {
       setError("Enter a valid origin and rotation.");
@@ -118,8 +132,8 @@ export function GradeWalkPanel({
     }
     const points = [];
     for (const r of rows) {
-      const distanceMm = parseLengthToMm(r.distance, unitSystem);
-      const dropMm = parseLengthToMm(r.drop, unitSystem);
+      const distanceMm = parseDistanceToMm(r.distance, unitSystem);
+      const dropMm = parseSignedDisplayToMm(r.drop, unitSystem);
       if (distanceMm == null || dropMm == null) {
         setError("Each row needs distance and drop/rise.");
         return;
@@ -153,18 +167,20 @@ export function GradeWalkPanel({
     setError(null);
     setMessage(null);
     try {
-      const ox = parseLengthToMm(originX, unitSystem);
-      const oy = parseLengthToMm(originY, unitSystem);
+      const ox = parseSignedDisplayToMm(originX, unitSystem);
+      const oy = parseSignedDisplayToMm(originY, unitSystem);
       const bearingDeg = Number(bearing);
       if (ox == null || oy == null || !Number.isFinite(bearingDeg)) {
         throw new Error("Enter a valid origin and rotation.");
       }
       const points = rows
         .map((r) => {
-          const distanceMm = parseLengthToMm(r.distance, unitSystem)!;
-          const dropMm = parseLengthToMm(r.drop, unitSystem)!;
+          const distanceMm = parseDistanceToMm(r.distance, unitSystem);
+          const dropMm = parseSignedDisplayToMm(r.drop, unitSystem);
+          if (distanceMm == null || dropMm == null) return null;
           return { distanceMm, dropMm };
         })
+        .filter((p): p is { distanceMm: number; dropMm: number } => p != null)
         .filter((p) => headingDeg == null || p.distanceMm >= 1e-6);
       const res = await fetch(`/api/projects/${projectId}/grade-walk`, {
         method: "POST",
