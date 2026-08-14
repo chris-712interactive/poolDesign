@@ -372,6 +372,16 @@ function isRectDrawTool(tool: Tool): boolean {
   );
 }
 
+function isClosedOutlineTool(tool: Tool): boolean {
+  return (
+    tool === "pool_poly" ||
+    tool === "patio" ||
+    tool === "house_poly" ||
+    tool === "property_line" ||
+    tool === "easement"
+  );
+}
+
 function newId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -531,6 +541,10 @@ export function CadWorkspace({
   const selectionRef = useRef<Selection>(null);
   const lengthBufferRef = useRef("");
   const draftPointsRef = useRef<PointMm[]>([]);
+  const lastDraftPointerRef = useRef<{ t: number; x: number; y: number } | null>(
+    null,
+  );
+  const suppressDraftUntilRef = useRef(0);
   const deleteSelectionRef = useRef<() => void>(() => {});
   selectionRef.current = selection;
   lengthBufferRef.current = lengthBuffer;
@@ -777,8 +791,30 @@ export function CadWorkspace({
     ) {
       return cursor;
     }
+    // Closing snap beats ortho / angle snap so the rubber-band doesn't
+    // square off a rectangle instead of closing on the first corner.
+    const minClosePts =
+      tool === "property_line" || tool === "easement" ? 2 : 3;
+    if (
+      isClosedOutlineTool(tool) &&
+      draftPoints.length >= minClosePts &&
+      segmentLengthMm(cursor, draftPoints[0]) <=
+        Math.max(
+          CLOSE_TOLERANCE_MM,
+          CLOSE_TOLERANCE_PX / Math.max(1e-6, vp.scale),
+        )
+    ) {
+      return draftPoints[0];
+    }
     return constrainPoint(draftPoints[draftPoints.length - 1], cursor);
-  }, [constrainPoint, cursor, draftPoints, tool, wallFixturePreview]);
+  }, [
+    constrainPoint,
+    cursor,
+    draftPoints,
+    tool,
+    vp.scale,
+    wallFixturePreview,
+  ]);
 
   const draftSegmentMm = useMemo(() => {
     if (!previewPoint || draftPoints.length === 0) return 0;
@@ -1360,6 +1396,20 @@ export function CadWorkspace({
     return CLOSE_TOLERANCE_PX / Math.max(1e-6, vp.scale);
   }
 
+  function draftCloseToleranceMm() {
+    return Math.max(CLOSE_TOLERANCE_MM, closeToleranceMm());
+  }
+
+  function clearDraft(suppressNextClickMs = 0) {
+    draftPointsRef.current = [];
+    lastDraftPointerRef.current = null;
+    setDraftPoints([]);
+    setLengthBuffer("");
+    if (suppressNextClickMs > 0) {
+      suppressDraftUntilRef.current = performance.now() + suppressNextClickMs;
+    }
+  }
+
   /** Copy draft vertices into a closed outline; drop a duplicate closing click. */
   function outlineFromDraft(): PointMm[] | null {
     const pts = draftPointsRef.current;
@@ -1371,7 +1421,7 @@ export function CadWorkspace({
       }
       return out;
     });
-    const tol = Math.max(CLOSE_TOLERANCE_MM, closeToleranceMm());
+    const tol = draftCloseToleranceMm();
     if (segmentLengthMm(copied[0], copied[copied.length - 1]) <= tol) {
       copied.pop();
     }
@@ -1416,8 +1466,7 @@ export function CadWorkspace({
       commitDesign(applyPoolPackage(base, pkg));
       setSelection({ kind: "pool", id: pkg.body.id });
     }
-    setDraftPoints([]);
-    setLengthBuffer("");
+    clearDraft();
   }
 
   function commitBuilding(outline: PointMm[]) {
@@ -1436,8 +1485,7 @@ export function CadWorkspace({
       buildings: [...(base.buildings ?? []), building],
     });
     setSelection({ kind: "building", id: building.id });
-    setDraftPoints([]);
-    setLengthBuffer("");
+    clearDraft();
   }
 
   function commitPatioCover(outline: PointMm[]) {
@@ -1471,8 +1519,7 @@ export function CadWorkspace({
       patioCovers: [...(design.patioCovers ?? []), cover],
     });
     setSelection({ kind: "cover", id: cover.id });
-    setDraftPoints([]);
-    setLengthBuffer("");
+    clearDraft();
   }
 
   function commitOpeningOnWall(point: PointMm) {
@@ -1521,8 +1568,7 @@ export function CadWorkspace({
     const base = withLayersVisible(design, "patio", "deck");
     commitDesign({ ...base, patios: [...base.patios, patio] });
     setSelection({ kind: "patio", id: patio.id });
-    setDraftPoints([]);
-    setLengthBuffer("");
+    clearDraft();
   }
 
   function finishPolygon(kind: "pool" | "patio" | "house") {
@@ -1535,6 +1581,9 @@ export function CadWorkspace({
     } else {
       commitPatio(outline);
     }
+    // Swallow the second click of a double-click-to-close so it doesn't
+    // start a new patio/pool/house on the end of the one just finished.
+    suppressDraftUntilRef.current = performance.now() + 450;
   }
 
   function finishPlumbing() {
@@ -1609,8 +1658,7 @@ export function CadWorkspace({
       siteLines: [...(design.siteLines ?? []), line],
     });
     setSelection({ kind: "siteLine", id: line.id });
-    setDraftPoints([]);
-    setLengthBuffer("");
+    clearDraft(closed ? 450 : 0);
   }
 
   function commitGateOnFence(point: PointMm) {
@@ -2366,6 +2414,10 @@ export function CadWorkspace({
       return;
     }
 
+    if (performance.now() < suppressDraftUntilRef.current) {
+      return;
+    }
+
     if (tool === "select") {
       const rotateId = hitRotateHandle(point);
       if (rotateId) {
@@ -2591,16 +2643,14 @@ export function CadWorkspace({
     ) {
       const from = draftPoints[draftPoints.length - 1] ?? null;
       setShiftDown(e.shiftKey);
-      const next = constrainPoint(from, point, ortho || e.shiftKey);
-      const closeTol = Math.max(CLOSE_TOLERANCE_MM, closeToleranceMm());
+      const closeTol = draftCloseToleranceMm();
+      // Close using the raw click, not the ortho/angle-snapped point.
+      // Otherwise Shift/ortho squares off a rectangle to the first corner
+      // instead of closing (often a 45×23-style box on the end).
       if (
-        (tool === "pool_poly" ||
-          tool === "patio" ||
-          tool === "house_poly" ||
-          tool === "property_line" ||
-          tool === "easement") &&
+        isClosedOutlineTool(tool) &&
         draftPoints.length >= 2 &&
-        segmentLengthMm(next, draftPoints[0]) <= closeTol
+        segmentLengthMm(point, draftPoints[0]) <= closeTol
       ) {
         if (tool === "property_line") finishSiteLine("property", true);
         else if (tool === "easement") finishSiteLine("easement", true);
@@ -2610,6 +2660,41 @@ export function CadWorkspace({
           );
         return;
       }
+
+      const now = performance.now();
+      const last = lastDraftPointerRef.current;
+      const isDouble =
+        !!last &&
+        now - last.t < 400 &&
+        Math.hypot(local.x - last.x, local.y - last.y) < CLOSE_TOLERANCE_PX * 1.5;
+      lastDraftPointerRef.current = { t: now, x: local.x, y: local.y };
+      if (isDouble) {
+        if (tool === "plumbing" || tool === "fence") {
+          finishDraft();
+          return;
+        }
+        if (
+          (tool === "pool_poly" ||
+            tool === "patio" ||
+            tool === "house_poly") &&
+          draftPoints.length >= 3
+        ) {
+          finishPolygon(
+            tool === "patio" ? "patio" : tool === "house_poly" ? "house" : "pool",
+          );
+          return;
+        }
+        if (tool === "property_line" && draftPoints.length >= 2) {
+          finishSiteLine("property", false);
+          return;
+        }
+        if (tool === "easement" && draftPoints.length >= 2) {
+          finishSiteLine("easement", false);
+          return;
+        }
+      }
+
+      const next = constrainPoint(from, point, ortho || e.shiftKey);
       setDraftPoints((pts) => [...pts, next]);
       setLengthBuffer("");
     }
@@ -3334,8 +3419,7 @@ export function CadWorkspace({
       return;
     }
     if (e.key === "Escape") {
-      setDraftPoints([]);
-      setLengthBuffer("");
+      clearDraft();
       setMeasurePoints([]);
       setCalibratePoints([]);
       setSelection(null);
@@ -3466,7 +3550,7 @@ export function CadWorkspace({
                   ? "Trace spa outline. Hold Shift for 90° lines. Close near start. After drawing, drag the circle on an edge to add a curve."
                   : "Click pool corners. Hold Shift for 90° lines. Type length + Enter. Close near start. After drawing, drag the circle on an edge to add a curve."
                 : tool === "patio"
-                  ? "Click corners. Hold Shift for 90° lines. Type length + Enter. Close near start. After drawing, drag the circle on an edge to add a curve."
+                  ? "Click corners. Hold Shift for 90° lines. Type length + Enter. Click the first corner to close. After drawing, drag the circle on an edge to add a curve."
                   : tool === "patio_rect"
                     ? draftPoints.length === 0
                       ? "Patio: click first corner of one side, then second, then depth."
@@ -3788,8 +3872,7 @@ export function CadWorkspace({
                   onTool={(next) => {
                     toolRef.current = next;
                     setTool(next);
-                    setDraftPoints([]);
-                    setLengthBuffer("");
+                    clearDraft();
                     if (next !== "measure") setMeasurePoints([]);
                     if (next !== "survey_calibrate") setCalibratePoints([]);
                     if (next === "survey_calibrate") startSurveyCalibrate();
