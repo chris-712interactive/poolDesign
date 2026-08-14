@@ -1898,9 +1898,35 @@ function gateWorldBasis(
   const lz = wb.z - wa.z;
   const len = Math.hypot(lx, lz) || 1;
   const along = { x: lx / len, z: lz / len };
-  const ow = { x: -outward.x, z: -outward.y };
-  const olen = Math.hypot(ow.x, ow.z) || 1;
-  return { along, out: { x: ow.x / olen, z: ow.z / olen } };
+  // Face normal must be perpendicular to THIS leaf (open or closed), not the
+  // closed fence line — otherwise hardware floats off a swung / racked leaf.
+  let nx = -along.z;
+  let nz = along.x;
+  const want = { x: -outward.x, z: -outward.y };
+  if (nx * want.x + nz * want.z < 0) {
+    nx = -nx;
+    nz = -nz;
+  }
+  const nlen = Math.hypot(nx, nz) || 1;
+  return { along, out: { x: nx / nlen, z: nz / nlen } };
+}
+
+/** World point on a racked leaf: t along the bottom rail, upM above that rail. */
+function rackedLeafPoint(
+  wa: { x: number; z: number },
+  wb: { x: number; z: number },
+  y0: number,
+  y1: number,
+  out: { x: number; z: number },
+  t: number,
+  upM: number,
+  outM: number,
+): { x: number; y: number; z: number } {
+  return {
+    x: wa.x + (wb.x - wa.x) * t + out.x * outM,
+    y: y0 + (y1 - y0) * t + upM,
+    z: wa.z + (wb.z - wa.z) * t + out.z * outM,
+  };
 }
 
 export function buildSceneModel(
@@ -3385,6 +3411,10 @@ export function buildSceneModel(
                 ];
 
         leaves.forEach((leaf, li) => {
+          const privacy = fence.kind === "wood" || fence.kind === "vinyl";
+          const leafThickM = privacy
+            ? Math.max(thickM * 0.95, postSizeM * 0.85)
+            : thickM * 0.95;
           pushRackedPanel(
             `gate_${fence.id}_${gate.id}_leaf${li}`,
             leaf.a,
@@ -3407,24 +3437,24 @@ export function buildSceneModel(
           const { along, out } = gateWorldBasis(leaf.a, leaf.b, outward);
           const wa = planToWorldXZ(leaf.a);
           const wb = planToWorldXZ(leaf.b);
-          const yBase =
-            (fenceBaseY(leaf.a) + fenceBaseY(leaf.b)) / 2 + clearanceM;
-          const alongT = (t: number, y: number, outM: number) => ({
-            x: wa.x + (wb.x - wa.x) * t + out.x * outM,
-            y,
-            z: wa.z + (wb.z - wa.z) * t + out.z * outM,
-          });
-          const stileT = leaf.hingeAtStart ? 0.06 : 0.94;
-          const latchT = leaf.hingeAtStart ? 0.94 : 0.06;
-          const faceOut = thickM * 0.55;
+          const y0 = fenceBaseY(leaf.a) + clearanceM;
+          const y1 = fenceBaseY(leaf.b) + clearanceM;
+          const leafLenM = Math.hypot(wb.x - wa.x, wb.z - wa.z) || 1;
+          const stileInsetT = Math.min(0.12, 0.05 / leafLenM);
+          const alongT = (t: number, upM: number, outM: number) =>
+            rackedLeafPoint(wa, wb, y0, y1, out, t, upM, outM);
+          const stileT = leaf.hingeAtStart ? stileInsetT : 1 - stileInsetT;
+          const latchT = leaf.hingeAtStart ? 1 - stileInsetT : stileInsetT;
+          const faceOut = leafThickM / 2;
+          const leafHMm = Math.round(leafHM * 1000);
 
           if (gate.kind !== "sliding") {
-            for (const hMm of poolGateHingeHeightsMm(gateHMm)) {
-              const hy = yBase + mmToMeters(hMm);
+            for (const hMm of poolGateHingeHeightsMm(leafHMm)) {
+              const upM = mmToMeters(hMm);
               // Barrels on the outside face of the hinge stile.
               pushGateBox(
                 `gate_${fence.id}_${gate.id}_h${li}_${Math.round(hMm)}`,
-                alongT(stileT, hy, faceOut + 0.018),
+                alongT(stileT, upM, faceOut + 0.02),
                 { x: 0.038, y: 0.09, z: 0.038 },
                 along,
                 "gateSteel",
@@ -3434,7 +3464,7 @@ export function buildSceneModel(
               // TruClose-style spring body, also outside.
               pushGateBox(
                 `gate_${fence.id}_${gate.id}_s${li}_${Math.round(hMm)}`,
-                alongT(stileT, hy + 0.04, faceOut + 0.048),
+                alongT(stileT, upM + 0.04, faceOut + 0.05),
                 { x: 0.028, y: 0.16, z: 0.028 },
                 along,
                 "gateSteel",
@@ -3447,7 +3477,7 @@ export function buildSceneModel(
             for (const t of [0.18, 0.5, 0.82]) {
               pushGateBox(
                 `gate_${fence.id}_${gate.id}_roll_${t}`,
-                alongT(t, yBase + leafHM - 0.03, faceOut + 0.02),
+                alongT(t, leafHM - 0.03, faceOut + 0.02),
                 { x: 0.05, y: 0.048, z: 0.048 },
                 along,
                 "gateSteel",
@@ -3457,13 +3487,13 @@ export function buildSceneModel(
             }
           }
 
-          const latch = poolGateLatchSpec(gateHMm);
+          const latch = poolGateLatchSpec(leafHMm);
           const latchFace =
-            latch.face === "outside" ? faceOut + 0.03 : -(faceOut + 0.03);
-          const latchY = yBase + mmToMeters(latch.heightMm);
+            latch.face === "outside" ? faceOut + 0.035 : -(faceOut + 0.035);
+          const latchUp = mmToMeters(latch.heightMm);
           pushGateBox(
             `gate_${fence.id}_${gate.id}_latch${li}`,
-            alongT(latchT, latchY, latchFace),
+            alongT(latchT, latchUp, latchFace),
             { x: 0.055, y: 0.2, z: 0.07 },
             along,
             "gateLatch",
@@ -3471,7 +3501,11 @@ export function buildSceneModel(
           );
           pushGateBox(
             `gate_${fence.id}_${gate.id}_btn${li}`,
-            alongT(latchT, latchY + 0.12, latchFace + (latch.face === "outside" ? 0.01 : -0.01)),
+            alongT(
+              latchT,
+              latchUp + 0.12,
+              latchFace + (latch.face === "outside" ? 0.01 : -0.01),
+            ),
             { x: 0.034, y: 0.042, z: 0.034 },
             along,
             "gateButton",
