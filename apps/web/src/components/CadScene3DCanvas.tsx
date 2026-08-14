@@ -620,6 +620,7 @@ function ExtrudeMesh({
           waterLayer={waterLayer}
           patioFinishId={desc.patioFinishId}
           waterShallow={desc.waterShallow}
+          colorHex={desc.colorHex}
         />
       </mesh>
       {desc.material === "poolFloor" ? (

@@ -413,3 +413,84 @@ export function stepsTreadOutline(
     { x: c.x + u.x * -hw + v.x * along1, y: c.y + u.y * -hw + v.y * along1 },
   ];
 }
+
+function openPlanRing(outline: PointMm[]): PointMm[] {
+  if (outline.length < 3) return outline;
+  const first = outline[0];
+  const last = outline[outline.length - 1];
+  if (Math.hypot(first.x - last.x, first.y - last.y) < 1) {
+    return outline.slice(0, -1);
+  }
+  return outline;
+}
+
+/** Shoelace signed area in plan mm². Positive ⇒ CCW in coordinate space. */
+export function planSignedAreaMm2(outline: PointMm[]): number {
+  const pts = openPlanRing(outline);
+  if (pts.length < 3) return 0;
+  let sum = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return sum / 2;
+}
+
+/** Unit outward normal for an edge (dx,dy) on a ring with the given signed area. */
+export function edgeOutwardNormal(
+  dx: number,
+  dy: number,
+  signedArea: number,
+): PointMm {
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  // CCW (positive area): interior is to the left, outward is to the right.
+  if (signedArea >= 0) return { x: uy, y: -ux };
+  return { x: -uy, y: ux };
+}
+
+/**
+ * Parallel offset of a closed plan outline (miter joins).
+ * Positive `deltaMm` expands (eaves); negative insets (floor slabs).
+ * Unlike a radial centroid expand, this keeps walls parallel — required for
+ * L / U footprints so the roof does not web across a notch.
+ */
+export function offsetClosedOutline(
+  outline: PointMm[],
+  deltaMm: number,
+): PointMm[] {
+  const pts = openPlanRing(outline);
+  if (pts.length < 3 || !Number.isFinite(deltaMm) || Math.abs(deltaMm) < 1e-6) {
+    return pts.map((p) => ({ x: p.x, y: p.y }));
+  }
+  const area = planSignedAreaMm2(pts);
+  const miterLimit = 4;
+  const out: PointMm[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const prev = pts[(i - 1 + pts.length) % pts.length];
+    const cur = pts[i];
+    const next = pts[(i + 1) % pts.length];
+    const n0 = edgeOutwardNormal(cur.x - prev.x, cur.y - prev.y, area);
+    const n1 = edgeOutwardNormal(next.x - cur.x, next.y - cur.y, area);
+    const sx = n0.x + n1.x;
+    const sy = n0.y + n1.y;
+    const slen = Math.hypot(sx, sy);
+    if (slen < 1e-6) {
+      out.push({ x: cur.x + n0.x * deltaMm, y: cur.y + n0.y * deltaMm });
+      continue;
+    }
+    const ux = sx / slen;
+    const uy = sy / slen;
+    const cos = n0.x * ux + n0.y * uy;
+    const mag =
+      Math.abs(cos) < 0.15
+        ? Math.sign(deltaMm) * Math.abs(deltaMm) * miterLimit
+        : deltaMm / cos;
+    const cap = miterLimit * Math.abs(deltaMm);
+    const d = Math.max(-cap, Math.min(cap, mag));
+    out.push({ x: cur.x + ux * d, y: cur.y + uy * d });
+  }
+  return out;
+}

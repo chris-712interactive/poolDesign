@@ -30,6 +30,9 @@ import {
   houseExteriorHex,
   mmToMeters,
   openingSillMm,
+  offsetClosedOutline,
+  edgeOutwardNormal,
+  planSignedAreaMm2,
   poolWallThicknessMm,
   resolveCeilingHeightMm,
   resolveFenceFinish,
@@ -157,6 +160,8 @@ export type ExtrudeDescriptor = {
    * reads lighter than the deep end — not the deep-basin thickness model.
    */
   waterShallow?: boolean;
+  /** Exterior wall tint (corner fillers matching wall panels). */
+  colorHex?: string;
 } & Selectable;
 
 export type BoxDescriptor = {
@@ -435,26 +440,6 @@ function closeOutline(outline: PointMm[]): PointMm[] {
   const last = outline[outline.length - 1];
   if (Math.hypot(first.x - last.x, first.y - last.y) < 1) return outline;
   return [...outline, first];
-}
-
-/** Expand a plan outline away from its centroid (eaves / roof overhang). */
-function expandOutlineFromCentroid(outline: PointMm[], mm: number): PointMm[] {
-  const open =
-    outline.length > 1 &&
-    Math.hypot(
-      outline[0].x - outline[outline.length - 1].x,
-      outline[0].y - outline[outline.length - 1].y,
-    ) < 1
-      ? outline.slice(0, -1)
-      : outline;
-  if (open.length < 3) return outline;
-  const bb = outlineBounds(open);
-  return open.map((p) => {
-    const dx = p.x - bb.cx;
-    const dy = p.y - bb.cy;
-    const len = Math.hypot(dx, dy) || 1;
-    return { x: p.x + (dx / len) * mm, y: p.y + (dy / len) * mm };
-  });
 }
 
 function selectionEquals(
@@ -2018,7 +2003,7 @@ export function buildSceneModel(
       const wallTmm = 180;
       // Exact same ring as resolveOpeningEdge / openingEndpoints.
       const pts = openOutlineRing(b.outline);
-      const bb = outlineBounds(b.outline);
+      const wallArea = planSignedAreaMm2(pts);
 
       // Interior ground floor — hollow shell so walkthrough can stand inside.
       meshes.push({
@@ -2034,7 +2019,7 @@ export function buildSceneModel(
       // Intermediate floor / ceiling slabs for multi-story houses.
       if (stories > 1) {
         const floorOutline = closeOutline(
-          expandOutlineFromCentroid(b.outline, -Math.min(wallTmm * 0.75, 140)),
+          offsetClosedOutline(b.outline, -Math.min(wallTmm * 0.75, 140)),
         );
         for (let s = 1; s < stories; s++) {
           const undersideMm =
@@ -2126,15 +2111,9 @@ export function buildSceneModel(
         if (edgeLen < 40) continue;
         const tx = (bPt.x - a.x) / edgeLen;
         const ty = (bPt.y - a.y) / edgeLen;
-        let nx = -ty;
-        let ny = tx;
-        const mid = { x: (a.x + bPt.x) / 2, y: (a.y + bPt.y) / 2 };
-        const toCenterX = bb.cx - mid.x;
-        const toCenterY = bb.cy - mid.y;
-        if (nx * toCenterX + ny * toCenterY > 0) {
-          nx = -nx;
-          ny = -ny;
-        }
+        const n = edgeOutwardNormal(bPt.x - a.x, bPt.y - a.y, wallArea);
+        const nx = n.x;
+        const ny = n.y;
 
         const holes = [...(holesByEdge.get(i) ?? [])];
         const prev = (i - 1 + pts.length) % pts.length;
@@ -2171,12 +2150,49 @@ export function buildSceneModel(
         });
       }
 
+      // Concave (inner) corners leave a T×T parallelogram hole because
+      // neighboring walls extrude inward and pull away from each other.
+      for (let i = 0; i < pts.length; i++) {
+        const prev = pts[(i - 1 + pts.length) % pts.length];
+        const cur = pts[i];
+        const next = pts[(i + 1) % pts.length];
+        const inDx = cur.x - prev.x;
+        const inDy = cur.y - prev.y;
+        const outDx = next.x - cur.x;
+        const outDy = next.y - cur.y;
+        if (Math.hypot(inDx, inDy) < 40 || Math.hypot(outDx, outDy) < 40) {
+          continue;
+        }
+        const cross = inDx * outDy - inDy * outDx;
+        // Reflex interior angle: turn opposite the ring winding.
+        if (cross * wallArea >= 0) continue;
+        const n0 = edgeOutwardNormal(inDx, inDy, wallArea);
+        const n1 = edgeOutwardNormal(outDx, outDy, wallArea);
+        const in0 = { x: -n0.x * wallTmm, y: -n0.y * wallTmm };
+        const in1 = { x: -n1.x * wallTmm, y: -n1.y * wallTmm };
+        meshes.push({
+          kind: "extrude",
+          id: `building_wall_corner_${b.id}_${i}`,
+          material: "building",
+          outlineMm: closeOutline([
+            cur,
+            { x: cur.x + in0.x, y: cur.y + in0.y },
+            { x: cur.x + in0.x + in1.x, y: cur.y + in0.y + in1.y },
+            { x: cur.x + in1.x, y: cur.y + in1.y },
+          ]),
+          bottomY: 0,
+          height: h,
+          colorHex,
+          select,
+        });
+      }
+
       // Flat roof deck + eaves overhang so the volume reads as a house, not a foam block.
       const eavesMm = 280;
       const roofSlab = 0.12;
       const fascia = 0.08;
       const roofOutline = closeOutline(
-        expandOutlineFromCentroid(b.outline, eavesMm),
+        offsetClosedOutline(b.outline, eavesMm),
       );
       meshes.push({
         kind: "extrude",
@@ -2207,15 +2223,9 @@ export function buildSceneModel(
         const wallLen = Math.hypot(wallUx, wallUy) || 1;
         const tx = wallUx / wallLen;
         const ty = wallUy / wallLen;
-        // Outward normal in plan (away from building center)
-        let nx = -ty;
-        let ny = tx;
-        const toCenterX = bb.cx - geom.center.x;
-        const toCenterY = bb.cy - geom.center.y;
-        if (nx * toCenterX + ny * toCenterY > 0) {
-          nx = -nx;
-          ny = -ny;
-        }
+        const n = edgeOutwardNormal(wallUx, wallUy, wallArea);
+        const nx = n.x;
+        const ny = n.y;
         // Center glass / door in the hollow wall so you can see out from inside.
         const xz = planToWorldXZ(geom.center);
         const outward = planDirToWorldXZ(nx, ny);

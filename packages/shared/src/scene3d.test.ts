@@ -17,6 +17,7 @@ import {
   resolveCeilingHeightMm,
   storyFloorElevationMm,
   sunWorldDir,
+  offsetClosedOutline,
 } from "./scene3d";
 
 describe("scene3d helpers", () => {
@@ -143,5 +144,44 @@ describe("scene3d helpers", () => {
     assert.equal(b.maxX, 10000);
     assert.equal(b.cx, 5000);
     assert.equal(b.cy, 2500);
+  });
+
+  it("offsets an L-outline in parallel so the notch is not webbed over", () => {
+    const L = [
+      { x: 0, y: 0 },
+      { x: 10000, y: 0 },
+      { x: 10000, y: 4000 },
+      { x: 4000, y: 4000 },
+      { x: 4000, y: 10000 },
+      { x: 0, y: 10000 },
+    ];
+    const eaves = 280;
+    const roof = offsetClosedOutline(L, eaves);
+    assert.equal(roof.length, 6);
+    const inner = roof[3];
+    // Inner corner moves into the notch (parallel miter), not toward the centroid.
+    assert.ok(Math.abs(inner.x - (4000 + eaves)) < 1);
+    assert.ok(Math.abs(inner.y - (4000 + eaves)) < 1);
+    // Notch edge stays horizontal (no diagonal span).
+    assert.ok(Math.abs(roof[2].y - roof[3].y) < 1);
+    assert.ok(Math.abs(roof[3].x - roof[4].x) < 1);
+    const inset = offsetClosedOutline(L, -140);
+    assert.ok(Math.abs(inset[3].x - 3860) < 1);
+    assert.ok(Math.abs(inset[3].y - 3860) < 1);
+  });
+
+  it("keeps rectangle edges parallel when offsetting eaves", () => {
+    const rect = [
+      { x: 0, y: 0 },
+      { x: 8000, y: 0 },
+      { x: 8000, y: 5000 },
+      { x: 0, y: 5000 },
+    ];
+    const roof = offsetClosedOutline(rect, 280);
+    assert.equal(roof.length, 4);
+    assert.ok(Math.abs(roof[0].x + 280) < 1);
+    assert.ok(Math.abs(roof[0].y + 280) < 1);
+    assert.ok(Math.abs(roof[1].x - 8280) < 1);
+    assert.ok(Math.abs(roof[2].y - 5280) < 1);
   });
 });
