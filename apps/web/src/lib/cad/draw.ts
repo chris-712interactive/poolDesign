@@ -1658,7 +1658,7 @@ export function drawDraft(
   if (preview) {
     const c = worldToScreen(preview, vp);
     ctx.lineTo(c.x, c.y);
-    if (closePreview && points.length >= 2) {
+    if (closePreview && points.length >= 3) {
       const first = worldToScreen(points[0], vp);
       ctx.lineTo(first.x, first.y);
     }

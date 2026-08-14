@@ -358,6 +358,7 @@ type Props = {
 };
 
 const CLOSE_TOLERANCE_MM = 150;
+const CLOSE_TOLERANCE_PX = 14;
 const VERTEX_HIT_PX = 10;
 const EDGE_HIT_PX = 9;
 const BULGE_HIT_PX = 12;
@@ -1355,24 +1356,64 @@ export function CadWorkspace({
     return true;
   }
 
+  function closeToleranceMm() {
+    return CLOSE_TOLERANCE_PX / Math.max(1e-6, vp.scale);
+  }
+
+  /** Copy draft vertices into a closed outline; drop a duplicate closing click. */
+  function outlineFromDraft(): PointMm[] | null {
+    const pts = draftPointsRef.current;
+    if (pts.length < 3) return null;
+    const copied = pts.map((p) => {
+      const out: PointMm = { x: p.x, y: p.y };
+      if (typeof p.bulge === "number" && Math.abs(p.bulge) > 1e-6) {
+        out.bulge = p.bulge;
+      }
+      return out;
+    });
+    const tol = Math.max(CLOSE_TOLERANCE_MM, closeToleranceMm());
+    if (segmentLengthMm(copied[0], copied[copied.length - 1]) <= tol) {
+      copied.pop();
+    }
+    return copied.length >= 3 ? copied : null;
+  }
+
+  function withLayersVisible(
+    doc: DesignDocument,
+    ...ids: string[]
+  ): DesignDocument {
+    let layers = doc.layers;
+    const present = ids.filter((id) => layers.some((l) => l.id === id));
+    if (present.length === 0) {
+      layers = [...layers, { id: ids[0], name: ids[0], visible: true }];
+    } else {
+      layers = layers.map((l) =>
+        present.includes(l.id) ? { ...l, visible: true } : l,
+      );
+    }
+    return { ...doc, layers };
+  }
+
   function commitWaterBody(outline: PointMm[]) {
+    const ring = outline.map((p) => ({ ...p }));
+    const base = withLayersVisible(design, "pool", "pools");
     if (waterKind === "spa") {
       const pkg = buildSpaPackage(
-        outline,
-        spaCount(design) + 1,
+        ring,
+        spaCount(base) + 1,
         DEFAULT_SPA_WALL_THICKNESS_MM,
-        design,
+        base,
       );
-      commitDesign(applySpaPackage(design, pkg));
+      commitDesign(applySpaPackage(base, pkg));
       setSelection({ kind: "pool", id: pkg.body.id });
     } else {
       const pkg = buildPoolPackage(
-        outline,
-        poolCount(design) + 1,
+        ring,
+        poolCount(base) + 1,
         DEFAULT_POOL_WALL_THICKNESS_MM,
-        design,
+        base,
       );
-      commitDesign(applyPoolPackage(design, pkg));
+      commitDesign(applyPoolPackage(base, pkg));
       setSelection({ kind: "pool", id: pkg.body.id });
     }
     setDraftPoints([]);
@@ -1384,22 +1425,15 @@ export function CadWorkspace({
     const building: Building = {
       id: newId("house"),
       name: `House ${(design.buildings ?? []).length + 1}`,
-      outline,
+      outline: outline.map((p) => ({ ...p })),
       stories,
       kind: "house",
       exteriorFinishId: DEFAULT_HOUSE_EXTERIOR_FINISH_ID,
     };
-    let layers = design.layers;
-    if (
-      !layers.some((l) => l.id === "house") &&
-      !layers.some((l) => l.id === "building")
-    ) {
-      layers = [{ id: "house", name: "house", visible: true }, ...layers];
-    }
+    const base = withLayersVisible(design, "house", "building");
     commitDesign({
-      ...design,
-      layers,
-      buildings: [...(design.buildings ?? []), building],
+      ...base,
+      buildings: [...(base.buildings ?? []), building],
     });
     setSelection({ kind: "building", id: building.id });
     setDraftPoints([]);
@@ -1481,26 +1515,25 @@ export function CadWorkspace({
     const patio: PatioRegion = {
       id: newId("patio"),
       name: `Patio ${design.patios.length + 1}`,
-      outline,
+      outline: outline.map((p) => ({ ...p })),
       materialId: DEFAULT_PATIO_FINISH_ID,
     };
-    commitDesign({ ...design, patios: [...design.patios, patio] });
+    const base = withLayersVisible(design, "patio", "deck");
+    commitDesign({ ...base, patios: [...base.patios, patio] });
     setSelection({ kind: "patio", id: patio.id });
     setDraftPoints([]);
     setLengthBuffer("");
   }
 
   function finishPolygon(kind: "pool" | "patio" | "house") {
-    if (draftPoints.length < 3) {
-      setDraftPoints([]);
-      return;
-    }
+    const outline = outlineFromDraft();
+    if (!outline) return;
     if (kind === "pool") {
-      commitWaterBody(draftPoints);
+      commitWaterBody(outline);
     } else if (kind === "house") {
-      commitBuilding(draftPoints);
+      commitBuilding(outline);
     } else {
-      commitPatio(draftPoints);
+      commitPatio(outline);
     }
   }
 
@@ -2559,18 +2592,19 @@ export function CadWorkspace({
       const from = draftPoints[draftPoints.length - 1] ?? null;
       setShiftDown(e.shiftKey);
       const next = constrainPoint(from, point, ortho || e.shiftKey);
+      const closeTol = Math.max(CLOSE_TOLERANCE_MM, closeToleranceMm());
       if (
         (tool === "pool_poly" ||
           tool === "patio" ||
           tool === "house_poly" ||
           tool === "property_line" ||
           tool === "easement") &&
-        draftPoints.length >= 3 &&
-        segmentLengthMm(next, draftPoints[0]) <= CLOSE_TOLERANCE_MM
+        draftPoints.length >= 2 &&
+        segmentLengthMm(next, draftPoints[0]) <= closeTol
       ) {
         if (tool === "property_line") finishSiteLine("property", true);
         else if (tool === "easement") finishSiteLine("easement", true);
-        else
+        else if (draftPoints.length >= 3)
           finishPolygon(
             tool === "patio" ? "patio" : tool === "house_poly" ? "house" : "pool",
           );
@@ -3350,6 +3384,7 @@ export function CadWorkspace({
         commitTypedLength();
         return;
       }
+      e.preventDefault();
       finishDraft();
       return;
     }
