@@ -34,6 +34,14 @@ export type PatioGradeAnalysis = {
 };
 
 type GradeShot = { x: number; y: number; z: number };
+type GradeTri = { a: number; b: number; c: number };
+
+type GradeSurface = {
+  shots: GradeShot[];
+  tris: GradeTri[];
+};
+
+const gradeSurfaceCache = new WeakMap<GradeSample[], GradeSurface>();
 
 function gradeShots(samples: GradeSample[]): GradeShot[] {
   const out: GradeShot[] = [];
@@ -50,52 +58,171 @@ function gradeShots(samples: GradeSample[]): GradeShot[] {
   return out;
 }
 
-/** Least-squares plane z = ax + by + c. Null when shots are collinear / piled up. */
-function fitDropPlane(
+function triArea2(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  c: { x: number; y: number },
+): number {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+function inCircumcircle(
+  p: GradeShot,
+  a: GradeShot,
+  b: GradeShot,
+  c: GradeShot,
+): boolean {
+  const adx = a.x - p.x;
+  const ady = a.y - p.y;
+  const bdx = b.x - p.x;
+  const bdy = b.y - p.y;
+  const cdx = c.x - p.x;
+  const cdy = c.y - p.y;
+  const det =
+    (adx * adx + ady * ady) * (bdx * cdy - cdx * bdy) +
+    (bdx * bdx + bdy * bdy) * (cdx * ady - adx * cdy) +
+    (cdx * cdx + cdy * cdy) * (adx * bdy - bdx * ady);
+  return det * Math.sign(triArea2(a, b, c)) > 0;
+}
+
+/** Delaunay triangles among shots. Empty when all shots are collinear. */
+function delaunayTris(shots: GradeShot[]): GradeTri[] {
+  if (shots.length < 3) return [];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const s of shots) {
+    if (s.x < minX) minX = s.x;
+    if (s.y < minY) minY = s.y;
+    if (s.x > maxX) maxX = s.x;
+    if (s.y > maxY) maxY = s.y;
+  }
+  const span = Math.max(maxX - minX, maxY - minY, 1) * 10;
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const n = shots.length;
+  const pts: GradeShot[] = [
+    ...shots,
+    { x: cx, y: cy - 2 * span, z: 0 },
+    { x: cx - 2 * span, y: cy + span, z: 0 },
+    { x: cx + 2 * span, y: cy + span, z: 0 },
+  ];
+  let tris: GradeTri[] = [{ a: n, b: n + 1, c: n + 2 }];
+  for (let i = 0; i < n; i++) {
+    const p = pts[i];
+    const bad: GradeTri[] = [];
+    const keep: GradeTri[] = [];
+    for (const t of tris) {
+      if (inCircumcircle(p, pts[t.a], pts[t.b], pts[t.c])) bad.push(t);
+      else keep.push(t);
+    }
+    const edges: Array<[number, number]> = [];
+    const pushEdge = (u: number, v: number) => {
+      const ix = edges.findIndex((e) => e[0] === v && e[1] === u);
+      if (ix >= 0) edges.splice(ix, 1);
+      else edges.push([u, v]);
+    };
+    for (const t of bad) {
+      pushEdge(t.a, t.b);
+      pushEdge(t.b, t.c);
+      pushEdge(t.c, t.a);
+    }
+    tris = keep;
+    for (const [u, v] of edges) {
+      if (Math.abs(triArea2(pts[u], pts[v], p)) < 1e-6) continue;
+      tris.push({ a: u, b: v, c: i });
+    }
+  }
+  return tris.filter((t) => t.a < n && t.b < n && t.c < n);
+}
+
+function barycentric(
+  p: PointMm,
+  a: GradeShot,
+  b: GradeShot,
+  c: GradeShot,
+): { w1: number; w2: number; w3: number } | null {
+  const den = triArea2(a, b, c);
+  if (Math.abs(den) < 1e-6) return null;
+  const w1 = triArea2(p, b, c) / den;
+  const w2 = triArea2(a, p, c) / den;
+  const w3 = 1 - w1 - w2;
+  return { w1, w2, w3 };
+}
+
+function lerpOnSegment(
+  p: PointMm,
+  a: GradeShot,
+  b: GradeShot,
+): { d2: number; z: number } {
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const len2 = vx * vx + vy * vy;
+  const t =
+    len2 < 1e-12
+      ? 0
+      : Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / len2));
+  const qx = a.x + t * vx;
+  const qy = a.y + t * vy;
+  const dx = p.x - qx;
+  const dy = p.y - qy;
+  return { d2: dx * dx + dy * dy, z: a.z + t * (b.z - a.z) };
+}
+
+function hullEdges(tris: GradeTri[]): Array<[number, number]> {
+  const counts = new Map<string, { u: number; v: number; n: number }>();
+  const add = (u: number, v: number) => {
+    const key = u < v ? `${u}:${v}` : `${v}:${u}`;
+    const e = counts.get(key);
+    if (e) e.n += 1;
+    else counts.set(key, { u, v, n: 1 });
+  };
+  for (const t of tris) {
+    add(t.a, t.b);
+    add(t.b, t.c);
+    add(t.c, t.a);
+  }
+  return [...counts.values()]
+    .filter((e) => e.n === 1)
+    .map((e) => [e.u, e.v]);
+}
+
+function interpolateTin(
+  point: PointMm,
   shots: GradeShot[],
-): { a: number; b: number; c: number } | null {
-  if (shots.length < 3) return null;
-  let mx = 0;
-  let my = 0;
-  let mz = 0;
-  for (const s of shots) {
-    mx += s.x;
-    my += s.y;
-    mz += s.z;
+  tris: GradeTri[],
+): number | null {
+  if (!tris.length) return null;
+  for (const t of tris) {
+    const bary = barycentric(point, shots[t.a], shots[t.b], shots[t.c]);
+    if (!bary) continue;
+    if (bary.w1 >= -1e-7 && bary.w2 >= -1e-7 && bary.w3 >= -1e-7) {
+      return (
+        bary.w1 * shots[t.a].z + bary.w2 * shots[t.b].z + bary.w3 * shots[t.c].z
+      );
+    }
   }
-  mx /= shots.length;
-  my /= shots.length;
-  mz /= shots.length;
-  let xx = 0;
-  let xy = 0;
-  let yy = 0;
-  let xz = 0;
-  let yz = 0;
-  for (const s of shots) {
-    const dx = s.x - mx;
-    const dy = s.y - my;
-    const dz = s.z - mz;
-    xx += dx * dx;
-    xy += dx * dy;
-    yy += dy * dy;
-    xz += dx * dz;
-    yz += dy * dz;
+  let best: { d2: number; z: number } | null = null;
+  for (const [u, v] of hullEdges(tris)) {
+    const hit = lerpOnSegment(point, shots[u], shots[v]);
+    if (!best || hit.d2 < best.d2) best = hit;
   }
-  const det = xx * yy - xy * xy;
-  const tr = xx + yy;
-  const disc = Math.sqrt(Math.max(0, tr * tr - 4 * det));
-  const eigMin = (tr - disc) / 2;
-  // Nearly collinear (grade walk): interpolating along the transect is more
-  // stable than a plane that can invent a steep cross-slope.
-  if (eigMin < shots.length * 600 * 600 || Math.abs(det) < 1e-6) return null;
-  const a = (yy * xz - xy * yz) / det;
-  const b = (xx * yz - xy * xz) / det;
-  return { a, b, c: mz - a * mx - b * my };
+  return best?.z ?? null;
+}
+
+function gradeSurface(samples: GradeSample[]): GradeSurface {
+  const cached = gradeSurfaceCache.get(samples);
+  if (cached) return cached;
+  const shots = gradeShots(samples);
+  const built = { shots, tris: delaunayTris(shots) };
+  gradeSurfaceCache.set(samples, built);
+  return built;
 }
 
 /**
  * Interpolate drop along the longest sample axis (grade-walk transect).
- * Cross-slope is level — a fence parallel to the walk does not bob.
+ * Used when shots are collinear so a TIN cannot be formed.
  */
 function interpolateAlongSampleAxis(
   point: PointMm,
@@ -145,8 +272,8 @@ function interpolateAlongSampleAxis(
 
 /**
  * Existing-grade drop at a plan point (mm below FFE).
- * Uses a fitted slope when shots spread in 2D; otherwise interpolates along
- * the walk axis so a fence does not bob between individual shots.
+ * Piecewise-linear on a TIN of the shots so walks from the house keep their
+ * slope; a fence along equal-drop hull edges stays level (no IDW bobbing).
  */
 export function existingGradeDropMm(
   point: PointMm,
@@ -159,10 +286,10 @@ export function existingGradeDropMm(
       return s.dropMm;
     }
   }
-  const shots = gradeShots(samples);
+  const { shots, tris } = gradeSurface(samples);
   if (!shots.length) return 0;
-  const plane = fitDropPlane(shots);
-  if (plane) return plane.a * point.x + plane.b * point.y + plane.c;
+  const tin = interpolateTin(point, shots, tris);
+  if (tin != null) return tin;
   return interpolateAlongSampleAxis(point, shots) ?? 0;
 }
 

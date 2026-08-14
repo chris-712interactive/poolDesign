@@ -61,6 +61,30 @@ describe("site-grade", () => {
     assert.ok(Math.abs(p - FT) < 10);
   });
 
+  it("keeps radial walks from the house sloping (not a flat average)", () => {
+    const far = 30 * FT;
+    const drop = 2.5 * FT;
+    const samples: GradeSample[] = [
+      { id: "house", position: { x: 0, y: 0 }, dropMm: 0 },
+      { id: "n", position: { x: 0, y: -far }, dropMm: drop },
+      { id: "e", position: { x: far, y: 0 }, dropMm: drop },
+      { id: "s", position: { x: 0, y: far }, dropMm: drop },
+      { id: "w", position: { x: -far, y: 0 }, dropMm: drop },
+    ];
+    const midN = existingGradeDropMm({ x: 0, y: -15 * FT }, samples);
+    assert.ok(
+      Math.abs(midN - 1.25 * FT) < 20,
+      `halfway north should be ~1.25', got ${midN}`,
+    );
+    const nearHouse = existingGradeDropMm({ x: 0, y: -3 * FT }, samples);
+    assert.ok(nearHouse < 0.4 * FT, `near house should be small, got ${nearHouse}`);
+    const atFence = existingGradeDropMm({ x: far, y: far * 0.2 }, samples);
+    assert.ok(
+      atFence > 2 * FT,
+      `past the far shots should stay near 2.5', got ${atFence}`,
+    );
+  });
+
   it("fill height starts below slab thickness", () => {
     assert.equal(fillHeightUnderSlabMm(50), 0);
     assert.equal(fillHeightUnderSlabMm(100), 0);
