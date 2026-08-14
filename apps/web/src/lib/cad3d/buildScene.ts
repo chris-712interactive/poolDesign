@@ -2020,35 +2020,6 @@ export function buildSceneModel(
       const pts = openOutlineRing(b.outline);
       const bb = outlineBounds(b.outline);
 
-      // Yard-facing edge — used for walk spawn views when no openings exist.
-      const lookBody =
-        (design.poolBodies ?? []).find(
-          (p) => p.outline.length >= 3 && waterBodyKind(p) !== "spa",
-        ) ?? (design.poolBodies ?? []).find((p) => p.outline.length >= 3);
-      const lookPlan = lookBody
-        ? outlineBounds(lookBody.outline)
-        : { cx: bb.cx, cy: bb.cy + Math.max(bb.height, 1000) };
-      let yardEdgeIndex = -1;
-      let yardToward = 0;
-      for (let i = 0; i < pts.length; i++) {
-        const a = pts[i];
-        const bPt = pts[(i + 1) % pts.length];
-        const edgeLen = Math.hypot(bPt.x - a.x, bPt.y - a.y);
-        if (edgeLen < 800) continue;
-        const mid = { x: (a.x + bPt.x) / 2, y: (a.y + bPt.y) / 2 };
-        let nx = -(bPt.y - a.y) / edgeLen;
-        let ny = (bPt.x - a.x) / edgeLen;
-        if (nx * (bb.cx - mid.x) + ny * (bb.cy - mid.y) > 0) {
-          nx = -nx;
-          ny = -ny;
-        }
-        const toward = nx * (lookPlan.cx - mid.x) + ny * (lookPlan.cy - mid.y);
-        if (toward > yardToward) {
-          yardToward = toward;
-          yardEdgeIndex = i;
-        }
-      }
-
       // Interior ground floor — hollow shell so walkthrough can stand inside.
       meshes.push({
         kind: "extrude",
@@ -2125,8 +2096,28 @@ export function buildSceneModel(
         holesByEdge.set(ei, list);
       }
 
-      // Track which corners still need a solid post (no opening reaches them).
-      const cornerNeedsPost = new Array(pts.length).fill(true);
+      // One extruded panel per edge, full length so corners meet.
+      // Only pull an end back when the neighboring wall has a punched
+      // opening in the overlap — otherwise that solid would fill the hole.
+      const insetM = mmToMeters(wallTmm);
+      const holeReaches = (
+        edgeIndex: number,
+        which: "start" | "end",
+      ): boolean => {
+        const holes = holesByEdge.get(edgeIndex) ?? [];
+        const ea = pts[edgeIndex];
+        const eb = pts[(edgeIndex + 1) % pts.length];
+        const len = Math.hypot(eb.x - ea.x, eb.y - ea.y);
+        if (len < 40) return false;
+        const half = mmToMeters(len) / 2;
+        for (const hole of holes) {
+          const left = hole.x - hole.w / 2;
+          const right = hole.x + hole.w / 2;
+          if (which === "start" && left <= -half + insetM + 0.02) return true;
+          if (which === "end" && right >= half - insetM - 0.02) return true;
+        }
+        return false;
+      };
 
       for (let i = 0; i < pts.length; i++) {
         const a = pts[i];
@@ -2146,72 +2137,24 @@ export function buildSceneModel(
         }
 
         const holes = [...(holesByEdge.get(i) ?? [])];
-
-        // Synthetic yard window when this edge has no openings.
-        const syntheticView =
-          holes.length === 0 && i === yardEdgeIndex && edgeLen >= 1600;
-        if (syntheticView) {
-          const winW = Math.min(2800, edgeLen * 0.45);
-          const sillY = 0.85;
-          const headY = Math.min(h - 0.25, sillY + 2.1);
-          holes.push({
-            x: 0,
-            y: sillY,
-            w: mmToMeters(winW),
-            h: headY - sillY,
-          });
-          const xz = planToWorldXZ(mid);
-          const outward = planDirToWorldXZ(nx, ny);
-          meshes.push({
-            kind: "box",
-            id: `building_viewglass_${b.id}`,
-            material: "window",
-            openingKind: "window",
-            position: {
-              x: xz.x - outward.x * mmToMeters(wallTmm) * 0.5,
-              y: (sillY + headY) / 2,
-              z: xz.z - outward.z * mmToMeters(wallTmm) * 0.5,
-            },
-            size: {
-              x: mmToMeters(winW),
-              y: headY - sillY,
-              z: mmToMeters(wallTmm * 0.7),
-            },
-            rotationY: 0,
-            axisX: planDirToWorldXZ(tx, ty),
-            axisZ: outward,
-            select,
-          });
-        }
-
-        // Shorten panels at corners so adjacent walls don't fill each
-        // other's punched openings (half-punched kitchen windows, etc.).
-        // Expand back out when an opening reaches near a corner.
-        const insetM = mmToMeters(wallTmm);
-        const halfEdgeM = mmToMeters(edgeLen) / 2;
-        let halfPanelM = Math.max(0.05, halfEdgeM - insetM);
-        for (const hole of holes) {
-          halfPanelM = Math.max(
-            halfPanelM,
-            Math.abs(hole.x) + hole.w / 2 + 0.01,
-          );
-        }
-        halfPanelM = Math.min(halfPanelM, halfEdgeM);
-        const panelLenM = halfPanelM * 2;
-
-        // Opening reaches this edge's start / end → skip that corner post.
-        for (const hole of holes) {
-          const left = hole.x - hole.w / 2;
-          const right = hole.x + hole.w / 2;
-          if (left <= -halfEdgeM + insetM + 0.02) cornerNeedsPost[i] = false;
-          if (right >= halfEdgeM - insetM - 0.02) {
-            cornerNeedsPost[(i + 1) % pts.length] = false;
-          }
-        }
-
-        const xz = planToWorldXZ(mid);
+        const prev = (i - 1 + pts.length) % pts.length;
+        const next = (i + 1) % pts.length;
+        const startInsetM = holeReaches(prev, "end") ? insetM : 0;
+        const endInsetM = holeReaches(next, "start") ? insetM : 0;
+        const fullLenM = mmToMeters(edgeLen);
+        const panelLenM = Math.max(0.05, fullLenM - startInsetM - endInsetM);
+        const centerFromStartM = startInsetM + panelLenM / 2;
+        const holeShiftM = fullLenM / 2 - centerFromStartM;
+        const holesLocal = holes.map((hole) => ({
+          ...hole,
+          x: hole.x + holeShiftM,
+        }));
+        const centerPlan = {
+          x: a.x + tx * centerFromStartM * 1000,
+          y: a.y + ty * centerFromStartM * 1000,
+        };
+        const xz = planToWorldXZ(centerPlan);
         const outward = planDirToWorldXZ(nx, ny);
-        // Sit the exterior face on the footprint edge; extrude inward.
         meshes.push({
           kind: "wallPanel",
           id: `building_wall_${b.id}_${i}`,
@@ -2222,50 +2165,7 @@ export function buildSceneModel(
           lengthM: panelLenM,
           heightM: h,
           thicknessM: mmToMeters(wallTmm),
-          holes,
-          colorHex,
-          select,
-        });
-      }
-
-      // Solid corner posts where shortened walls meet (no opening there).
-      for (let i = 0; i < pts.length; i++) {
-        if (!cornerNeedsPost[i]) continue;
-        const prev = pts[(i - 1 + pts.length) % pts.length];
-        const cur = pts[i];
-        const next = pts[(i + 1) % pts.length];
-        const lenIn = Math.hypot(cur.x - prev.x, cur.y - prev.y);
-        const lenOut = Math.hypot(next.x - cur.x, next.y - cur.y);
-        if (lenIn < 40 || lenOut < 40) continue;
-        let nx0 = -(cur.y - prev.y) / lenIn;
-        let ny0 = (cur.x - prev.x) / lenIn;
-        let nx1 = -(next.y - cur.y) / lenOut;
-        let ny1 = (next.x - cur.x) / lenOut;
-        const mid0 = { x: (prev.x + cur.x) / 2, y: (prev.y + cur.y) / 2 };
-        const mid1 = { x: (cur.x + next.x) / 2, y: (cur.y + next.y) / 2 };
-        if (nx0 * (bb.cx - mid0.x) + ny0 * (bb.cy - mid0.y) > 0) {
-          nx0 = -nx0;
-          ny0 = -ny0;
-        }
-        if (nx1 * (bb.cx - mid1.x) + ny1 * (bb.cy - mid1.y) > 0) {
-          nx1 = -nx1;
-          ny1 = -ny1;
-        }
-        // Place post on the interior side of the exterior corner.
-        const inset = wallTmm * 0.5;
-        const plan = {
-          x: cur.x - ((nx0 + nx1) / 2) * inset,
-          y: cur.y - ((ny0 + ny1) / 2) * inset,
-        };
-        const xz = planToWorldXZ(plan);
-        const tM = mmToMeters(wallTmm);
-        meshes.push({
-          kind: "box",
-          id: `building_corner_${b.id}_${i}`,
-          material: "building",
-          position: { x: xz.x, y: h / 2, z: xz.z },
-          size: { x: tM, y: h, z: tM },
-          rotationY: 0,
+          holes: holesLocal,
           colorHex,
           select,
         });
