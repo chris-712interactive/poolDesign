@@ -33,26 +33,137 @@ export type PatioGradeAnalysis = {
   retainingLengthMm: number;
 };
 
+type GradeShot = { x: number; y: number; z: number };
+
+function gradeShots(samples: GradeSample[]): GradeShot[] {
+  const out: GradeShot[] = [];
+  for (const s of samples) {
+    const hit = out.find(
+      (p) => Math.hypot(p.x - s.position.x, p.y - s.position.y) < 1,
+    );
+    if (hit) {
+      hit.z = (hit.z + s.dropMm) / 2;
+      continue;
+    }
+    out.push({ x: s.position.x, y: s.position.y, z: s.dropMm });
+  }
+  return out;
+}
+
+/** Least-squares plane z = ax + by + c. Null when shots are collinear / piled up. */
+function fitDropPlane(
+  shots: GradeShot[],
+): { a: number; b: number; c: number } | null {
+  if (shots.length < 3) return null;
+  let mx = 0;
+  let my = 0;
+  let mz = 0;
+  for (const s of shots) {
+    mx += s.x;
+    my += s.y;
+    mz += s.z;
+  }
+  mx /= shots.length;
+  my /= shots.length;
+  mz /= shots.length;
+  let xx = 0;
+  let xy = 0;
+  let yy = 0;
+  let xz = 0;
+  let yz = 0;
+  for (const s of shots) {
+    const dx = s.x - mx;
+    const dy = s.y - my;
+    const dz = s.z - mz;
+    xx += dx * dx;
+    xy += dx * dy;
+    yy += dy * dy;
+    xz += dx * dz;
+    yz += dy * dz;
+  }
+  const det = xx * yy - xy * xy;
+  const tr = xx + yy;
+  const disc = Math.sqrt(Math.max(0, tr * tr - 4 * det));
+  const eigMin = (tr - disc) / 2;
+  // Nearly collinear (grade walk): interpolating along the transect is more
+  // stable than a plane that can invent a steep cross-slope.
+  if (eigMin < shots.length * 600 * 600 || Math.abs(det) < 1e-6) return null;
+  const a = (yy * xz - xy * yz) / det;
+  const b = (xx * yz - xy * xz) / det;
+  return { a, b, c: mz - a * mx - b * my };
+}
+
 /**
- * Inverse-distance-weighted existing-grade drop at a plan point.
- * Returns 0 when there are no samples.
+ * Interpolate drop along the longest sample axis (grade-walk transect).
+ * Cross-slope is level — a fence parallel to the walk does not bob.
+ */
+function interpolateAlongSampleAxis(
+  point: PointMm,
+  shots: GradeShot[],
+): number | null {
+  if (!shots.length) return null;
+  if (shots.length === 1) return shots[0].z;
+  let i0 = 0;
+  let i1 = 1;
+  let best = -1;
+  for (let i = 0; i < shots.length; i++) {
+    for (let j = i + 1; j < shots.length; j++) {
+      const d = Math.hypot(shots[j].x - shots[i].x, shots[j].y - shots[i].y);
+      if (d > best) {
+        best = d;
+        i0 = i;
+        i1 = j;
+      }
+    }
+  }
+  if (best < 10) return shots[0].z;
+  const ox = shots[i0].x;
+  const oy = shots[i0].y;
+  const ux = (shots[i1].x - ox) / best;
+  const uy = (shots[i1].y - oy) / best;
+  const keyed = shots
+    .map((s) => ({
+      t: (s.x - ox) * ux + (s.y - oy) * uy,
+      z: s.z,
+    }))
+    .sort((a, b) => a.t - b.t);
+  const t = (point.x - ox) * ux + (point.y - oy) * uy;
+  if (t <= keyed[0].t) return keyed[0].z;
+  const last = keyed[keyed.length - 1];
+  if (t >= last.t) return last.z;
+  for (let i = 1; i < keyed.length; i++) {
+    if (t <= keyed[i].t) {
+      const a = keyed[i - 1];
+      const b = keyed[i];
+      const span = b.t - a.t;
+      if (span < 1e-6) return b.z;
+      return a.z + (b.z - a.z) * ((t - a.t) / span);
+    }
+  }
+  return last.z;
+}
+
+/**
+ * Existing-grade drop at a plan point (mm below FFE).
+ * Uses a fitted slope when shots spread in 2D; otherwise interpolates along
+ * the walk axis so a fence does not bob between individual shots.
  */
 export function existingGradeDropMm(
   point: PointMm,
   samples: GradeSample[],
-  power = 2,
+  _power = 2,
 ): number {
   if (!samples.length) return 0;
-  let wSum = 0;
-  let vSum = 0;
   for (const s of samples) {
-    const d = Math.hypot(point.x - s.position.x, point.y - s.position.y);
-    if (d < 1e-3) return s.dropMm;
-    const w = 1 / d ** power;
-    wSum += w;
-    vSum += w * s.dropMm;
+    if (Math.hypot(point.x - s.position.x, point.y - s.position.y) < 1e-3) {
+      return s.dropMm;
+    }
   }
-  return wSum > 0 ? vSum / wSum : 0;
+  const shots = gradeShots(samples);
+  if (!shots.length) return 0;
+  const plane = fitDropPlane(shots);
+  if (plane) return plane.a * point.x + plane.b * point.y + plane.c;
+  return interpolateAlongSampleAxis(point, shots) ?? 0;
 }
 
 function patioBounds(outline: PointMm[]): {

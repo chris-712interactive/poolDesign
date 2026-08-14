@@ -3205,8 +3205,8 @@ export function buildSceneModel(
         : fence.kind === "chain_link"
           ? 0.8
           : undefined;
-      // Short spans so IDW grade curvature is followed along the run.
-      const PANEL_STEP_MM = 1200;
+      // Short spans so a non-planar grade still reads along the run.
+      const PANEL_STEP_MM = 2400;
 
       for (let i = 0; i < fence.points.length - 1; i++) {
         const a = fence.points[i];

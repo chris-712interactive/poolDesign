@@ -35,6 +35,32 @@ describe("site-grade", () => {
     assert.equal(existingGradeDropMm({ x: 0, y: 0 }, samples), 0);
   });
 
+  it("keeps a fence offset from a walk level where shots share the same drop", () => {
+    const samples: GradeSample[] = [
+      { id: "house", position: { x: 0, y: 0 }, dropMm: 0 },
+      { id: "a", position: { x: 0, y: 20 * FT }, dropMm: 2.5 * FT },
+      { id: "b", position: { x: 0, y: 40 * FT }, dropMm: 2.5 * FT },
+    ];
+    const ys = [20 * FT, 25 * FT, 30 * FT, 35 * FT, 40 * FT];
+    for (const y of ys) {
+      const drop = existingGradeDropMm({ x: 15 * FT, y }, samples);
+      assert.ok(
+        Math.abs(drop - 2.5 * FT) < 5,
+        `offset fence at y=${y} should stay at 2.5', got ${drop}`,
+      );
+    }
+  });
+
+  it("fits a plane when shots actually spread in 2D", () => {
+    const samples: GradeSample[] = [
+      { id: "a", position: { x: 0, y: 0 }, dropMm: 0 },
+      { id: "b", position: { x: 20 * FT, y: 0 }, dropMm: 0 },
+      { id: "c", position: { x: 0, y: 20 * FT }, dropMm: 2 * FT },
+    ];
+    const p = existingGradeDropMm({ x: 10 * FT, y: 10 * FT }, samples);
+    assert.ok(Math.abs(p - FT) < 10);
+  });
+
   it("fill height starts below slab thickness", () => {
     assert.equal(fillHeightUnderSlabMm(50), 0);
     assert.equal(fillHeightUnderSlabMm(100), 0);
