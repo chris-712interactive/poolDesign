@@ -5,7 +5,7 @@
 
 import type { PointMm, SurveyUnderlay } from "./design-model";
 import { normalizeNorthDeg, segmentLengthMm } from "./design-model";
-import { MM_PER_FOOT } from "./units";
+import { MM_PER_FOOT, parseLengthToMm, type UnitSystem } from "./units";
 
 /** Initial uncalibrated width — 80′ so a typical plat is on-screen. */
 export const DEFAULT_SURVEY_WIDTH_MM = 80 * MM_PER_FOOT;
@@ -166,6 +166,37 @@ export function rotateSurveyUnderlay(
 /** Plan millimeters represented by one image pixel (along width). */
 export function surveyMmPerPixel(underlay: SurveyUnderlay): number {
   return underlay.widthMm / Math.max(1, underlay.pixelWidth);
+}
+
+export function surveyUnderlayWorldCorners(underlay: SurveyUnderlay): PointMm[] {
+  const { widthMm, heightMm } = underlay;
+  return [
+    surveyLocalToWorld(underlay, { x: 0, y: 0 }),
+    surveyLocalToWorld(underlay, { x: widthMm, y: 0 }),
+    surveyLocalToWorld(underlay, { x: widthMm, y: heightMm }),
+    surveyLocalToWorld(underlay, { x: 0, y: heightMm }),
+  ];
+}
+
+/**
+ * Printed survey callouts are almost always feet or meters.
+ * Bare `50` → 50′ (imperial) or 50 m (metric). Also accepts ′ ’ ″ quotes.
+ */
+export function parseSurveyKnownLengthToMm(
+  input: string,
+  unitSystem: UnitSystem,
+): number | null {
+  const normalized = input
+    .trim()
+    .replace(/[′’]/g, "'")
+    .replace(/[″“”]/g, '"');
+  if (!normalized) return null;
+  if (/^\d+(\.\d+)?$/.test(normalized)) {
+    const n = Number(normalized);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return unitSystem === "metric" ? n * 1000 : n * MM_PER_FOOT;
+  }
+  return parseLengthToMm(normalized, unitSystem);
 }
 
 export function normalizeSurveyUnderlay(

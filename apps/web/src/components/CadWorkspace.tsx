@@ -98,7 +98,9 @@ import {
   resolveEquipmentConnection,
   calibrateSurveyUnderlay,
   moveSurveyUnderlay,
+  parseSurveyKnownLengthToMm,
   pointInSurveyUnderlay,
+  surveyUnderlayWorldCorners,
   stepsRunMm,
   STANDARD_STEP_TREAD_MM,
   segmentLengthMm,
@@ -195,6 +197,7 @@ import {
   applyOrtho,
   pointAtLength,
   screenToWorld,
+  viewportToFitWorld,
   zoomAt,
   type Viewport,
 } from "@/lib/cad/math";
@@ -461,11 +464,15 @@ export function CadWorkspace({
   designRef.current = design;
   const [measurePoints, setMeasurePoints] = useState<PointMm[]>([]);
   const [calibratePoints, setCalibratePoints] = useState<PointMm[]>([]);
+  const calibratePointsRef = useRef<PointMm[]>([]);
+  calibratePointsRef.current = calibratePoints;
   const [surveyImage, setSurveyImage] = useState<HTMLImageElement | null>(null);
   const [past, setPast] = useState<DesignDocument[]>([]);
   const [future, setFuture] = useState<DesignDocument[]>([]);
   const [vp, setVp] = useState<Viewport>(DEFAULT_VIEWPORT);
   const [tool, setTool] = useState<Tool>("pool_rect");
+  const toolRef = useRef<Tool>("pool_rect");
+  toolRef.current = tool;
   const [waterKind, setWaterKind] = useState<WaterBodyKind>("pool");
   const [coverKind, setCoverKind] = useState<PatioCoverKind>("pergola");
   const [fenceKind, setFenceKind] = useState<FenceKind>("aluminum");
@@ -1041,8 +1048,14 @@ export function CadWorkspace({
       drawMeasure(ctx, vp, measurePoints[0], measurePoints[1], unitSystem);
     }
 
-    if (calibratePoints.length === 1 && previewPoint) {
-      drawMeasure(ctx, vp, calibratePoints[0], previewPoint, unitSystem);
+    if (calibratePoints.length === 1) {
+      drawMeasure(
+        ctx,
+        vp,
+        calibratePoints[0],
+        previewPoint ?? calibratePoints[0],
+        unitSystem,
+      );
     } else if (calibratePoints.length >= 2) {
       drawMeasure(ctx, vp, calibratePoints[0], calibratePoints[1], unitSystem);
     }
@@ -1157,7 +1170,8 @@ export function CadWorkspace({
       !design.patios.length &&
       !(design.buildings ?? []).length &&
       !(design.patioCovers ?? []).length &&
-      !draftPoints.length
+      !draftPoints.length &&
+      !design.surveyUnderlay
     ) {
       ctx.fillStyle = "rgba(20,32,41,0.45)";
       ctx.font = "14px Source Sans 3, sans-serif";
@@ -1252,6 +1266,44 @@ export function CadWorkspace({
   ): PointMm {
     const { x, y } = canvasLocal(e);
     return screenToWorld(x, y, vp, unitSystem, snap);
+  }
+
+  function startSurveyCalibrate() {
+    toolRef.current = "survey_calibrate";
+    setDesignMode("2d");
+    setSideTab("layers");
+    setTool("survey_calibrate");
+    setCalibratePoints([]);
+    setLengthBuffer("");
+  }
+
+  function applySurveyCalibration(knownMm: number): boolean {
+    const pts = calibratePointsRef.current;
+    const current = designRef.current;
+    const underlay = current.surveyUnderlay;
+    if (!underlay || pts.length < 2) return false;
+    const a = pts[0];
+    const b = pts[1];
+    const worldLen = segmentLengthMm(a, b);
+    const screenLen = worldLen * vp.scale;
+    if (!(knownMm > 0) || worldLen < 1 || screenLen < 8) return false;
+    const nextUnderlay = calibrateSurveyUnderlay(underlay, a, b, knownMm);
+    commitDesign({ ...current, surveyUnderlay: nextUnderlay });
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      setVp(
+        viewportToFitWorld(
+          surveyUnderlayWorldCorners(nextUnderlay),
+          rect.width,
+          rect.height,
+        ),
+      );
+    }
+    setCalibratePoints([]);
+    setLengthBuffer("");
+    setTool("select");
+    return true;
   }
 
   function commitWaterBody(outline: PointMm[]) {
@@ -2209,12 +2261,10 @@ export function CadWorkspace({
       return;
     }
 
-    if (tool === "survey_calibrate") {
-      if (calibratePoints.length >= 2) {
-        setCalibratePoints([point]);
-      } else {
-        setCalibratePoints((pts) => [...pts, point]);
-      }
+    if (toolRef.current === "survey_calibrate" || tool === "survey_calibrate") {
+      const pick = worldFromEvent(e, false);
+      setCursor(pick);
+      setCalibratePoints((pts) => (pts.length >= 2 ? [pick] : [...pts, pick]));
       return;
     }
 
@@ -3003,21 +3053,8 @@ export function CadWorkspace({
         lengthBuffer
       ) {
         e.preventDefault();
-        const mm = parseLengthToMm(lengthBuffer, unitSystem);
-        if (mm != null && mm > 0 && design.surveyUnderlay) {
-          commitDesign({
-            ...design,
-            surveyUnderlay: calibrateSurveyUnderlay(
-              design.surveyUnderlay,
-              calibratePoints[0],
-              calibratePoints[1],
-              mm,
-            ),
-          });
-          setCalibratePoints([]);
-          setLengthBuffer("");
-          setTool("select");
-        }
+        const mm = parseSurveyKnownLengthToMm(lengthBuffer, unitSystem);
+        if (mm != null && mm > 0) applySurveyCalibration(mm);
         return;
       }
       if (lengthBuffer) {
@@ -3123,7 +3160,11 @@ export function CadWorkspace({
                         : tool === "measure"
                           ? "Click two points to measure distance. Esc clears."
                           : tool === "survey_calibrate"
-                            ? "Click two ends of a printed dimension on the survey, then type that length and Enter."
+                            ? calibratePoints.length === 0
+                              ? "Click the first end of a printed dimension on the survey."
+                              : calibratePoints.length === 1
+                                ? "Click the other end of that dimension."
+                                : "Type the printed length (e.g. 50) and Enter, or Apply scale in Layers."
                           : "Select to move/edit. Drag a side midpoint to stretch it evenly; drag a corner to reshape. Hold Shift on a corner for 90° edges.";
 
   return (
@@ -3228,18 +3269,63 @@ export function CadWorkspace({
                       }
                     }}
                   />
+                  {design.surveyUnderlay &&
+                  layerVisible(design, "survey") &&
+                  (!design.surveyUnderlay.calibrated ||
+                    tool === "survey_calibrate") ? (
+                    <div className="cad-survey-hint" role="status">
+                      <div className="cad-survey-hint-copy">
+                        {tool === "survey_calibrate"
+                          ? calibratePoints.length === 0
+                            ? "Mark the first end of a printed scale on the survey — a scale bar, dimension callout, or known property line."
+                            : calibratePoints.length === 1
+                              ? "Mark the other end of that same scale."
+                              : "Type the printed length in Layers (e.g. 50 for 50′) and Apply scale."
+                          : "This survey isn’t scaled to CAD yet. Mark both ends of a printed scale on the sheet so the drawing matches real dimensions."}
+                      </div>
+                      {tool !== "survey_calibrate" ? (
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={startSurveyCalibrate}
+                        >
+                          Mark scale
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div className="hud">
                     <div>
-                      {(tool === "pool_rect" ||
-                        tool === "house_rect" ||
-                        tool === "cover_rect") &&
-                      draftPoints.length === 2
-                        ? "Depth"
-                        : "Segment"}
+                      {tool === "survey_calibrate"
+                        ? "Survey span"
+                        : (tool === "pool_rect" ||
+                              tool === "house_rect" ||
+                              tool === "cover_rect") &&
+                            draftPoints.length === 2
+                          ? "Depth"
+                          : "Segment"}
                       :{" "}
-                      {draftPoints.length > 0
-                        ? formatLength(draftSegmentMm, unitSystem)
-                        : "—"}
+                      {tool === "survey_calibrate"
+                        ? calibratePoints.length >= 2
+                          ? formatLength(
+                              segmentLengthMm(
+                                calibratePoints[0],
+                                calibratePoints[1],
+                              ),
+                              unitSystem,
+                            )
+                          : calibratePoints.length === 1 && previewPoint
+                            ? formatLength(
+                                segmentLengthMm(
+                                  calibratePoints[0],
+                                  previewPoint,
+                                ),
+                                unitSystem,
+                              )
+                            : "—"
+                        : draftPoints.length > 0
+                          ? formatLength(draftSegmentMm, unitSystem)
+                          : "—"}
                     </div>
                     <div>
                       {tool === "plumbing"
@@ -3347,11 +3433,13 @@ export function CadWorkspace({
                       : draftPoints.length >= 3
                   }
                   onTool={(next) => {
+                    toolRef.current = next;
                     setTool(next);
                     setDraftPoints([]);
                     setLengthBuffer("");
                     if (next !== "measure") setMeasurePoints([]);
                     if (next !== "survey_calibrate") setCalibratePoints([]);
+                    if (next === "survey_calibrate") startSurveyCalibrate();
                   }}
                   onWaterKind={setWaterKind}
                   onCoverKind={setCoverKind}
@@ -5328,31 +5416,11 @@ export function CadWorkspace({
                   projectId={projectId}
                   design={design}
                   unitSystem={unitSystem}
+                  calibrating={tool === "survey_calibrate"}
                   calibratePoints={calibratePoints}
                   onDesignChange={commitDesign}
-                  onStartCalibrate={() => {
-                    setSideTab("layers");
-                    setTool("survey_calibrate");
-                    setCalibratePoints([]);
-                    setLengthBuffer("");
-                  }}
-                  onApplyCalibrate={(knownMm) => {
-                    if (!design.surveyUnderlay || calibratePoints.length < 2) {
-                      return;
-                    }
-                    commitDesign({
-                      ...design,
-                      surveyUnderlay: calibrateSurveyUnderlay(
-                        design.surveyUnderlay,
-                        calibratePoints[0],
-                        calibratePoints[1],
-                        knownMm,
-                      ),
-                    });
-                    setCalibratePoints([]);
-                    setLengthBuffer("");
-                    setTool("select");
-                  }}
+                  onStartCalibrate={startSurveyCalibrate}
+                  onApplyCalibrate={(knownMm) => applySurveyCalibration(knownMm)}
                   onCancelCalibrate={() => {
                     setCalibratePoints([]);
                     setLengthBuffer("");

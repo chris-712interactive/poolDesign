@@ -165,7 +165,7 @@ export function CadToolPalette({
 
   return (
     <div className="cad-tab-panel" role="tabpanel">
-      <div className="cad-icon-toolbar cad-icon-toolbar-2 cad-tools-core">
+      <div className="cad-icon-toolbar cad-icon-toolbar-3 cad-tools-core">
         <button
           type="button"
           className={`tool-icon-btn ${tool === "select" ? "active" : ""}`}
@@ -185,6 +185,16 @@ export function CadToolPalette({
         >
           {toolMeta("measure").icon}
           <ToolTooltip label="Measure" />
+        </button>
+        <button
+          type="button"
+          className={`tool-icon-btn ${tool === "survey_calibrate" ? "active" : ""}`}
+          title="Calibrate survey"
+          aria-label="Calibrate survey"
+          onClick={() => onTool("survey_calibrate")}
+        >
+          {toolMeta("survey_calibrate").icon}
+          <ToolTooltip label="Calibrate survey" />
         </button>
       </div>
 

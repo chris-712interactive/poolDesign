@@ -97,3 +97,33 @@ export function zoomAt(
     panY: screenY - worldY * nextScale,
   };
 }
+
+/** Pan/zoom so the given world points fill the canvas with padding. */
+export function viewportToFitWorld(
+  points: PointMm[],
+  viewW: number,
+  viewH: number,
+  padding = 48,
+): Viewport {
+  if (points.length === 0 || viewW < 8 || viewH < 8) return DEFAULT_VIEWPORT;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  const w = Math.max(1, maxX - minX);
+  const h = Math.max(1, maxY - minY);
+  const innerW = Math.max(8, viewW - padding * 2);
+  const innerH = Math.max(8, viewH - padding * 2);
+  const scale = Math.min(0.4, Math.max(0.01, Math.min(innerW / w, innerH / h)));
+  return {
+    scale,
+    panX: (viewW - w * scale) / 2 - minX * scale,
+    panY: (viewH - h * scale) / 2 - minY * scale,
+  };
+}

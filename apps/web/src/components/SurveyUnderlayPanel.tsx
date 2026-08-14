@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createSurveyUnderlay,
   formatLength,
-  parseLengthToMm,
+  parseSurveyKnownLengthToMm,
   rotateSurveyUnderlay,
   surveyMmPerPixel,
   type DesignDocument,
@@ -17,10 +17,11 @@ type Props = {
   projectId: string;
   design: DesignDocument;
   unitSystem: UnitSystem;
+  calibrating: boolean;
   calibratePoints: PointMm[];
   onDesignChange: (next: DesignDocument) => void;
   onStartCalibrate: () => void;
-  onApplyCalibrate: (knownMm: number) => void;
+  onApplyCalibrate: (knownMm: number) => boolean;
   onCancelCalibrate: () => void;
 };
 
@@ -28,6 +29,7 @@ export function SurveyUnderlayPanel({
   projectId,
   design,
   unitSystem,
+  calibrating,
   calibratePoints,
   onDesignChange,
   onStartCalibrate,
@@ -38,6 +40,14 @@ export function SurveyUnderlayPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [known, setKnown] = useState("");
+  const knownRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (calibrating && calibratePoints.length >= 2) {
+      knownRef.current?.focus();
+      knownRef.current?.select();
+    }
+  }, [calibrating, calibratePoints.length]);
 
   async function onFile(file: File | undefined) {
     if (!file) return;
@@ -66,6 +76,7 @@ export function SurveyUnderlayPanel({
             )
           : [...design.layers, { id: "survey", name: "survey", visible: true }],
       });
+      onStartCalibrate();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -77,14 +88,34 @@ export function SurveyUnderlayPanel({
     onDesignChange({ ...design, surveyUnderlay: next });
   }
 
-  const lengthLabel = unitSystem === "metric" ? "m" : "ft-in";
+  function applyKnown() {
+    const mm = parseSurveyKnownLengthToMm(known, unitSystem);
+    if (mm == null || mm <= 0) {
+      setError(
+        unitSystem === "metric"
+          ? "Enter the printed length (e.g. 15.24 or 15.24m)."
+          : "Enter the printed length (e.g. 50 or 50').",
+      );
+      return;
+    }
+    setError(null);
+    const ok = onApplyCalibrate(mm);
+    if (!ok) {
+      setError("Click two ends of a dimension on the survey first.");
+      return;
+    }
+    setKnown("");
+  }
+
+  const lengthLabel = unitSystem === "metric" ? "m" : "ft";
+  const showCalibrateUi = Boolean(underlay) && (calibrating || calibratePoints.length > 0);
 
   return (
     <div className="stack" style={{ gap: "0.55rem", marginTop: "1.1rem" }}>
       <strong>Survey underlay</strong>
       <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
-        Upload a PNG/JPG of the plat. Click two ends of a printed dimension,
-        then enter that length so the sheet matches CAD scale.
+        Upload a PNG/JPG of the plat. Click <em>Calibrate scale</em>, then click
+        both ends of a printed dimension on the sheet and type that length.
       </p>
       <input
         type="file"
@@ -101,6 +132,15 @@ export function SurveyUnderlayPanel({
             {underlay.calibrated ? "Scale calibrated to CAD." : "Not calibrated yet."}{" "}
             1 px = {formatLength(surveyMmPerPixel(underlay), unitSystem)}
           </div>
+          {!underlay.calibrated ? (
+            <p className="cad-survey-panel-callout">
+              {calibrating
+                ? calibratePoints.length >= 2
+                  ? "Enter the printed length of the span you marked, then Apply scale."
+                  : "On the plan, mark both ends of a printed scale (scale bar, dimension, or known lot line)."
+                : "The sheet is not scaled yet. Click Calibrate scale, then mark both ends of a printed dimension on the survey."}
+            </p>
+          ) : null}
           <div className="field">
             <label htmlFor="survey-opacity">Opacity</label>
             <input
@@ -140,55 +180,49 @@ export function SurveyUnderlayPanel({
             </button>
             <button
               type="button"
-              className="btn"
+              className={calibrating ? "btn" : "btn secondary"}
               onClick={onStartCalibrate}
             >
-              Calibrate scale
+              {calibrating ? "Calibrating…" : "Calibrate scale"}
             </button>
           </div>
-          {calibratePoints.length > 0 ? (
+          {showCalibrateUi ? (
             <div className="stack" style={{ gap: "0.35rem" }}>
               <span className="muted" style={{ fontSize: "0.85rem" }}>
-                {calibratePoints.length === 1
-                  ? "Click the other end of that dimension."
-                  : "Enter the length printed on the survey."}
+                {calibratePoints.length === 0
+                  ? "Click the first end of a known dimension on the survey."
+                  : calibratePoints.length === 1
+                    ? "Click the other end of that dimension."
+                    : "Type the length printed on the survey, then Apply scale."}
               </span>
-              {calibratePoints.length >= 2 ? (
-                <div className="field">
-                  <label htmlFor="survey-known">
-                    Survey length ({lengthLabel})
-                  </label>
-                  <input
-                    id="survey-known"
-                    value={known}
-                    placeholder={unitSystem === "metric" ? "e.g. 15.24" : "e.g. 50'"}
-                    onChange={(e) => setKnown(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter") return;
-                      const mm = parseLengthToMm(known, unitSystem);
-                      if (mm == null || mm <= 0) return;
-                      onApplyCalibrate(mm);
-                      setKnown("");
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="btn"
-                    style={{ marginTop: "0.35rem" }}
-                    onClick={() => {
-                      const mm = parseLengthToMm(known, unitSystem);
-                      if (mm == null || mm <= 0) {
-                        setError("Enter the printed length (e.g. 50').");
-                        return;
-                      }
-                      onApplyCalibrate(mm);
-                      setKnown("");
-                    }}
-                  >
-                    Apply scale
-                  </button>
-                </div>
-              ) : null}
+              <div className="field">
+                <label htmlFor="survey-known">
+                  Survey length ({lengthLabel})
+                </label>
+                <input
+                  id="survey-known"
+                  ref={knownRef}
+                  value={known}
+                  disabled={calibratePoints.length < 2}
+                  placeholder={unitSystem === "metric" ? "e.g. 15.24" : "e.g. 50"}
+                  onChange={(e) => setKnown(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    applyKnown();
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ marginTop: "0.35rem" }}
+                  disabled={calibratePoints.length < 2}
+                  onClick={applyKnown}
+                >
+                  Apply scale
+                </button>
+              </div>
               <button
                 type="button"
                 className="btn secondary"

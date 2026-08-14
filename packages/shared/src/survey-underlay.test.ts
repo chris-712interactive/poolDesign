@@ -4,6 +4,7 @@ import { MM_PER_FOOT } from "./units";
 import {
   calibrateSurveyUnderlay,
   createSurveyUnderlay,
+  parseSurveyKnownLengthToMm,
   pointInSurveyUnderlay,
   rotateSurveyUnderlay,
   surveyMmPerPixel,
@@ -58,5 +59,21 @@ describe("survey underlay calibration", () => {
     const c2 = surveyUnderlayCenter(turned);
     assert.ok(Math.abs(c.x - c2.x) < 1e-6);
     assert.ok(Math.abs(c.y - c2.y) < 1e-6);
+  });
+
+  it("reads survey callouts as feet, including prime quotes", () => {
+    const fiftyFeet = 50 * MM_PER_FOOT;
+    assert.ok(
+      Math.abs(parseSurveyKnownLengthToMm("50", "imperial")! - fiftyFeet) < 0.5,
+    );
+    assert.ok(
+      Math.abs(parseSurveyKnownLengthToMm("50'", "imperial")! - fiftyFeet) < 0.5,
+    );
+    assert.ok(
+      Math.abs(parseSurveyKnownLengthToMm("50′", "imperial")! - fiftyFeet) < 0.5,
+    );
+    assert.ok(
+      Math.abs(parseSurveyKnownLengthToMm("15.24", "metric")! - 15240) < 0.5,
+    );
   });
 });
