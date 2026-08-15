@@ -215,7 +215,7 @@ export function walkBounds(
   center: { x: number; z: number },
   groundSize: number,
 ): { minX: number; maxX: number; minZ: number; maxZ: number } {
-  const half = Math.max(20, groundSize * 0.65);
+  const half = Math.max(48, groundSize * 0.9);
   return {
     minX: center.x - half,
     maxX: center.x + half,

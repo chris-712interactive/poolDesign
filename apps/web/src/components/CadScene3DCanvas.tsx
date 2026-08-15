@@ -11,7 +11,7 @@ import {
 } from "react";
 import type { CadScene3DHandle } from "@/lib/cad3d/cadScene3dHandle";
 import { Canvas, ThreeEvent, useThree } from "@react-three/fiber";
-import { Html, OrbitControls, Sky } from "@react-three/drei";
+import { Html, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import type { DesignDocument, PointMm } from "@pool-design/shared";
 import {
@@ -80,6 +80,7 @@ import {
 } from "@/lib/cad3d/WaterMaterial";
 import { WalkControls } from "@/lib/cad3d/WalkControls";
 import { walkSpawnPose } from "@/lib/cad3d/walkMode";
+import { WorldBackdrop } from "@/lib/cad3d/WorldBackdrop";
 import {
   PresentationBloom,
   SoftShadowSetup,
@@ -89,6 +90,7 @@ import {
   TIME_OF_DAY_ORDER,
   TIME_OF_DAY_PRESETS,
   TimeOfDayContext,
+  isNightTime,
   lightingForNorth,
   type TimeOfDay,
 } from "@/lib/cad3d/timeOfDay";
@@ -2416,8 +2418,8 @@ function CameraRig({
         enableDamping
         dampingFactor={0.08}
         minDistance={2}
-        maxDistance={groundSize * 3}
-        maxPolarAngle={Math.PI * 0.49}
+        maxDistance={Math.max(80, groundSize * 5)}
+        maxPolarAngle={Math.PI * 0.495}
         target={target}
       />
       <CameraPosePersistence projectId={projectId} />
@@ -2776,7 +2778,7 @@ export function CadScene3DCanvas({
       <Canvas
         shadows
         dpr={[1, 2]}
-        camera={{ fov: 45, near: 0.1, far: 2000 }}
+        camera={{ fov: 45, near: 0.1, far: 5000 }}
         gl={{
           antialias: true,
           preserveDrawingBuffer: true,
@@ -2800,15 +2802,14 @@ export function CadScene3DCanvas({
                 />
                 <color attach="background" args={[tod.background]} />
                 <fog attach="fog" args={[tod.fog, tod.fogNear, tod.fogFar]} />
-                {tod.showSky ? (
-                  <Sky
-                    sunPosition={lighting.sunPosition}
-                    turbidity={tod.sky.turbidity}
-                    rayleigh={tod.sky.rayleigh}
-                    mieCoefficient={tod.sky.mieCoefficient}
-                    mieDirectionalG={tod.sky.mieDirectionalG}
-                  />
-                ) : null}
+                <WorldBackdrop
+                  center={model.center}
+                  tod={tod}
+                  sunPosition={lighting.sunPosition}
+                  groundMap={textures?.ground.color ?? null}
+                  groundRoughness={textures?.ground.roughness ?? null}
+                  night={isNightTime(timeOfDay)}
+                />
                 <ambientLight intensity={tod.ambient} />
                 <SunLight
                   position={lighting.sunWorld}

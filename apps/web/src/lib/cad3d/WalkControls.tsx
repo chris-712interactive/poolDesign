@@ -59,10 +59,12 @@ export function WalkControls({
     cam.lookAt(spawn.lookAt[0], spawn.lookAt[1], spawn.lookAt[2]);
     cam.fov = WALK_FOV;
     cam.near = 0.05;
+    cam.far = 5000;
     cam.updateProjectionMatrix();
     return () => {
       cam.fov = ORBIT_FOV;
       cam.near = 0.1;
+      cam.far = 5000;
       cam.updateProjectionMatrix();
     };
   }, [camera, spawn, spawnToken]);
