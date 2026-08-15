@@ -24,8 +24,9 @@ function disableFog(root: THREE.Object3D | null) {
     if (!mesh.isMesh || !mesh.material) return;
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const mat of mats) {
-      mat.fog = false;
-      mat.depthWrite = false;
+      const m = mat as THREE.ShaderMaterial;
+      m.fog = false;
+      m.depthWrite = false;
     }
   });
 }
