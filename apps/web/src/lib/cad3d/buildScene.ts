@@ -3329,7 +3329,7 @@ export function buildSceneModel(
           id: `siteline_${line.id}_band_${markI++}`,
           points: samples,
           widthM: Math.max(0.45, mmToMeters(recordedW)),
-          heightM: 0.04,
+          heightM: 0.08,
           colorHex: "#7b4bb8",
           opacity: 0.55,
         });
@@ -3342,7 +3342,7 @@ export function buildSceneModel(
           id: `siteline_${line.id}_dash_${markI++}`,
           points: chain,
           widthM: centerWidth,
-          heightM: 0.12,
+          heightM: 0.16,
           colorHex: color,
           opacity: 1,
         });

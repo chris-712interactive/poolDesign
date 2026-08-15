@@ -1989,8 +1989,8 @@ function GroundMarkMesh({ desc }: { desc: GroundMarkDescriptor }) {
         side={THREE.DoubleSide}
         toneMapped={false}
         polygonOffset
-        polygonOffsetFactor={-4}
-        polygonOffsetUnits={-4}
+        polygonOffsetFactor={-8}
+        polygonOffsetUnits={-8}
         clippingPlanes={clippingPlanes}
       />
     </mesh>
@@ -2625,6 +2625,16 @@ export function CadScene3DCanvas({
     () => lightingForNorth(tod, design.northDeg ?? 0, model.center),
     [tod, design.northDeg, model.center],
   );
+  const lotPadHalfM = useMemo(() => {
+    let x = 16;
+    let z = 16;
+    for (const p of model.ground.outlineMm) {
+      const w = planToWorldXZ(p);
+      x = Math.max(x, Math.abs(w.x - model.center.x));
+      z = Math.max(z, Math.abs(w.z - model.center.z));
+    }
+    return { x, z };
+  }, [model.ground.outlineMm, model.center.x, model.center.z]);
   const applyPreset = (id: ViewPresetId) => {
     setWalkMode(false);
     setWalkLocked(false);
@@ -2819,6 +2829,7 @@ export function CadScene3DCanvas({
                 <fog attach="fog" args={[tod.fog, tod.fogNear, tod.fogFar]} />
                 <WorldBackdrop
                   center={model.center}
+                  lotPadHalfM={lotPadHalfM}
                   tod={tod}
                   sunPosition={lighting.sunPosition}
                   groundMap={textures?.ground.color ?? null}

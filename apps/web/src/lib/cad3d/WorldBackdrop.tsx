@@ -8,11 +8,13 @@ import type { TimeOfDayPreset } from "@/lib/cad3d/timeOfDay";
 
 /** Half-extent of the horizon lawn. Larger than orbit zoom; fog hides the rim. */
 const WORLD_HALF_M = 2800;
-const WORLD_SEGMENTS = 96;
+const CELL_M = 36;
 const SKY_DISTANCE = 4000;
 
 type Props = {
   center: { x: number; z: number };
+  /** Lot pad half-size in world XZ (m). Horizon lawn is an annulus outside this. */
+  lotPadHalfM: { x: number; z: number };
   tod: TimeOfDayPreset;
   sunPosition: [number, number, number];
   groundMap?: THREE.CanvasTexture | null;
@@ -35,50 +37,97 @@ function disableFog(root: THREE.Object3D | null) {
 }
 
 /**
- * Subdivided square lawn. A disc/ring used huge radial triangles, which
- * stretched grass into a corduroy strip and left a thin rim you could see
- * under at low pitch.
+ * Square annulus: subdivided lawn around the lot pad. A solid plane filled
+ * pool pits and buried survey marks; a disc/ring stretched UVs into a strip.
  */
-function makeHorizonLawnGeometry(center: {
-  x: number;
-  z: number;
-}): THREE.BufferGeometry {
-  const geo = new THREE.PlaneGeometry(
-    WORLD_HALF_M * 2,
-    WORLD_HALF_M * 2,
-    WORLD_SEGMENTS,
-    WORLD_SEGMENTS,
-  );
-  const pos = geo.attributes.position;
-  const uv = geo.attributes.uv;
+function segsFor(lengthM: number): number {
+  return Math.max(1, Math.ceil(Math.abs(lengthM) / CELL_M));
+}
 
-  for (let i = 0; i < pos.count; i++) {
-    const lx = pos.getX(i);
-    const ly = pos.getY(i);
-    uv.setXY(
-      i,
-      (center.x + lx) / GRASS_TILE_M,
-      (center.z - ly) / GRASS_TILE_M,
-    );
+function pushGrid(
+  positions: number[],
+  normals: number[],
+  uvs: number[],
+  indices: number[],
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  center: { x: number; z: number },
+) {
+  const nx = segsFor(x1 - x0) + 1;
+  const ny = segsFor(y1 - y0) + 1;
+  const base = positions.length / 3;
+  for (let j = 0; j < ny; j++) {
+    const y = y0 + ((y1 - y0) * j) / (ny - 1);
+    for (let i = 0; i < nx; i++) {
+      const x = x0 + ((x1 - x0) * i) / (nx - 1);
+      positions.push(x, y, 0);
+      normals.push(0, 0, 1);
+      uvs.push(
+        (center.x + x) / GRASS_TILE_M,
+        (center.z - y) / GRASS_TILE_M,
+      );
+    }
   }
-  uv.needsUpdate = true;
+  for (let j = 0; j < ny - 1; j++) {
+    for (let i = 0; i < nx - 1; i++) {
+      const a = base + j * nx + i;
+      const b = a + 1;
+      const c = a + nx;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+}
+
+function makeHorizonLawnGeometry(
+  center: { x: number; z: number },
+  lotPadHalfM: { x: number; z: number },
+): THREE.BufferGeometry {
+  const innerX = Math.min(
+    WORLD_HALF_M * 0.4,
+    Math.max(8, lotPadHalfM.x * 0.98),
+  );
+  const innerY = Math.min(
+    WORLD_HALF_M * 0.4,
+    Math.max(8, lotPadHalfM.z * 0.98),
+  );
+  const o = WORLD_HALF_M;
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  // Four rectangles around the pad (local XY, rotated to XZ later).
+  pushGrid(positions, normals, uvs, indices, -o, -o, -innerX, o, center);
+  pushGrid(positions, normals, uvs, indices, innerX, -o, o, o, center);
+  pushGrid(positions, normals, uvs, indices, -innerX, -o, innerX, -innerY, center);
+  pushGrid(positions, normals, uvs, indices, -innerX, innerY, innerX, o, center);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
   return geo;
 }
 
 function HorizonGround({
   center,
+  lotPadHalfM,
   groundMap,
   groundRoughness,
   night,
 }: {
   center: { x: number; z: number };
+  lotPadHalfM: { x: number; z: number };
   groundMap?: THREE.CanvasTexture | null;
   groundRoughness?: THREE.CanvasTexture | null;
   night: boolean;
 }) {
   const geometry = useMemo(
-    () => makeHorizonLawnGeometry(center),
-    [center.x, center.z],
+    () => makeHorizonLawnGeometry(center, lotPadHalfM),
+    [center.x, center.z, lotPadHalfM.x, lotPadHalfM.z],
   );
 
   useLayoutEffect(() => {
@@ -166,6 +215,7 @@ function NightDome() {
  */
 export function WorldBackdrop({
   center,
+  lotPadHalfM,
   tod,
   sunPosition,
   groundMap,
@@ -182,6 +232,7 @@ export function WorldBackdrop({
     <>
       <HorizonGround
         center={center}
+        lotPadHalfM={lotPadHalfM}
         groundMap={groundMap}
         groundRoughness={groundRoughness}
         night={night}
