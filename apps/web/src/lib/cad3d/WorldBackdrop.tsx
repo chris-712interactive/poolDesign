@@ -3,15 +3,16 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { Sky } from "@react-three/drei";
 import * as THREE from "three";
+import { GRASS_TILE_M } from "@/lib/cad3d/proceduralTextures";
 import type { TimeOfDayPreset } from "@/lib/cad3d/timeOfDay";
 
-const WORLD_RADIUS_M = 2200;
+/** Half-extent of the horizon lawn. Larger than orbit zoom; fog hides the rim. */
+const WORLD_HALF_M = 2800;
+const WORLD_SEGMENTS = 96;
 const SKY_DISTANCE = 4000;
 
 type Props = {
   center: { x: number; z: number };
-  /** Inradius of the designed lot pad (m). Horizon lawn starts at this edge. */
-  lotRadiusM: number;
   tod: TimeOfDayPreset;
   sunPosition: [number, number, number];
   groundMap?: THREE.CanvasTexture | null;
@@ -34,22 +35,31 @@ function disableFog(root: THREE.Object3D | null) {
 }
 
 /**
- * Annulus with the same world-meter UVs as ExtrudeGeometry's WorldUVGenerator
- * (shape x/y in meters, texture.repeat 14). Default RingGeometry UVs cluster
- * at 0.5 on the inner hole, which stretched into a corduroy strip.
+ * Subdivided square lawn. A disc/ring used huge radial triangles, which
+ * stretched grass into a corduroy strip and left a thin rim you could see
+ * under at low pitch.
  */
-function makeHorizonRingGeometry(
-  inner: number,
-  outer: number,
-  center: { x: number; z: number },
-): THREE.RingGeometry {
-  const geo = new THREE.RingGeometry(inner, outer, 128, 24);
+function makeHorizonLawnGeometry(center: {
+  x: number;
+  z: number;
+}): THREE.BufferGeometry {
+  const geo = new THREE.PlaneGeometry(
+    WORLD_HALF_M * 2,
+    WORLD_HALF_M * 2,
+    WORLD_SEGMENTS,
+    WORLD_SEGMENTS,
+  );
   const pos = geo.attributes.position;
   const uv = geo.attributes.uv;
+
   for (let i = 0; i < pos.count; i++) {
     const lx = pos.getX(i);
     const ly = pos.getY(i);
-    uv.setXY(i, center.x + lx, ly - center.z);
+    uv.setXY(
+      i,
+      (center.x + lx) / GRASS_TILE_M,
+      (center.z - ly) / GRASS_TILE_M,
+    );
   }
   uv.needsUpdate = true;
   return geo;
@@ -57,46 +67,25 @@ function makeHorizonRingGeometry(
 
 function HorizonGround({
   center,
-  lotRadiusM,
   groundMap,
   groundRoughness,
   night,
 }: {
   center: { x: number; z: number };
-  lotRadiusM: number;
   groundMap?: THREE.CanvasTexture | null;
   groundRoughness?: THREE.CanvasTexture | null;
   night: boolean;
 }) {
-  const inner = Math.min(
-    WORLD_RADIUS_M * 0.35,
-    Math.max(12, lotRadiusM * 0.94),
-  );
   const geometry = useMemo(
-    () => makeHorizonRingGeometry(inner, WORLD_RADIUS_M, center),
-    [inner, center.x, center.z],
+    () => makeHorizonLawnGeometry(center),
+    [center.x, center.z],
   );
-  const maps = useMemo(() => {
-    if (!groundMap) return { color: null, roughness: null };
-    const color = groundMap.clone();
-    color.wrapS = color.wrapT = THREE.RepeatWrapping;
-    color.needsUpdate = true;
-    let roughness: THREE.CanvasTexture | null = null;
-    if (groundRoughness) {
-      roughness = groundRoughness.clone();
-      roughness.wrapS = roughness.wrapT = THREE.RepeatWrapping;
-      roughness.needsUpdate = true;
-    }
-    return { color, roughness };
-  }, [groundMap, groundRoughness]);
 
   useLayoutEffect(() => {
     return () => {
       geometry.dispose();
-      maps.color?.dispose();
-      maps.roughness?.dispose();
     };
-  }, [geometry, maps]);
+  }, [geometry]);
 
   return (
     <mesh
@@ -108,8 +97,8 @@ function HorizonGround({
       renderOrder={-2}
     >
       <meshStandardMaterial
-        map={maps.color}
-        roughnessMap={maps.roughness ?? undefined}
+        map={groundMap}
+        roughnessMap={groundRoughness ?? undefined}
         color={night ? "#4a5848" : "#ffffff"}
         roughness={1}
         metalness={0}
@@ -177,7 +166,6 @@ function NightDome() {
  */
 export function WorldBackdrop({
   center,
-  lotRadiusM,
   tod,
   sunPosition,
   groundMap,
@@ -194,7 +182,6 @@ export function WorldBackdrop({
     <>
       <HorizonGround
         center={center}
-        lotRadiusM={lotRadiusM}
         groundMap={groundMap}
         groundRoughness={groundRoughness}
         night={night}

@@ -57,6 +57,7 @@ import {
   makeDeckTexture,
   makeGateButtonTexture,
   makeGatePolymerTexture,
+  GRASS_TILE_M,
   makeGroundTexture,
   makePebbleFloorTexture,
   makePlasterTexture,
@@ -506,6 +507,19 @@ function SelectableMaterial({
   );
 }
 
+function applyGrassWorldUVs(geo: THREE.BufferGeometry) {
+  const pos = geo.attributes.position;
+  let uv = geo.attributes.uv as THREE.BufferAttribute | undefined;
+  if (!uv || uv.count !== pos.count) {
+    uv = new THREE.BufferAttribute(new Float32Array(pos.count * 2), 2);
+    geo.setAttribute("uv", uv);
+  }
+  for (let i = 0; i < pos.count; i++) {
+    uv.setXY(i, pos.getX(i) / GRASS_TILE_M, pos.getZ(i) / GRASS_TILE_M);
+  }
+  uv.needsUpdate = true;
+}
+
 function TerrainMesh({ desc }: { desc: TerrainDescriptor }) {
   const geometry = useMemo(() => {
     const { cols, rows, stepMm, originMm, heightsM } = desc;
@@ -524,8 +538,8 @@ function TerrainMesh({ desc }: { desc: TerrainDescriptor }) {
         positions[idx * 3] = xz.x;
         positions[idx * 3 + 1] = y;
         positions[idx * 3 + 2] = xz.z;
-        uvs[idx * 2] = i / Math.max(1, cols - 1);
-        uvs[idx * 2 + 1] = j / Math.max(1, rows - 1);
+        uvs[idx * 2] = xz.x / GRASS_TILE_M;
+        uvs[idx * 2 + 1] = xz.z / GRASS_TILE_M;
       }
     }
     const indices: number[] = [];
@@ -587,6 +601,7 @@ function ExtrudeMesh({
       const geo = new THREE.ShapeGeometry(shape);
       geo.rotateX(-Math.PI / 2);
       geo.translate(0, desc.bottomY + Math.max(0.004, desc.height), 0);
+      if (desc.material === "ground") applyGrassWorldUVs(geo);
       return geo;
     }
     const geo = new THREE.ExtrudeGeometry(shape, {
@@ -595,6 +610,7 @@ function ExtrudeMesh({
     });
     geo.rotateX(-Math.PI / 2);
     geo.translate(0, desc.bottomY, 0);
+    if (desc.material === "ground") applyGrassWorldUVs(geo);
     return geo;
   }, [desc]);
 
@@ -2609,23 +2625,6 @@ export function CadScene3DCanvas({
     () => lightingForNorth(tod, design.northDeg ?? 0, model.center),
     [tod, design.northDeg, model.center],
   );
-  const lotRadiusM = useMemo(() => {
-    const pts = model.ground.outlineMm;
-    if (pts.length < 2) return 16;
-    const { x: cx, z: cz } = model.center;
-    let r = Infinity;
-    for (let i = 0; i < pts.length; i++) {
-      const a = planToWorldXZ(pts[i]);
-      const b = planToWorldXZ(pts[(i + 1) % pts.length]);
-      const dx = b.x - a.x;
-      const dz = b.z - a.z;
-      const len = Math.hypot(dx, dz) || 1;
-      const dist = Math.abs(dx * (cz - a.z) - dz * (cx - a.x)) / len;
-      r = Math.min(r, dist);
-    }
-    return Number.isFinite(r) && r > 1 ? r : 16;
-  }, [model.ground.outlineMm, model.center.x, model.center.z]);
-
   const applyPreset = (id: ViewPresetId) => {
     setWalkMode(false);
     setWalkLocked(false);
@@ -2794,7 +2793,7 @@ export function CadScene3DCanvas({
       <Canvas
         shadows
         dpr={[1, 2]}
-        camera={{ fov: 45, near: 0.1, far: 5000 }}
+        camera={{ fov: 45, near: 0.1, far: 8000 }}
         gl={{
           antialias: true,
           preserveDrawingBuffer: true,
@@ -2820,7 +2819,6 @@ export function CadScene3DCanvas({
                 <fog attach="fog" args={[tod.fog, tod.fogNear, tod.fogFar]} />
                 <WorldBackdrop
                   center={model.center}
-                  lotRadiusM={lotRadiusM}
                   tod={tod}
                   sunPosition={lighting.sunPosition}
                   groundMap={textures?.ground.color ?? null}

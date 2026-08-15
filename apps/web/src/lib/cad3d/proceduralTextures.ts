@@ -57,6 +57,9 @@ type TexPair = {
   roughness: THREE.CanvasTexture;
 };
 
+/** World-space grass tile size (meters). Lot pad and horizon lawn share this. */
+export const GRASS_TILE_M = 5;
+
 function canvasPair(
   size: number,
   draw: (
@@ -391,8 +394,8 @@ export function makeGroundTexture(): TexPair {
     cctx.putImageData(cImg, 0, 0);
     rctx.putImageData(rImg, 0, 0);
   }, 4);
-  pair.color.repeat.set(14, 14);
-  pair.roughness.repeat.set(14, 14);
+  pair.color.repeat.set(1, 1);
+  pair.roughness.repeat.set(1, 1);
   return pair;
 }
 
