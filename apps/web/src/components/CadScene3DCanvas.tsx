@@ -2804,6 +2804,7 @@ export function CadScene3DCanvas({
                 <fog attach="fog" args={[tod.fog, tod.fogNear, tod.fogFar]} />
                 <WorldBackdrop
                   center={model.center}
+                  lotRadiusM={Math.max(22, model.groundSize * 0.55)}
                   tod={tod}
                   sunPosition={lighting.sunPosition}
                   groundMap={textures?.ground.color ?? null}

@@ -10,6 +10,8 @@ const SKY_DISTANCE = 4000;
 
 type Props = {
   center: { x: number; z: number };
+  /** Half-size of the designed lot pad (m). Horizon lawn starts outside this. */
+  lotRadiusM: number;
   tod: TimeOfDayPreset;
   sunPosition: [number, number, number];
   groundMap?: THREE.CanvasTexture | null;
@@ -34,15 +36,21 @@ function disableFog(root: THREE.Object3D | null) {
 /** Distant lawn so orbit / walk never drop off into a void. */
 function HorizonGround({
   center,
+  lotRadiusM,
   groundMap,
   groundRoughness,
   night,
 }: {
   center: { x: number; z: number };
+  lotRadiusM: number;
   groundMap?: THREE.CanvasTexture | null;
   groundRoughness?: THREE.CanvasTexture | null;
   night: boolean;
 }) {
+  const inner = Math.min(
+    WORLD_RADIUS_M * 0.8,
+    Math.max(18, lotRadiusM * 0.98),
+  );
   const maps = useMemo(() => {
     if (!groundMap) return { color: null, roughness: null };
     const color = groundMap.clone();
@@ -69,10 +77,12 @@ function HorizonGround({
   return (
     <mesh
       rotation={[-Math.PI / 2, 0, 0]}
-      position={[center.x, -0.14, center.z]}
+      position={[center.x, -0.08, center.z]}
       receiveShadow
+      frustumCulled={false}
+      renderOrder={-2}
     >
-      <circleGeometry args={[WORLD_RADIUS_M, 72]} />
+      <ringGeometry args={[inner, WORLD_RADIUS_M, 96]} />
       <meshStandardMaterial
         map={maps.color}
         roughnessMap={maps.roughness ?? undefined}
@@ -80,6 +90,9 @@ function HorizonGround({
         roughness={1}
         metalness={0}
         envMapIntensity={0.35}
+        polygonOffset
+        polygonOffsetFactor={2}
+        polygonOffsetUnits={2}
       />
     </mesh>
   );
@@ -141,6 +154,7 @@ function NightDome() {
  */
 export function WorldBackdrop({
   center,
+  lotRadiusM,
   tod,
   sunPosition,
   groundMap,
@@ -157,6 +171,7 @@ export function WorldBackdrop({
     <>
       <HorizonGround
         center={center}
+        lotRadiusM={lotRadiusM}
         groundMap={groundMap}
         groundRoughness={groundRoughness}
         night={night}
