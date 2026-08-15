@@ -21,10 +21,11 @@ describe("entitlements", () => {
     assert.equal(planDisplayName("starter"), "Sales");
   });
 
-  it("gives builder features while trialing", () => {
+  it("gives builder features while the local trial is active", () => {
     const e = entitlementsForCompany({
       planKey: "starter",
       subscriptionStatus: "trialing",
+      trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
     assert.equal(e.pdfQuote, true);
     assert.equal(e.permitPacket, true);

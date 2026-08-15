@@ -1,6 +1,7 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import { authenticate, getSessionUser, setSessionCookie } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
+import Link from "next/link";
 
 async function loginAction(formData: FormData) {
   "use server";
@@ -37,6 +38,7 @@ export default async function LoginPage({
     redirect("/app");
   }
   const params = await searchParams;
+  const showDemo = process.env.NODE_ENV !== "production";
 
   return (
     <div className="app-shell">
@@ -45,7 +47,9 @@ export default async function LoginPage({
         <div className="panel stack">
           <h1>Sign in</h1>
           <p className="muted">
-            Use a seeded demo account, or your company credentials.
+            Company credentials. New team?{" "}
+            <Link href="/signup">Start a {showDemo ? "" : "14-day "}free trial</Link>
+            .
           </p>
           {params.error === "1" && (
             <p className="error">Invalid email or password.</p>
@@ -53,10 +57,8 @@ export default async function LoginPage({
           {params.error === "db" && (
             <p className="error">
               Could not reach the database. Confirm{" "}
-              <code>DATABASE_URL</code> is set in Vercel, then run{" "}
-              <code>pnpm db:push</code> and <code>pnpm db:seed</code> against
-              that database. Check{" "}
-              <a href="/api/health">/api/health</a> and Vercel function logs.
+              <code>DATABASE_URL</code> is set, then check{" "}
+              <a href="/api/health">/api/health</a>.
             </p>
           )}
           <form action={loginAction} className="stack">
@@ -67,7 +69,8 @@ export default async function LoginPage({
                 name="email"
                 type="email"
                 required
-                defaultValue="designer@acme-pools.test"
+                autoComplete="email"
+                defaultValue={showDemo ? "designer@acme-pools.test" : ""}
               />
             </div>
             <div className="field">
@@ -77,19 +80,23 @@ export default async function LoginPage({
                 name="password"
                 type="password"
                 required
-                defaultValue="password123"
+                autoComplete="current-password"
+                defaultValue={showDemo ? "password123" : ""}
               />
             </div>
             <button className="btn" type="submit">
               Sign in
             </button>
           </form>
-          <div className="muted" style={{ fontSize: "0.9rem" }}>
-            <div>owner@poolshape.com</div>
-            <div>admin@acme-pools.test</div>
-            <div>designer@acme-pools.test</div>
-            <div>password: password123</div>
-          </div>
+          {showDemo ? (
+            <div className="muted" style={{ fontSize: "0.9rem" }}>
+              <div>Demo (development only)</div>
+              <div>owner@poolshape.com</div>
+              <div>admin@acme-pools.test</div>
+              <div>designer@acme-pools.test</div>
+              <div>password: password123</div>
+            </div>
+          ) : null}
         </div>
       </main>
     </div>

@@ -6,6 +6,34 @@ import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
 import { getCompanyMilestones, summarizeMilestones } from "@/lib/milestones";
 
+async function extendTrialAction(formData: FormData) {
+  "use server";
+  const user = await getSessionUser();
+  if (!user || user.role !== "platform_owner") redirect("/login");
+  const companyId = String(formData.get("companyId") || "");
+  const days = Math.min(90, Math.max(1, Number(formData.get("days") || 14)));
+  const company = await prisma.company.findUnique({ where: { id: companyId } });
+  if (!company) redirect("/platform");
+  if (company.subscriptionStatus === "active") {
+    revalidatePath(`/platform/companies/${companyId}`);
+    return;
+  }
+  const now = new Date();
+  const from =
+    company.trialEndsAt && company.trialEndsAt.getTime() > now.getTime()
+      ? company.trialEndsAt
+      : now;
+  await prisma.company.update({
+    where: { id: companyId },
+    data: {
+      subscriptionStatus: "trialing",
+      trialEndsAt: new Date(from.getTime() + days * 24 * 60 * 60 * 1000),
+    },
+  });
+  revalidatePath(`/platform/companies/${companyId}`);
+  revalidatePath("/platform");
+}
+
 async function updateMilestoneAction(formData: FormData) {
   "use server";
   const user = await getSessionUser();
@@ -106,6 +134,30 @@ export default async function CompanyDetailPage({
               <span className="badge warn">Stuck on {summary.stuckOn}</span>
             )}
           </div>
+          {company.subscriptionStatus !== "active" ? (
+            <form
+              action={extendTrialAction}
+              className="row"
+              style={{ marginTop: "0.85rem" }}
+            >
+              <input type="hidden" name="companyId" value={company.id} />
+              <label className="muted" htmlFor="days">
+                Extend local trial
+              </label>
+              <input
+                id="days"
+                name="days"
+                type="number"
+                min={1}
+                max={90}
+                defaultValue={14}
+                style={{ width: 72 }}
+              />
+              <button className="btn secondary" type="submit">
+                Add days
+              </button>
+            </form>
+          ) : null}
         </div>
 
         <div className="panel">

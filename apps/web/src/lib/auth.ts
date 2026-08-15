@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { prisma, type User, type Company } from "@pool-design/db";
 import bcrypt from "bcryptjs";
 import { createHmac, timingSafeEqual } from "crypto";
+import { expireStaleTrial } from "@/lib/subscription";
 
 const SESSION_COOKIE = "pd_session";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 14;
@@ -61,10 +62,16 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   if (!token) return null;
   const userId = verifySessionToken(token);
   if (!userId) return null;
-  return prisma.user.findUnique({
+  const user = await prisma.user.findUnique({
     where: { id: userId },
     include: { company: true },
   });
+  if (!user) return null;
+  if (user.company) {
+    const company = await expireStaleTrial(user.company);
+    return { ...user, company: company ?? user.company };
+  }
+  return user;
 }
 
 export async function requireSessionUser(): Promise<SessionUser> {

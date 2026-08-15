@@ -62,8 +62,12 @@ export async function POST(request: Request) {
     success_url: `${appBaseUrl()}/app/admin?billing=success`,
     cancel_url: `${appBaseUrl()}/app/admin?billing=canceled`,
     metadata: { companyId: company.id, planKey },
+    payment_method_collection: "always",
+    allow_promotion_codes: true,
     subscription_data: {
       metadata: { companyId: company.id, planKey },
+      // Local trial only — never Stripe trial_period_days (no card on file
+      // during trial; conversion is a paid Checkout session).
     },
   });
 

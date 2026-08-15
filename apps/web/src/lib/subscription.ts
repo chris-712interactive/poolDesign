@@ -1,32 +1,39 @@
-import type { Company, SubscriptionStatus } from "@pool-design/db";
+import type { Company } from "@pool-design/db";
+import { prisma } from "@pool-design/db";
 import {
+  companyHasAppAccess as accessFromBilling,
   companyHasEntitlement,
   entitlementsForCompany,
+  isLocalTrialExpired,
   planDisplayName,
   planTierForKey,
+  subscriptionAccessMessage as billingAccessMessage,
   type EntitlementKey,
   type PlanEntitlements,
 } from "@pool-design/shared";
 
-const BLOCKED: SubscriptionStatus[] = ["canceled", "suspended"];
-
-/** Soft gate: trialing/active/past_due allowed; canceled/suspended blocked. */
-export function companyHasAppAccess(company: Company | null | undefined): boolean {
-  if (!company) return true; // platform owner has no company
-  return !BLOCKED.includes(company.subscriptionStatus);
+export function companyHasAppAccess(
+  company: Company | null | undefined,
+): boolean {
+  if (!company) return true;
+  return accessFromBilling(company);
 }
 
-export function subscriptionAccessMessage(status: SubscriptionStatus): string {
-  if (status === "canceled") {
-    return "Your subscription is canceled. Renew billing to continue designing.";
-  }
-  if (status === "suspended") {
-    return "This company account is suspended. Contact support or renew billing.";
-  }
-  if (status === "past_due") {
-    return "Payment is past due. Update billing to avoid interruption.";
-  }
-  return "";
+export function subscriptionAccessMessage(
+  company: Company | null | undefined,
+): string {
+  return billingAccessMessage(company);
+}
+
+/** Flip expired local trials to canceled so billing UI is consistent. */
+export async function expireStaleTrial(
+  company: Company | null | undefined,
+): Promise<Company | null | undefined> {
+  if (!company || !isLocalTrialExpired(company)) return company;
+  return prisma.company.update({
+    where: { id: company.id },
+    data: { subscriptionStatus: "canceled" },
+  });
 }
 
 export function companyEntitlements(

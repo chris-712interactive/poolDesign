@@ -40,6 +40,7 @@ export default async function CompanyAdminPage() {
             status: company.subscriptionStatus,
             hasCustomer: Boolean(company.stripeCustomerId),
             stripeCustomerId: company.stripeCustomerId,
+            trialEndsAt: company.trialEndsAt?.toISOString() ?? null,
           }}
           rootDomain={rootDomain}
         />

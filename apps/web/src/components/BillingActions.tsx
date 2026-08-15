@@ -1,17 +1,34 @@
 "use client";
 
 import { useState } from "react";
-import { planDisplayName } from "@pool-design/shared";
+import {
+  formatMoney,
+  PLAN_MARKETING,
+  PLAN_PRICING,
+  planDisplayName,
+  trialDaysRemaining,
+} from "@pool-design/shared";
 
 type Props = {
   hasCustomer: boolean;
   planKey: string;
   status: string;
+  trialEndsAt?: string | Date | null;
 };
 
-export function BillingActions({ hasCustomer, planKey, status }: Props) {
+export function BillingActions({
+  hasCustomer,
+  planKey,
+  status,
+  trialEndsAt,
+}: Props) {
   const [busy, setBusy] = useState<"checkout" | "portal" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const daysLeft = trialDaysRemaining({
+    subscriptionStatus: status,
+    trialEndsAt: trialEndsAt ?? null,
+  });
+  const converting = status === "trialing" || status === "canceled";
 
   async function startCheckout(nextPlan: string) {
     setBusy("checkout");
@@ -47,44 +64,75 @@ export function BillingActions({ hasCustomer, planKey, status }: Props) {
 
   return (
     <div className="stack">
-      <p className="muted" style={{ margin: 0 }}>
-        <strong>Sales</strong> — 3D design, client share, live finish sessions.
-        <br />
-        <strong>Builder</strong> — PDF quotes, CSV takeoffs, grade-walk import,
-        draft permit packets.
-      </p>
-      <div className="row" style={{ flexWrap: "wrap" }}>
-        <button
-          type="button"
-          className="btn secondary"
-          disabled={busy !== null}
-          onClick={() => void startCheckout("starter")}
-        >
-          {busy === "checkout" ? "Redirecting…" : "Sales plan"}
-        </button>
-        <button
-          type="button"
-          className="btn"
-          disabled={busy !== null}
-          onClick={() => void startCheckout("pro")}
-        >
-          {busy === "checkout" ? "Redirecting…" : "Builder plan"}
-        </button>
-        {hasCustomer ? (
+      {daysLeft != null ? (
+        <p className="muted" style={{ margin: 0 }}>
+          <strong>
+            {daysLeft === 0
+              ? "Trial ends today."
+              : `${daysLeft} day${daysLeft === 1 ? "" : "s"} left in your trial.`}
+          </strong>{" "}
+          Full Builder features are unlocked until then. No card on file — pick a
+          plan when you are ready.
+        </p>
+      ) : null}
+      <div className="grid-2">
+        <div className="stack">
+          <strong>{PLAN_MARKETING.sales.name}</strong>
+          <span className="muted">
+            {formatMoney(PLAN_PRICING.sales.monthlyCents)}/mo · company
+          </span>
+          <p className="muted" style={{ margin: 0 }}>
+            {PLAN_MARKETING.sales.blurb}
+          </p>
           <button
             type="button"
             className="btn secondary"
             disabled={busy !== null}
-            onClick={() => void openPortal()}
+            onClick={() => void startCheckout("starter")}
           >
-            {busy === "portal" ? "Opening…" : "Manage billing"}
+            {busy === "checkout"
+              ? "Redirecting…"
+              : converting
+                ? "Subscribe to Sales"
+                : "Switch to Sales"}
           </button>
-        ) : null}
+        </div>
+        <div className="stack">
+          <strong>{PLAN_MARKETING.builder.name}</strong>
+          <span className="muted">
+            {formatMoney(PLAN_PRICING.builder.monthlyCents)}/mo · company
+          </span>
+          <p className="muted" style={{ margin: 0 }}>
+            {PLAN_MARKETING.builder.blurb}
+          </p>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy !== null}
+            onClick={() => void startCheckout("pro")}
+          >
+            {busy === "checkout"
+              ? "Redirecting…"
+              : converting
+                ? "Subscribe to Builder"
+                : "Switch to Builder"}
+          </button>
+        </div>
       </div>
+      {hasCustomer ? (
+        <button
+          type="button"
+          className="btn secondary"
+          disabled={busy !== null}
+          onClick={() => void openPortal()}
+        >
+          {busy === "portal" ? "Opening…" : "Manage billing"}
+        </button>
+      ) : null}
       <p className="muted">
-        Current plan: {planDisplayName(planKey)} ({planKey}) · status: {status}
+        Current plan: {planDisplayName(planKey)} · status: {status}
         {status === "trialing"
-          ? " · Trial includes Builder features for evaluation"
+          ? " · Trial is billed by PoolShape, not Stripe"
           : ""}
       </p>
       {error ? <p style={{ color: "var(--danger)" }}>{error}</p> : null}

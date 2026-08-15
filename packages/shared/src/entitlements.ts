@@ -3,6 +3,8 @@
  * DB still stores planKey as "starter" | "pro"; tiers are the product names.
  */
 
+import { isLocalTrialActive } from "./billing";
+
 export type PlanKey = "starter" | "pro";
 export type PlanTier = "sales" | "builder";
 
@@ -61,11 +63,12 @@ export function planTierForKey(planKey: string | null | undefined): PlanTier {
 export type CompanyEntitlementInput = {
   planKey?: string | null;
   subscriptionStatus?: string | null;
+  trialEndsAt?: Date | string | null;
 };
 
 /**
  * Resolve entitlements for a company.
- * Trialing accounts get Builder features so teams can evaluate the full product.
+ * Active local trials get Builder features so teams can evaluate the full product.
  */
 export function entitlementsForCompany(
   company: CompanyEntitlementInput | null | undefined,
@@ -73,7 +76,7 @@ export function entitlementsForCompany(
   if (!company) {
     return ENTITLEMENTS_BY_TIER.builder;
   }
-  if (company.subscriptionStatus === "trialing") {
+  if (isLocalTrialActive(company)) {
     return ENTITLEMENTS_BY_TIER.builder;
   }
   return ENTITLEMENTS_BY_TIER[planTierForKey(company.planKey)];

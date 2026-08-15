@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PoolShape",
-  description: "Professional pool design, estimating, and client proposals",
+  title: "PoolShape — pool design software for builders",
+  description:
+    "CAD, 3D, takeoffs, and client proposals for pool companies. 14-day trial, no credit card. Sales and Builder plans billed through Stripe.",
   icons: {
     icon: [{ url: "/brand/mark.svg", type: "image/svg+xml" }],
     apple: [{ url: "/brand/mark.png" }],

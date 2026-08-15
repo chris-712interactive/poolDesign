@@ -30,6 +30,7 @@ async function applySubscription(
   subscription: Stripe.Subscription,
   planKey?: string | null,
 ) {
+  const status = mapStripeStatus(subscription.status);
   await prisma.company.update({
     where: { id: companyId },
     data: {
@@ -38,15 +39,14 @@ async function applySubscription(
         typeof subscription.customer === "string"
           ? subscription.customer
           : subscription.customer.id,
-      subscriptionStatus: mapStripeStatus(subscription.status),
+      // Paid Checkout is never a Stripe trial. Keep our local "trialing"
+      // status only until a real subscription exists.
+      subscriptionStatus: status === "trialing" ? "active" : status,
       ...(planKey ? { planKey } : {}),
-      trialEndsAt: subscription.trial_end
-        ? new Date(subscription.trial_end * 1000)
-        : null,
+      trialEndsAt: null,
     },
   });
 
-  const status = mapStripeStatus(subscription.status);
   if (status === "active" || status === "trialing") {
     await completeMilestone(companyId, "subscription_active");
   }

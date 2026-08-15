@@ -35,6 +35,7 @@ type Props = {
     status: string;
     hasCustomer: boolean;
     stripeCustomerId: string | null;
+    trialEndsAt: string | null;
   };
   rootDomain: string;
 };
@@ -164,8 +165,7 @@ export function CompanyAdminClient({
       <div className="panel">
         <h1>Company admin</h1>
         <p className="muted">
-          Profile, team invites, price book, and billing for pilot companies.
-          Subdomain:{" "}
+          Profile, team invites, price book, and billing. Subdomain:{" "}
           <strong>
             {profile.slug}.{rootDomain}
           </strong>
@@ -236,6 +236,7 @@ export function CompanyAdminClient({
             hasCustomer={billing.hasCustomer}
             planKey={billing.planKey}
             status={billing.status}
+            trialEndsAt={billing.trialEndsAt}
           />
           <div className="muted">
             Stripe customer: {billing.stripeCustomerId || "Not connected yet"}

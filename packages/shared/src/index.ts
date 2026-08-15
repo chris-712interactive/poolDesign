@@ -31,6 +31,7 @@ export * from "./infinity-hydraulics";
 export * from "./depth-profile";
 export * from "./waterline-tiles";
 export * from "./entitlements";
+export * from "./billing";
 export * from "./grade-walk";
 export * from "./live-session";
 export * from "./quote-docs";

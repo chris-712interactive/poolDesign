@@ -37,7 +37,7 @@ Open [http://localhost:3000](http://localhost:3000) (or the port shown in the te
 - **Estimate / BOM**: automatic takeoffs with starter catalog pricing + company price overrides
 - **Builder exports**: printable PDF quote, CSV takeoff, draft permit packet (gated by plan)
 - **Grade walk import**: transect distance + drop → grade samples (phone AR API-ready)
-- **Stripe** trial → Sales (`starter`) / Builder (`pro`) billing (Checkout + Customer Portal)
+- **Stripe** Sales (`starter`) / Builder (`pro`) after a **local 14-day trial** (no card, no Stripe trial)
 - **Team invites** from company admin
 - **Object library**: furniture/amenities filtered by design level; counts roll into the BOM
 - **Deploy:** Vercel + Postgres — [docs/deploy.md](docs/deploy.md)
