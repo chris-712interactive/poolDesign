@@ -6,7 +6,11 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
   const trialDays = user?.company
     ? trialDaysRemaining(user.company)
     : null;
-  const showTrial = Boolean(user?.company && isLocalTrialActive(user.company));
+  const showTrial = Boolean(
+    user?.role === "company_admin" &&
+      user.company &&
+      isLocalTrialActive(user.company),
+  );
 
   return (
     <>
@@ -62,11 +66,7 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
           {trialDays === 0
             ? "Your trial ends today."
             : `${trialDays} day${trialDays === 1 ? "" : "s"} left in your trial.`}{" "}
-          {user?.role === "company_admin" ? (
-            <Link href="/app/admin">Choose Sales or Builder</Link>
-          ) : (
-            <span>Ask your company admin to subscribe when you are ready.</span>
-          )}
+          <Link href="/app/admin">Choose Sales or Builder</Link>
         </div>
       ) : null}
     </>
