@@ -5,12 +5,12 @@ import { Sky } from "@react-three/drei";
 import * as THREE from "three";
 import type { TimeOfDayPreset } from "@/lib/cad3d/timeOfDay";
 
-const WORLD_RADIUS_M = 900;
+const WORLD_RADIUS_M = 2200;
 const SKY_DISTANCE = 4000;
 
 type Props = {
   center: { x: number; z: number };
-  /** Half-size of the designed lot pad (m). Horizon lawn starts outside this. */
+  /** Inradius of the designed lot pad (m). Horizon lawn starts at this edge. */
   lotRadiusM: number;
   tod: TimeOfDayPreset;
   sunPosition: [number, number, number];
@@ -33,7 +33,28 @@ function disableFog(root: THREE.Object3D | null) {
   });
 }
 
-/** Distant lawn so orbit / walk never drop off into a void. */
+/**
+ * Annulus with the same world-meter UVs as ExtrudeGeometry's WorldUVGenerator
+ * (shape x/y in meters, texture.repeat 14). Default RingGeometry UVs cluster
+ * at 0.5 on the inner hole, which stretched into a corduroy strip.
+ */
+function makeHorizonRingGeometry(
+  inner: number,
+  outer: number,
+  center: { x: number; z: number },
+): THREE.RingGeometry {
+  const geo = new THREE.RingGeometry(inner, outer, 128, 24);
+  const pos = geo.attributes.position;
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < pos.count; i++) {
+    const lx = pos.getX(i);
+    const ly = pos.getY(i);
+    uv.setXY(i, center.x + lx, ly - center.z);
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+
 function HorizonGround({
   center,
   lotRadiusM,
@@ -48,20 +69,22 @@ function HorizonGround({
   night: boolean;
 }) {
   const inner = Math.min(
-    WORLD_RADIUS_M * 0.8,
-    Math.max(18, lotRadiusM * 0.98),
+    WORLD_RADIUS_M * 0.35,
+    Math.max(12, lotRadiusM * 0.94),
+  );
+  const geometry = useMemo(
+    () => makeHorizonRingGeometry(inner, WORLD_RADIUS_M, center),
+    [inner, center.x, center.z],
   );
   const maps = useMemo(() => {
     if (!groundMap) return { color: null, roughness: null };
     const color = groundMap.clone();
     color.wrapS = color.wrapT = THREE.RepeatWrapping;
-    color.repeat.set(72, 72);
     color.needsUpdate = true;
     let roughness: THREE.CanvasTexture | null = null;
     if (groundRoughness) {
       roughness = groundRoughness.clone();
       roughness.wrapS = roughness.wrapT = THREE.RepeatWrapping;
-      roughness.repeat.set(72, 72);
       roughness.needsUpdate = true;
     }
     return { color, roughness };
@@ -69,30 +92,31 @@ function HorizonGround({
 
   useLayoutEffect(() => {
     return () => {
+      geometry.dispose();
       maps.color?.dispose();
       maps.roughness?.dispose();
     };
-  }, [maps]);
+  }, [geometry, maps]);
 
   return (
     <mesh
+      geometry={geometry}
       rotation={[-Math.PI / 2, 0, 0]}
-      position={[center.x, -0.08, center.z]}
+      position={[center.x, -0.06, center.z]}
       receiveShadow
       frustumCulled={false}
       renderOrder={-2}
     >
-      <ringGeometry args={[inner, WORLD_RADIUS_M, 96]} />
       <meshStandardMaterial
         map={maps.color}
         roughnessMap={maps.roughness ?? undefined}
-        color={night ? "#243028" : "#7a8c62"}
+        color={night ? "#4a5848" : "#ffffff"}
         roughness={1}
         metalness={0}
         envMapIntensity={0.35}
         polygonOffset
-        polygonOffsetFactor={2}
-        polygonOffsetUnits={2}
+        polygonOffsetFactor={4}
+        polygonOffsetUnits={4}
       />
     </mesh>
   );
@@ -106,7 +130,6 @@ function NightDome() {
     for (let i = 0; i < count; i++) {
       const u = Math.random();
       const v = Math.random();
-      // Upper hemisphere only
       const theta = 2 * Math.PI * u;
       const phi = Math.acos(Math.min(1, Math.max(0, 1 - v * 0.72)));
       positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);

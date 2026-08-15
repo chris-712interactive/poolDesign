@@ -2609,6 +2609,22 @@ export function CadScene3DCanvas({
     () => lightingForNorth(tod, design.northDeg ?? 0, model.center),
     [tod, design.northDeg, model.center],
   );
+  const lotRadiusM = useMemo(() => {
+    const pts = model.ground.outlineMm;
+    if (pts.length < 2) return 16;
+    const { x: cx, z: cz } = model.center;
+    let r = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const a = planToWorldXZ(pts[i]);
+      const b = planToWorldXZ(pts[(i + 1) % pts.length]);
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const dist = Math.abs(dx * (cz - a.z) - dz * (cx - a.x)) / len;
+      r = Math.min(r, dist);
+    }
+    return Number.isFinite(r) && r > 1 ? r : 16;
+  }, [model.ground.outlineMm, model.center.x, model.center.z]);
 
   const applyPreset = (id: ViewPresetId) => {
     setWalkMode(false);
@@ -2804,7 +2820,7 @@ export function CadScene3DCanvas({
                 <fog attach="fog" args={[tod.fog, tod.fogNear, tod.fogFar]} />
                 <WorldBackdrop
                   center={model.center}
-                  lotRadiusM={Math.max(22, model.groundSize * 0.55)}
+                  lotRadiusM={lotRadiusM}
                   tod={tod}
                   sunPosition={lighting.sunPosition}
                   groundMap={textures?.ground.color ?? null}

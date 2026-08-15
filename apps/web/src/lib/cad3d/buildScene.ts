@@ -3342,7 +3342,7 @@ export function buildSceneModel(
           id: `siteline_${line.id}_dash_${markI++}`,
           points: chain,
           widthM: centerWidth,
-          heightM: 0.08,
+          heightM: 0.12,
           colorHex: color,
           opacity: 1,
         });
