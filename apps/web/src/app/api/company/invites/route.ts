@@ -1,19 +1,8 @@
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
 import { prisma } from "@pool-design/db";
 import { getSessionUser } from "@/lib/auth";
-import { appBaseUrl } from "@/lib/app-url";
-import { completeMilestone, newInviteToken } from "@/lib/shares";
+import { createCompanyInvite } from "@/lib/invites";
 import { companyHasAppAccess } from "@/lib/subscription";
-
-function tempPassword(): string {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  let out = "";
-  for (let i = 0; i < 10; i++) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
-  return out;
-}
 
 /** List pending invites. */
 export async function GET() {
@@ -69,41 +58,22 @@ export async function POST(request: Request) {
     );
   }
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    return NextResponse.json(
-      { error: "A user with that email already exists" },
-      { status: 409 },
-    );
+  const result = await createCompanyInvite({
+    companyId: user.companyId,
+    invitedByUserId: user.id,
+    email,
+    name,
+    role,
+  });
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  const password = tempPassword();
-  const temporaryPasswordHash = await bcrypt.hash(password, 10);
-  const token = newInviteToken();
-  const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-
-  const invite = await prisma.companyInvite.create({
-    data: {
-      companyId: user.companyId,
-      email,
-      name,
-      role,
-      token,
-      temporaryPasswordHash,
-      invitedByUserId: user.id,
-      expiresAt,
-    },
-  });
-
-  await completeMilestone(user.companyId, "team_invited");
-
   return NextResponse.json({
-    id: invite.id,
-    email: invite.email,
-    name: invite.name,
-    role: invite.role,
-    temporaryPassword: password,
-    inviteUrl: `${appBaseUrl()}/invite/${invite.token}`,
-    expiresAt: invite.expiresAt,
+    email: result.email,
+    name: result.name,
+    role: result.role,
+    temporaryPassword: result.temporaryPassword,
+    inviteUrl: result.inviteUrl,
   });
 }

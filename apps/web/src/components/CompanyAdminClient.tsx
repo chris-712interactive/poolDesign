@@ -29,6 +29,7 @@ type InviteResult = {
 } | null;
 
 type Props = {
+  alsoDesigner: boolean;
   initialProfile: Profile;
   billing: {
     planKey: string;
@@ -41,11 +42,14 @@ type Props = {
 };
 
 export function CompanyAdminClient({
+  alsoDesigner: alsoDesignerInitial,
   initialProfile,
   billing,
   rootDomain,
 }: Props) {
   const [profile, setProfile] = useState(initialProfile);
+  const [alsoDesigner, setAlsoDesigner] = useState(alsoDesignerInitial);
+  const [alsoDesignerMsg, setAlsoDesignerMsg] = useState<string | null>(null);
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
   const [inviteName, setInviteName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -117,6 +121,31 @@ export function CompanyAdminClient({
     }
   }
 
+  async function toggleAlsoDesigner(next: boolean) {
+    setAlsoDesignerMsg(null);
+    setAlsoDesigner(next);
+    try {
+      const res = await fetch("/api/company/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alsoDesigner: next }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not update designer seat");
+      setAlsoDesigner(json.alsoDesigner === true);
+      setAlsoDesignerMsg(
+        json.alsoDesigner
+          ? "You can open CAD on this account."
+          : "CAD is limited to invited designers.",
+      );
+    } catch (err) {
+      setAlsoDesigner(!next);
+      setAlsoDesignerMsg(
+        err instanceof Error ? err.message : "Could not update designer seat",
+      );
+    }
+  }
+
   async function savePriceBook(acceptDefaults: boolean) {
     setBusy(true);
     setPriceMsg(null);
@@ -170,6 +199,24 @@ export function CompanyAdminClient({
             {profile.slug}.{rootDomain}
           </strong>
         </p>
+      </div>
+
+      <div className="panel stack">
+        <h2>Your designer seat</h2>
+        <p className="muted">
+          Company admin is for billing and team. Check this to also open CAD
+          yourself — or invite a designer below.
+        </p>
+        <label className="row" style={{ gap: "0.6rem", alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={alsoDesigner}
+            disabled={busy}
+            onChange={(e) => void toggleAlsoDesigner(e.target.checked)}
+          />
+          I also design (open CAD on this account)
+        </label>
+        {alsoDesignerMsg ? <p className="muted">{alsoDesignerMsg}</p> : null}
       </div>
 
       <div className="grid-2">
@@ -248,7 +295,7 @@ export function CompanyAdminClient({
         <h2>Invite teammate</h2>
         <p className="muted">
           Creates an invite link and one-time temporary password. Share both with
-          the designer.
+          the teammate. You can invite a designer even if you also design.
         </p>
         <div className="grid-2">
           <div className="field">

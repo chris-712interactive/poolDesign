@@ -7,12 +7,14 @@ import { AppHeader } from "@/components/AppHeader";
 import { CreateProjectForm } from "@/components/CreateProjectForm";
 import { SubscriptionBlocked } from "@/components/SubscriptionBlocked";
 import { companyHasAppAccess } from "@/lib/subscription";
+import { needsCompanySetup } from "@pool-design/shared";
 
 export default async function ProjectsPage() {
   const user = await getSessionUser();
   if (!user) redirect("/login");
   if (user.role === "platform_owner") redirect("/platform");
   if (!user.companyId) redirect("/login");
+  if (needsCompanySetup(user)) redirect("/app/setup");
 
   if (!companyHasAppAccess(user.company)) {
     return <SubscriptionBlocked user={user} />;

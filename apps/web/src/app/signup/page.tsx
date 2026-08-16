@@ -2,7 +2,7 @@ import { redirect, unstable_rethrow } from "next/navigation";
 import { getSessionUser, setSessionCookie } from "@/lib/auth";
 import { createTrialCompany } from "@/lib/signup";
 import { AppHeader } from "@/components/AppHeader";
-import { TRIAL_DURATION_DAYS } from "@pool-design/shared";
+import { TRIAL_DURATION_DAYS, needsCompanySetup } from "@pool-design/shared";
 import Link from "next/link";
 
 async function signupAction(formData: FormData) {
@@ -19,7 +19,7 @@ async function signupAction(formData: FormData) {
   }
   try {
     await setSessionCookie(result.userId);
-    redirect("/app");
+    redirect("/app/setup");
   } catch (err) {
     unstable_rethrow(err);
     console.error("signup session failed", err);
@@ -35,7 +35,7 @@ export default async function SignupPage({
   const user = await getSessionUser();
   if (user) {
     if (user.role === "platform_owner") redirect("/platform");
-    redirect("/app");
+    redirect(needsCompanySetup(user) ? "/app/setup" : "/app");
   }
   const params = await searchParams;
   const error = params.error ? decodeURIComponent(params.error) : null;

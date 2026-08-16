@@ -1,6 +1,7 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import { authenticate, getSessionUser, setSessionCookie } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
+import { appHomePath } from "@/lib/companyAccess";
 import Link from "next/link";
 
 async function loginAction(formData: FormData) {
@@ -13,8 +14,7 @@ async function loginAction(formData: FormData) {
       redirect("/login?error=1");
     }
     await setSessionCookie(user.id);
-    if (user.role === "platform_owner") redirect("/platform");
-    redirect("/app");
+    redirect(appHomePath(user));
   } catch (err) {
     unstable_rethrow(err);
     console.error("login failed", err);
@@ -35,7 +35,7 @@ export default async function LoginPage({
   }
   if (user) {
     if (user.role === "platform_owner") redirect("/platform");
-    redirect("/app");
+    redirect(appHomePath(user));
   }
   const params = await searchParams;
   const showDemo = process.env.NODE_ENV !== "production";

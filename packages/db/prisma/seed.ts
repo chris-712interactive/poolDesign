@@ -56,10 +56,12 @@ async function main() {
       subscriptionStatus: "trialing",
       planKey: "pro",
       trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      setupCompletedAt: new Date(),
     },
     update: {
       name: "Acme Pools",
       subscriptionStatus: "trialing",
+      setupCompletedAt: new Date(),
     },
   });
 
@@ -96,10 +98,11 @@ async function main() {
       name: "Alex Admin",
       passwordHash,
       role: "company_admin",
+      alsoDesigner: true,
       companyId: company.id,
       unitSystem: "imperial",
     },
-    update: { passwordHash, companyId: company.id },
+    update: { passwordHash, companyId: company.id, alsoDesigner: true },
   });
 
   await prisma.user.upsert({

@@ -1,13 +1,18 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@pool-design/db";
-import { parseDesignDocument } from "@pool-design/shared";
+import {
+  entitlementsForCompany,
+  needsCompanySetup,
+  parseDesignDocument,
+} from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
 import { CadWorkspace } from "@/components/CadWorkspace";
 import { SubscriptionBlocked } from "@/components/SubscriptionBlocked";
 import { companyHasAppAccess } from "@/lib/subscription";
+import { userCanUseCad } from "@/lib/companyAccess";
 import { catalogWithCompanyPrices } from "@/lib/shares";
-import { entitlementsForCompany } from "@pool-design/shared";
 
 export default async function ProjectCadPage({
   params,
@@ -18,6 +23,7 @@ export default async function ProjectCadPage({
   if (!user) redirect("/login");
   if (user.role === "platform_owner") redirect("/platform");
   if (!user.companyId) redirect("/login");
+  if (needsCompanySetup(user)) redirect("/app/setup");
 
   if (!companyHasAppAccess(user.company)) {
     return <SubscriptionBlocked user={user} />;
@@ -39,6 +45,30 @@ export default async function ProjectCadPage({
     project.designLevel,
   );
   const entitlements = entitlementsForCompany(user.company);
+
+  if (!userCanUseCad(user)) {
+    return (
+      <div className="app-shell">
+        <AppHeader user={user} />
+        <main className="page" style={{ maxWidth: 560 }}>
+          <div className="panel stack">
+            <h1>Designer seat needed</h1>
+            <p>
+              CAD is for designer seats. Assign one to yourself in Company
+              admin, or invite a designer to open this project.
+            </p>
+            {user.role === "company_admin" ? (
+              <Link className="btn" href="/app/admin">
+                Open company admin
+              </Link>
+            ) : (
+              <p className="muted">Ask your company admin to grant CAD access.</p>
+            )}
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">

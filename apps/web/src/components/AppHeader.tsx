@@ -13,7 +13,7 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
   );
 
   return (
-    <>
+    <div className="app-chrome">
       <header className="topbar">
         <Link href="/" className="brand">
           <img
@@ -69,6 +69,6 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
           <Link href="/app/admin">Choose Sales or Builder</Link>
         </div>
       ) : null}
-    </>
+    </div>
   );
 }

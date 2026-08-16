@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@pool-design/db";
 import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
+import { needsCompanySetup } from "@pool-design/shared";
 
 async function updateSettingsAction(formData: FormData) {
   "use server";
@@ -25,6 +26,7 @@ export default async function SettingsPage() {
   const user = await getSessionUser();
   if (!user) redirect("/login");
   if (user.role === "platform_owner") redirect("/platform");
+  if (needsCompanySetup(user)) redirect("/app/setup");
 
   return (
     <div className="app-shell">

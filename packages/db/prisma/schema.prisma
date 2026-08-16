@@ -64,6 +64,7 @@ model Company {
   stripeSubscriptionId String?
   stripeConnectId      String?
   trialEndsAt          DateTime?
+  setupCompletedAt     DateTime?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
@@ -80,6 +81,8 @@ model User {
   name         String
   passwordHash String
   role         UserRole
+  /** Company admin who also takes a designer seat (opens CAD). */
+  alsoDesigner Boolean    @default(false)
   companyId    String?
   unitSystem   UnitSystem @default(imperial)
   createdAt    DateTime   @default(now())

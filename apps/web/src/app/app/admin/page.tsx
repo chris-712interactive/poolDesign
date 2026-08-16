@@ -3,12 +3,14 @@ import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
 import { CompanyAdminClient } from "@/components/CompanyAdminClient";
 import { companyHasAppAccess } from "@/lib/subscription";
+import { needsCompanySetup } from "@pool-design/shared";
 
 export default async function CompanyAdminPage() {
   const user = await getSessionUser();
   if (!user) redirect("/login");
   if (user.role !== "company_admin") redirect("/app");
   if (!user.company) redirect("/login");
+  if (needsCompanySetup(user)) redirect("/app/setup");
 
   // Admins may always reach billing to renew; other admin tools still load.
   const company = user.company;
@@ -28,6 +30,7 @@ export default async function CompanyAdminPage() {
           </div>
         ) : null}
         <CompanyAdminClient
+          alsoDesigner={user.alsoDesigner}
           initialProfile={{
             name: company.name,
             logoUrl: company.logoUrl,

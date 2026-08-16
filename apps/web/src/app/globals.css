@@ -55,6 +55,11 @@ textarea {
   grid-template-rows: auto 1fr;
 }
 
+.app-chrome {
+  display: flex;
+  flex-direction: column;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -102,6 +107,34 @@ textarea {
 
 .page {
   padding: 1.5rem;
+}
+
+.setup-choices {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.setup-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  background: white;
+  cursor: pointer;
+  color: inherit;
+}
+
+.setup-choice:hover {
+  border-color: var(--accent);
+}
+
+.setup-choice.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .panel {
@@ -1726,9 +1759,11 @@ textarea {
 .trial-banner {
   background: #123d36;
   color: #e7f6f1;
-  padding: 0.55rem 1.5rem;
-  font-size: 0.92rem;
+  padding: 0.45rem 1.5rem;
+  font-size: 0.9rem;
+  line-height: 1.35;
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   gap: 0.35rem 0.75rem;
   align-items: center;
