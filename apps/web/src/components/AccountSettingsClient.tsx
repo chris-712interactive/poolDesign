@@ -157,7 +157,7 @@ export function AccountSettingsClient({
       <nav className="panel admin-nav" aria-label="Account">
         <div>
           <h1 className="admin-nav-title">Account</h1>
-          <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.85rem" }}>
+          <p className="muted admin-nav-sub" title={profile.email}>
             {profile.email}
           </p>
         </div>

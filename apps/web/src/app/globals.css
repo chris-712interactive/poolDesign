@@ -115,7 +115,7 @@ textarea {
 
 .admin-layout {
   display: grid;
-  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
 }
@@ -126,11 +126,25 @@ textarea {
   gap: 1rem;
   position: sticky;
   top: 1rem;
+  min-width: 0;
+}
+
+.admin-nav > * {
+  min-width: 0;
 }
 
 .admin-nav-title {
   margin: 0;
   font-size: 1.15rem;
+}
+
+.admin-nav-sub {
+  display: block;
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .admin-nav-list {

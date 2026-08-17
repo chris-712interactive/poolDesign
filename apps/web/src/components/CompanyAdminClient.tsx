@@ -231,7 +231,10 @@ export function CompanyAdminClient({
       <nav className="panel admin-nav" aria-label="Company settings">
         <div>
           <h1 className="admin-nav-title">Company admin</h1>
-          <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.85rem" }}>
+          <p
+            className="muted admin-nav-sub"
+            title={`${profile.slug}.${rootDomain}`}
+          >
             {profile.slug}.{rootDomain}
           </p>
         </div>
