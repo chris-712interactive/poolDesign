@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
-import { CompanyAdminClient, parseAdminSection } from "@/components/CompanyAdminClient";
+import { CompanyAdminClient } from "@/components/CompanyAdminClient";
+import { parseAdminSection } from "@/lib/adminSections";
 import { companyHasAppAccess } from "@/lib/subscription";
 import { needsCompanySetup } from "@pool-design/shared";
 
@@ -34,7 +35,7 @@ export default async function CompanyAdminPage({
           </div>
         ) : null}
         <CompanyAdminClient
-          alsoDesigner={user.alsoDesigner}
+          alsoDesigner={user.alsoDesigner === true}
           initialSection={parseAdminSection(section)}
           initialProfile={{
             name: company.name,

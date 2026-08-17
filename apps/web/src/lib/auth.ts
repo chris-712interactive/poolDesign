@@ -56,22 +56,41 @@ export async function clearSessionCookie() {
   jar.delete(SESSION_COOKIE);
 }
 
+function isDatabaseError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; message?: string };
+  if (typeof e.code === "string" && e.code.startsWith("P")) return true;
+  const msg = e.message ?? "";
+  return (
+    msg.includes("DATABASE_URL") ||
+    msg.includes("does not exist") ||
+    msg.includes("Can't reach database") ||
+    msg.includes("Prisma")
+  );
+}
+
 export async function getSessionUser(): Promise<SessionUser | null> {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   if (!token) return null;
   const userId = verifySessionToken(token);
   if (!userId) return null;
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { company: true },
-  });
-  if (!user) return null;
-  if (user.company) {
-    const company = await expireStaleTrial(user.company);
-    return { ...user, company: company ?? user.company };
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { company: true },
+    });
+    if (!user) return null;
+    if (user.company) {
+      const company = await expireStaleTrial(user.company);
+      return { ...user, company: company ?? user.company };
+    }
+    return user;
+  } catch (err) {
+    console.error("getSessionUser failed", err);
+    if (isDatabaseError(err)) return null;
+    throw err;
   }
-  return user;
 }
 
 export async function requireSessionUser(): Promise<SessionUser> {

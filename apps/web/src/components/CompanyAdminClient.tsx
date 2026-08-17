@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@pool-design/shared";
 import { BillingActions } from "@/components/BillingActions";
+import { type AdminSection } from "@/lib/adminSections";
 
 type Profile = {
   name: string;
@@ -29,15 +30,6 @@ type InviteResult = {
   email: string;
 } | null;
 
-export const ADMIN_SECTIONS = [
-  "company",
-  "team",
-  "prices",
-  "billing",
-] as const;
-
-export type AdminSection = (typeof ADMIN_SECTIONS)[number];
-
 const NAV: { id: AdminSection; label: string; hint: string }[] = [
   {
     id: "company",
@@ -60,12 +52,6 @@ const NAV: { id: AdminSection; label: string; hint: string }[] = [
     hint: "Trial, Sales, and Builder plans",
   },
 ];
-
-export function parseAdminSection(value: string | undefined): AdminSection {
-  return ADMIN_SECTIONS.includes(value as AdminSection)
-    ? (value as AdminSection)
-    : "company";
-}
 
 type Props = {
   alsoDesigner: boolean;
