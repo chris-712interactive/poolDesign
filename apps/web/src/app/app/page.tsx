@@ -1,13 +1,12 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { prisma } from "@pool-design/db";
-import { DESIGN_LEVEL_LABELS, type DesignLevel } from "@pool-design/shared";
+import { needsCompanySetup, type DesignLevel } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
 import { CreateProjectForm } from "@/components/CreateProjectForm";
+import { ProjectList } from "@/components/ProjectList";
 import { SubscriptionBlocked } from "@/components/SubscriptionBlocked";
 import { companyHasAppAccess } from "@/lib/subscription";
-import { needsCompanySetup } from "@pool-design/shared";
 
 export default async function ProjectsPage() {
   const user = await getSessionUser();
@@ -48,26 +47,15 @@ export default async function ProjectsPage() {
           {projects.length === 0 ? (
             <p className="muted">No projects yet. Create your first one.</p>
           ) : (
-            <div className="stack" style={{ marginTop: "1rem" }}>
-              {projects.map((project) => (
-                <Link
-                  key={project.id}
-                  href={`/app/projects/${project.id}`}
-                  className="card-link"
-                >
-                  <div className="row" style={{ justifyContent: "space-between" }}>
-                    <strong>{project.name}</strong>
-                    <span className="badge">
-                      {DESIGN_LEVEL_LABELS[project.designLevel]}
-                    </span>
-                  </div>
-                  <div className="muted">
-                    {project.clientName || "No client"} ·{" "}
-                    {project.address || "No address"}
-                  </div>
-                </Link>
-              ))}
-            </div>
+            <ProjectList
+              projects={projects.map((project) => ({
+                id: project.id,
+                name: project.name,
+                clientName: project.clientName,
+                address: project.address,
+                designLevel: project.designLevel as DesignLevel,
+              }))}
+            />
           )}
         </div>
       </main>

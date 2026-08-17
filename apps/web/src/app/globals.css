@@ -733,6 +733,22 @@ textarea {
   transform: translateY(-1px);
 }
 
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.project-row-main {
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+}
+
+.project-row .btn {
+  flex-shrink: 0;
+}
+
 .milestone {
   display: grid;
   grid-template-columns: 28px 1fr auto;

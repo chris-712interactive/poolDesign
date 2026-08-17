@@ -86,3 +86,28 @@ export async function PUT(
     designRevision: updated.designRevision,
   });
 }
+
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const user = await getSessionUser();
+  if (!user?.companyId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!companyHasAppAccess(user.company)) {
+    return NextResponse.json({ error: "Subscription inactive" }, { status: 402 });
+  }
+
+  const { id } = await context.params;
+  const project = await prisma.project.findFirst({
+    where: { id, companyId: user.companyId },
+    select: { id: true, name: true },
+  });
+  if (!project) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  await prisma.project.delete({ where: { id: project.id } });
+  return NextResponse.json({ ok: true, name: project.name });
+}
