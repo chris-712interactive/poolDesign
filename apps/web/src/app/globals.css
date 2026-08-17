@@ -1615,14 +1615,6 @@ textarea {
   font-weight: 600;
 }
 
-.account-page h1,
-.account-page .panel h2 {
-  font-family: var(--font-display);
-  font-weight: 560;
-  letter-spacing: -0.02em;
-  margin: 0;
-}
-
 @media (max-width: 560px) {
   .account-meta {
     grid-template-columns: 1fr;
