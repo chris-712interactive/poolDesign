@@ -1442,6 +1442,18 @@ textarea {
   border: none;
 }
 
+.cad-survey-prompt {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(15, 28, 36, 0.55);
+  backdrop-filter: blur(4px);
+}
+
 .cad-survey-panel-callout {
   margin: 0;
   padding: 0.55rem 0.7rem;

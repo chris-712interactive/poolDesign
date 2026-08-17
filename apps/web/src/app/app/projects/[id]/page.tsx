@@ -16,8 +16,10 @@ import { catalogWithCompanyPrices } from "@/lib/shares";
 
 export default async function ProjectCadPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ survey?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
@@ -30,6 +32,7 @@ export default async function ProjectCadPage({
   }
 
   const { id } = await params;
+  const { survey } = await searchParams;
   const project = await prisma.project.findFirst({
     where: { id, companyId: user.companyId },
   });
@@ -82,6 +85,7 @@ export default async function ProjectCadPage({
           initialDesign={design}
           catalog={catalog}
           entitlements={entitlements}
+          promptSurveyImport={survey === "1"}
         />
       </main>
     </div>

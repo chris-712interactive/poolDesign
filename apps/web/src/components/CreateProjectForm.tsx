@@ -68,7 +68,7 @@ async function createProjectAction(formData: FormData) {
   }
 
   revalidatePath("/app");
-  redirect(`/app/projects/${project.id}`);
+  redirect(`/app/projects/${project.id}?survey=1`);
 }
 
 export function CreateProjectForm({

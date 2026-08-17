@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   DEFAULT_PATIO_FINISH_ID,
   DEFAULT_PATIO_ROOF_HEIGHT_MM,
@@ -234,6 +235,7 @@ import {
   openingEndpoints,
 } from "@/lib/cad/draw";
 import { SurveyUnderlayPanel } from "@/components/SurveyUnderlayPanel";
+import { ImportSurveyPrompt } from "@/components/ImportSurveyPrompt";
 
 type WorkspaceView = "design" | "estimate";
 type DesignMode = "2d" | "3d";
@@ -358,6 +360,8 @@ type Props = {
   initialDesign: DesignDocument;
   catalog?: CatalogItem[];
   entitlements?: PlanEntitlements;
+  /** First open after creating a project — ask to import a survey underlay. */
+  promptSurveyImport?: boolean;
 };
 
 const CLOSE_TOLERANCE_MM = 150;
@@ -485,6 +489,7 @@ export function CadWorkspace({
   initialDesign,
   catalog,
   entitlements,
+  promptSurveyImport = false,
 }: Props) {
   const planEntitlements = entitlements ?? {
     liveClientSession: true,
@@ -505,6 +510,10 @@ export function CadWorkspace({
     normalizeDesignDocument(initialDesign, { designLevel, unitSystem }),
   );
   designRef.current = design;
+  const router = useRouter();
+  const [surveyPromptOpen, setSurveyPromptOpen] = useState(
+    () => promptSurveyImport && !initialDesign.surveyUnderlay,
+  );
   const [measurePoints, setMeasurePoints] = useState<PointMm[]>([]);
   const [calibratePoints, setCalibratePoints] = useState<PointMm[]>([]);
   const calibratePointsRef = useRef<PointMm[]>([]);
@@ -1381,6 +1390,11 @@ export function CadWorkspace({
     setTool("survey_calibrate");
     setCalibratePoints([]);
     setLengthBuffer("");
+  }
+
+  function dismissSurveyPrompt() {
+    setSurveyPromptOpen(false);
+    router.replace(`/app/projects/${projectId}`, { scroll: false });
   }
 
   function applySurveyCalibration(knownMm: number): boolean {
@@ -3679,6 +3693,19 @@ export function CadWorkspace({
           entitlements={planEntitlements}
         />
       ) : (
+        <>
+          {surveyPromptOpen ? (
+            <ImportSurveyPrompt
+              projectId={projectId}
+              design={design}
+              onImported={(next) => {
+                commitDesign(next);
+                dismissSurveyPrompt();
+                startSurveyCalibrate();
+              }}
+              onSkip={dismissSurveyPrompt}
+            />
+          ) : null}
         <div
           className="cad-layout"
           onKeyDown={onKeyDown}
@@ -6129,6 +6156,7 @@ export function CadWorkspace({
             )}
           </aside>
         </div>
+        </>
       )}
     </div>
   );
