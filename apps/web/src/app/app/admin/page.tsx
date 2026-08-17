@@ -9,7 +9,7 @@ import { needsCompanySetup } from "@pool-design/shared";
 export default async function CompanyAdminPage({
   searchParams,
 }: {
-  searchParams: Promise<{ section?: string }>;
+  searchParams: Promise<{ section?: string; seat?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
@@ -17,7 +17,7 @@ export default async function CompanyAdminPage({
   if (!user.company) redirect("/login");
   if (needsCompanySetup(user)) redirect("/app/setup");
 
-  const { section } = await searchParams;
+  const { section, seat } = await searchParams;
   const company = user.company;
   const rootDomain =
     process.env.NEXT_PUBLIC_ROOT_DOMAIN || "localhost:3000";
@@ -35,8 +35,10 @@ export default async function CompanyAdminPage({
           </div>
         ) : null}
         <CompanyAdminClient
-          alsoDesigner={user.alsoDesigner === true}
           initialSection={parseAdminSection(section)}
+          seatFlash={
+            seat === "success" ? "success" : seat === "canceled" ? "canceled" : null
+          }
           initialProfile={{
             name: company.name,
             logoUrl: company.logoUrl,

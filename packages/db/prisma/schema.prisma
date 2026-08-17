@@ -65,6 +65,9 @@ model Company {
   stripeConnectId      String?
   trialEndsAt          DateTime?
   setupCompletedAt     DateTime?
+  /** Extra designer seats billed on Stripe (beyond the one included seat). */
+  designerSeatsPaid    Int                @default(0)
+  stripeDesignerItemId String?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
@@ -73,6 +76,8 @@ model Company {
   milestoneStatuses CompanyMilestoneStatus[]
   priceOverrides    CompanyPriceOverride[]
   invites           CompanyInvite[]
+  roleGrants        UserRoleGrant[]
+  seatCheckouts     SeatCheckout[]
 }
 
 model User {
@@ -89,6 +94,7 @@ model User {
   updatedAt    DateTime   @updatedAt
 
   company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  roleGrants UserRoleGrant[]
 
   @@index([companyId])
 }
@@ -153,6 +159,38 @@ model ProjectShare {
 
   @@index([projectId])
   @@index([token])
+}
+
+/** Staff roles on a company user. A person may hold more than one. */
+model UserRoleGrant {
+  id        String   @id @default(cuid())
+  userId    String
+  companyId String
+  role      UserRole
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+  @@index([companyId, role])
+  @@index([userId])
+}
+
+/** Checkout in flight for a paid designer seat assigned to a user. */
+model SeatCheckout {
+  id              String   @id @default(cuid())
+  companyId       String
+  userId          String
+  role            UserRole @default(designer)
+  stripeSessionId String   @unique
+  status          String   @default("pending")
+  createdAt       DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([userId])
 }
 
 /** Per-company catalog unit price overrides (cents). */

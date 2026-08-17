@@ -3,10 +3,12 @@ import { prisma } from "@pool-design/db";
 import { getSessionUser } from "@/lib/auth";
 import {
   appBaseUrl,
+  designerSeatPriceId,
   getStripe,
   priceIdForPlan,
   stripeConfigured,
 } from "@/lib/stripe";
+import { retrieveSubscription } from "@/lib/designerSeats";
 
 /** Start Stripe Checkout for the current company. */
 export async function POST(request: Request) {
@@ -55,10 +57,44 @@ export async function POST(request: Request) {
     });
   }
 
+  if (company.stripeSubscriptionId) {
+    const subscription = await retrieveSubscription(
+      company.stripeSubscriptionId,
+    );
+    const hasPlan = subscription.items.data.some((item) => {
+      const id = typeof item.price === "string" ? item.price : item.price.id;
+      return id === priceId;
+    });
+    if (!hasPlan) {
+      await stripe.subscriptionItems.create({
+        subscription: subscription.id,
+        price: priceId,
+        proration_behavior: "create_prorations",
+      });
+    }
+    await stripe.subscriptions.update(subscription.id, {
+      metadata: { companyId: company.id, planKey },
+    });
+    return NextResponse.json({
+      url: `${appBaseUrl()}/app/admin?section=billing`,
+    });
+  }
+
+  const lineItems: { price: string; quantity: number }[] = [
+    { price: priceId, quantity: 1 },
+  ];
+  const designerPrice = designerSeatPriceId();
+  if (designerPrice && company.designerSeatsPaid > 0) {
+    lineItems.push({
+      price: designerPrice,
+      quantity: company.designerSeatsPaid,
+    });
+  }
+
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
+    line_items: lineItems,
     success_url: `${appBaseUrl()}/app/admin?billing=success`,
     cancel_url: `${appBaseUrl()}/app/admin?billing=canceled`,
     metadata: { companyId: company.id, planKey },
@@ -66,8 +102,6 @@ export async function POST(request: Request) {
     allow_promotion_codes: true,
     subscription_data: {
       metadata: { companyId: company.id, planKey },
-      // Local trial only — never Stripe trial_period_days (no card on file
-      // during trial; conversion is a paid Checkout session).
     },
   });
 

@@ -51,6 +51,7 @@ If the dashboard overrides `vercel.json`, paste the Install/Build commands above
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
 | `STRIPE_PRICE_STARTER_MONTHLY` | Price ID |
 | `STRIPE_PRICE_PRO_MONTHLY` | Price ID |
+| `STRIPE_PRICE_DESIGNER_SEAT_MONTHLY` | Extra designer seat ($40/mo) |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Publishable key |
 
 6. After first deploy, run migrate/push against production DB:

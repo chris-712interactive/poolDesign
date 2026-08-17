@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@pool-design/db";
 import { getSessionUser } from "@/lib/auth";
 import { createCompanyInvite } from "@/lib/invites";
+import { grantRoles } from "@/lib/roleGrants";
 import { companyHasAppAccess } from "@/lib/subscription";
 
 type Body = {
@@ -46,16 +47,18 @@ export async function POST(request: Request) {
     }
   }
 
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: user.id },
-      data: { alsoDesigner },
-    }),
-    prisma.company.update({
-      where: { id: user.companyId },
-      data: { setupCompletedAt: new Date() },
-    }),
-  ]);
+  const roles = alsoDesigner
+    ? (["company_admin", "designer"] as const)
+    : (["company_admin"] as const);
+  await grantRoles({
+    userId: user.id,
+    companyId: user.companyId,
+    roles,
+  });
+  await prisma.company.update({
+    where: { id: user.companyId },
+    data: { setupCompletedAt: new Date() },
+  });
 
   return NextResponse.json({
     alsoDesigner,

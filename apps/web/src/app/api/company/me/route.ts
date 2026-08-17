@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@pool-design/db";
 import { getSessionUser } from "@/lib/auth";
+import { grantRoles } from "@/lib/roleGrants";
+import { isCompanyStaffRole } from "@pool-design/shared";
 
 /** Company admin: take or drop a designer seat on your own account. */
 export async function PATCH(request: Request) {
@@ -16,11 +17,21 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "alsoDesigner is required" }, { status: 400 });
   }
 
-  const updated = await prisma.user.update({
-    where: { id: user.id },
-    data: { alsoDesigner: body.alsoDesigner },
-    select: { alsoDesigner: true },
+  const roles = new Set(
+    user.roleGrants.map((g) => g.role).filter(isCompanyStaffRole),
+  );
+  roles.add("company_admin");
+  if (body.alsoDesigner) roles.add("designer");
+  else roles.delete("designer");
+
+  const saved = await grantRoles({
+    userId: user.id,
+    companyId: user.companyId,
+    roles: [...roles],
   });
 
-  return NextResponse.json(updated);
+  return NextResponse.json({
+    alsoDesigner: saved.includes("designer"),
+    roles: saved,
+  });
 }

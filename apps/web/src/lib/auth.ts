@@ -1,13 +1,17 @@
 import { cookies } from "next/headers";
-import { prisma, type User, type Company } from "@pool-design/db";
+import { prisma, type User, type Company, type UserRoleGrant } from "@pool-design/db";
 import bcrypt from "bcryptjs";
 import { createHmac, timingSafeEqual } from "crypto";
 import { expireStaleTrial } from "@/lib/subscription";
+import { ensureRoleGrants } from "@/lib/roleGrants";
 
 const SESSION_COOKIE = "pd_session";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 14;
 
-export type SessionUser = User & { company: Company | null };
+export type SessionUser = User & {
+  company: Company | null;
+  roleGrants: UserRoleGrant[];
+};
 
 function secret() {
   return process.env.SESSION_SECRET || "dev-session-secret-change-me";
@@ -78,14 +82,26 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: { company: true },
+      include: { company: true, roleGrants: true },
     });
     if (!user) return null;
+    let roleGrants = user.roleGrants;
+    if (user.companyId && roleGrants.length === 0 && user.role !== "platform_owner") {
+      await ensureRoleGrants({
+        userId: user.id,
+        companyId: user.companyId,
+        role: user.role,
+        alsoDesigner: user.alsoDesigner,
+      });
+      roleGrants = await prisma.userRoleGrant.findMany({
+        where: { userId: user.id },
+      });
+    }
     if (user.company) {
       const company = await expireStaleTrial(user.company);
-      return { ...user, company: company ?? user.company };
+      return { ...user, roleGrants, company: company ?? user.company };
     }
-    return user;
+    return { ...user, roleGrants };
   } catch (err) {
     console.error("getSessionUser failed", err);
     if (isDatabaseError(err)) return null;
@@ -107,7 +123,7 @@ export async function authenticate(
 ): Promise<SessionUser | null> {
   const user = await prisma.user.findUnique({
     where: { email: email.toLowerCase().trim() },
-    include: { company: true },
+    include: { company: true, roleGrants: true },
   });
   if (!user) return null;
   const ok = await bcrypt.compare(password, user.passwordHash);

@@ -11,7 +11,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { CadWorkspace } from "@/components/CadWorkspace";
 import { SubscriptionBlocked } from "@/components/SubscriptionBlocked";
 import { companyHasAppAccess } from "@/lib/subscription";
-import { userCanUseCad } from "@/lib/companyAccess";
+import { userCanUseCad, userHasLicensedCadAccess } from "@/lib/companyAccess";
 import { catalogWithCompanyPrices } from "@/lib/shares";
 
 export default async function ProjectCadPage({
@@ -49,20 +49,26 @@ export default async function ProjectCadPage({
   );
   const entitlements = entitlementsForCompany(user.company);
 
-  if (!userCanUseCad(user)) {
+  const hasDesignerRole = userCanUseCad(user);
+  const hasLicensedCad = await userHasLicensedCadAccess(user);
+
+  if (!hasDesignerRole || !hasLicensedCad) {
     return (
       <div className="app-shell">
         <AppHeader user={user} />
         <main className="page" style={{ maxWidth: 560 }}>
           <div className="panel stack">
-            <h1>Designer seat needed</h1>
+            <h1>
+              {hasDesignerRole ? "Designer license needed" : "Designer seat needed"}
+            </h1>
             <p>
-              CAD is for designer seats. Assign one to yourself in Company
-              admin, or invite a designer to open this project.
+              {hasDesignerRole
+                ? "This account has the designer role, but there is no active Stripe seat covering CAD. Ask a company admin to assign a paid designer license."
+                : "CAD is for designer seats. Assign one in Company admin, or invite a designer to open this project."}
             </p>
             {user.role === "company_admin" ? (
-              <Link className="btn" href="/app/admin">
-                Open company admin
+              <Link className="btn" href="/app/admin?section=team">
+                Open team permissions
               </Link>
             ) : (
               <p className="muted">Ask your company admin to grant CAD access.</p>

@@ -39,3 +39,4 @@ export * from "./permit-packet";
 export * from "./pool-gate-hardware";
 export * from "./survey-underlay";
 export * from "./site-lines";
+export * from "./seats";

@@ -28,3 +28,7 @@ export function priceIdForPlan(planKey: string): string | null {
   }
   return process.env.STRIPE_PRICE_STARTER_MONTHLY || null;
 }
+
+export function designerSeatPriceId(): string | null {
+  return process.env.STRIPE_PRICE_DESIGNER_SEAT_MONTHLY || null;
+}

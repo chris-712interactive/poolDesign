@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@pool-design/db";
 import { setSessionCookie } from "@/lib/auth";
+import { grantRoles } from "@/lib/roleGrants";
+import { isCompanyStaffRole } from "@pool-design/shared";
 
 type RouteContext = { params: Promise<{ token: string }> };
 
@@ -52,9 +54,18 @@ export async function POST(request: Request, context: RouteContext) {
       name: invite.name,
       passwordHash,
       role: invite.role,
+      alsoDesigner: false,
       companyId: invite.companyId,
       unitSystem: invite.company.defaultUnitSystem,
     },
+  });
+  const granted = isCompanyStaffRole(invite.role)
+    ? [invite.role]
+    : (["designer"] as const);
+  await grantRoles({
+    userId: user.id,
+    companyId: invite.companyId,
+    roles: granted,
   });
 
   await prisma.companyInvite.update({

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { formatMoney } from "@pool-design/shared";
+import { formatMoney, COMPANY_STAFF_ROLES, STAFF_ROLE_LABELS, DESIGNER_SEAT_MONTHLY_CENTS, type CompanyStaffRole } from "@pool-design/shared";
 import { BillingActions } from "@/components/BillingActions";
 import { type AdminSection } from "@/lib/adminSections";
 
@@ -39,7 +39,7 @@ const NAV: { id: AdminSection; label: string; hint: string }[] = [
   {
     id: "team",
     label: "Team",
-    hint: "Who can design and who to invite",
+    hint: "Permissions, seats, and invites",
   },
   {
     id: "prices",
@@ -53,8 +53,23 @@ const NAV: { id: AdminSection; label: string; hint: string }[] = [
   },
 ];
 
+type Member = {
+  id: string;
+  name: string;
+  email: string;
+  isSelf: boolean;
+  roles: CompanyStaffRole[];
+  designerLicensed: boolean;
+};
+
+type SeatPrompt = {
+  userId: string;
+  roles: CompanyStaffRole[];
+  warning: string;
+  monthlyCents: number;
+};
+
 type Props = {
-  alsoDesigner: boolean;
   initialProfile: Profile;
   billing: {
     planKey: string;
@@ -65,20 +80,19 @@ type Props = {
   };
   rootDomain: string;
   initialSection?: AdminSection;
+  seatFlash?: "success" | "canceled" | null;
 };
 
 export function CompanyAdminClient({
-  alsoDesigner: alsoDesignerInitial,
   initialProfile,
   billing,
   rootDomain,
   initialSection = "company",
+  seatFlash = null,
 }: Props) {
   const router = useRouter();
   const [section, setSection] = useState<AdminSection>(initialSection);
   const [profile, setProfile] = useState(initialProfile);
-  const [alsoDesigner, setAlsoDesigner] = useState(alsoDesignerInitial);
-  const [alsoDesignerMsg, setAlsoDesignerMsg] = useState<string | null>(null);
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
   const [inviteName, setInviteName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -89,6 +103,19 @@ export function CompanyAdminClient({
   const [priceMsg, setPriceMsg] = useState<string | null>(null);
   const [pricesLoaded, setPricesLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [membersLoaded, setMembersLoaded] = useState(false);
+  const [teamMsg, setTeamMsg] = useState<string | null>(
+    seatFlash === "success"
+      ? "Designer license is active and assigned."
+      : seatFlash === "canceled"
+        ? "License checkout was canceled."
+        : null,
+  );
+  const [seatPrompt, setSeatPrompt] = useState<SeatPrompt | null>(null);
+  const [seatBusy, setSeatBusy] = useState(false);
+  const [designerCapacity, setDesignerCapacity] = useState(1);
+  const [paidDesignerSeats, setPaidDesignerSeats] = useState(0);
 
   function goTo(next: AdminSection) {
     setSection(next);
@@ -105,6 +132,126 @@ export function CompanyAdminClient({
       })
       .catch(() => undefined);
   }, [section, pricesLoaded]);
+
+  useEffect(() => {
+    if (section !== "team" || membersLoaded) return;
+    void loadMembers();
+  }, [section, membersLoaded]);
+
+  async function loadMembers() {
+    try {
+      const res = await fetch("/api/company/members");
+      const json = (await res.json()) as {
+        members?: Member[];
+        designerCapacity?: number;
+        paidDesignerSeats?: number;
+      };
+      if (json.members) setMembers(json.members);
+      if (typeof json.designerCapacity === "number") {
+        setDesignerCapacity(json.designerCapacity);
+      }
+      if (typeof json.paidDesignerSeats === "number") {
+        setPaidDesignerSeats(json.paidDesignerSeats);
+      }
+    } catch {
+      setTeamMsg("Could not load the team.");
+    } finally {
+      setMembersLoaded(true);
+    }
+  }
+
+  async function toggleRole(
+    member: Member,
+    role: CompanyStaffRole,
+    checked: boolean,
+  ) {
+    const next = checked
+      ? [...new Set([...member.roles, role])]
+      : member.roles.filter((r) => r !== role);
+    if (next.length === 0) {
+      setTeamMsg("Each person needs at least one role.");
+      return;
+    }
+    setBusy(true);
+    setTeamMsg(null);
+    try {
+      const res = await fetch(`/api/company/members/${member.id}/roles`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roles: next }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        requiresCheckout?: boolean;
+        warning?: string;
+        monthlyCents?: number;
+        roles?: CompanyStaffRole[];
+        userId?: string;
+      };
+      if (res.status === 409 && json.requiresCheckout) {
+        setSeatPrompt({
+          userId: json.userId ?? member.id,
+          roles: json.roles ?? next,
+          warning: json.warning || "This role requires a paid designer license.",
+          monthlyCents: json.monthlyCents ?? 4000,
+        });
+        return;
+      }
+      if (!res.ok) throw new Error(json.error || "Could not update roles");
+      await loadMembers();
+      router.refresh();
+    } catch (err) {
+      setTeamMsg(err instanceof Error ? err.message : "Could not update roles");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmPaidSeat() {
+    if (!seatPrompt) return;
+    setSeatBusy(true);
+    setTeamMsg(null);
+    try {
+      const res = await fetch("/api/stripe/checkout-seat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: seatPrompt.userId,
+          roles: seatPrompt.roles,
+        }),
+      });
+      const json = (await res.json()) as {
+        url?: string;
+        error?: string;
+        ok?: boolean;
+      };
+      if (!res.ok) throw new Error(json.error || "Checkout failed");
+      if (json.url) {
+        window.location.href = json.url;
+        return;
+      }
+      setSeatPrompt(null);
+      await loadMembers();
+      router.refresh();
+      setTeamMsg("Designer license added and assigned.");
+    } catch (err) {
+      setTeamMsg(err instanceof Error ? err.message : "Checkout failed");
+    } finally {
+      setSeatBusy(false);
+    }
+  }
+
+  async function buyLicense(member: Member) {
+    setSeatPrompt({
+      userId: member.id,
+      roles: member.roles.includes("designer")
+        ? member.roles
+        : [...member.roles, "designer"],
+      warning:
+        "This adds a designer license that renews monthly with Stripe. If the license lapses, this person loses CAD access.",
+      monthlyCents: DESIGNER_SEAT_MONTHLY_CENTS,
+    });
+  }
 
   async function saveProfile(e: FormEvent) {
     e.preventDefault();
@@ -155,31 +302,6 @@ export function CompanyAdminClient({
       setInviteError(err instanceof Error ? err.message : "Invite failed");
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function toggleAlsoDesigner(next: boolean) {
-    setAlsoDesignerMsg(null);
-    setAlsoDesigner(next);
-    try {
-      const res = await fetch("/api/company/me", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ alsoDesigner: next }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Could not update designer seat");
-      setAlsoDesigner(json.alsoDesigner === true);
-      setAlsoDesignerMsg(
-        json.alsoDesigner
-          ? "You can open CAD on this account."
-          : "CAD is limited to invited designers.",
-      );
-    } catch (err) {
-      setAlsoDesigner(!next);
-      setAlsoDesignerMsg(
-        err instanceof Error ? err.message : "Could not update designer seat",
-      );
     }
   }
 
@@ -324,21 +446,76 @@ export function CompanyAdminClient({
         {section === "team" ? (
           <>
             <div className="stack">
-              <h3 style={{ margin: 0 }}>Your designer seat</h3>
+              <h3 style={{ margin: 0 }}>Permissions</h3>
               <p className="muted" style={{ margin: 0 }}>
-                Company admin is for billing and team. Check this to also open
-                CAD yourself — or invite a designer below.
+                Assign every role a person needs. Admin and estimator are
+                included. Extra designer seats are {formatMoney(4000)}/month on
+                Stripe and stay valid only while that license renews.
               </p>
-              <label className="row" style={{ gap: "0.6rem", alignItems: "center" }}>
-                <input
-                  type="checkbox"
-                  checked={alsoDesigner}
-                  disabled={busy}
-                  onChange={(e) => void toggleAlsoDesigner(e.target.checked)}
-                />
-                I also design (open CAD on this account)
-              </label>
-              {alsoDesignerMsg ? <p className="muted">{alsoDesignerMsg}</p> : null}
+              <p className="muted" style={{ margin: 0 }}>
+                Designer seats: {designerCapacity} available ({paidDesignerSeats}{" "}
+                paid extra).
+              </p>
+              {teamMsg ? <p className="muted">{teamMsg}</p> : null}
+              <div className="proposal-table-wrap">
+                <table className="proposal-table team-perm-table">
+                  <thead>
+                    <tr>
+                      <th>Person</th>
+                      {COMPANY_STAFF_ROLES.map((role) => (
+                        <th key={role}>{STAFF_ROLE_LABELS[role]}</th>
+                      ))}
+                      <th>CAD</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {members.map((member) => (
+                      <tr key={member.id}>
+                        <td>
+                          <strong>{member.name}</strong>
+                          {member.isSelf ? " (you)" : ""}
+                          <div className="muted admin-nav-sub" title={member.email}>
+                            {member.email}
+                          </div>
+                        </td>
+                        {COMPANY_STAFF_ROLES.map((role) => (
+                          <td key={role}>
+                            <label className="team-perm-check">
+                              <input
+                                type="checkbox"
+                                aria-label={`${STAFF_ROLE_LABELS[role]} for ${member.name}`}
+                                checked={member.roles.includes(role)}
+                                disabled={busy}
+                                onChange={(e) =>
+                                  void toggleRole(member, role, e.target.checked)
+                                }
+                              />
+                            </label>
+                          </td>
+                        ))}
+                        <td>
+                          {member.roles.includes("designer") ? (
+                            member.designerLicensed ? (
+                              <span>Licensed</span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn secondary"
+                                disabled={busy}
+                                onClick={() => void buyLicense(member)}
+                              >
+                                Buy license
+                              </button>
+                            )
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
             <form className="stack" onSubmit={(e) => void sendInvite(e)}>
               <h3 style={{ margin: 0 }}>Invite teammate</h3>
@@ -505,6 +682,42 @@ export function CompanyAdminClient({
           </div>
         ) : null}
       </section>
+      {seatPrompt ? (
+        <div className="modal-backdrop" role="presentation">
+          <div
+            className="panel stack modal-card"
+            role="dialog"
+            aria-labelledby="seat-prompt-title"
+          >
+            <h2 id="seat-prompt-title" style={{ margin: 0 }}>
+              Extra designer license
+            </h2>
+            <p style={{ margin: 0 }}>{seatPrompt.warning}</p>
+            <p className="muted" style={{ margin: 0 }}>
+              {formatMoney(seatPrompt.monthlyCents)}/month, billed by Stripe
+              with your subscription.
+            </p>
+            <div className="row">
+              <button
+                type="button"
+                className="btn"
+                disabled={seatBusy}
+                onClick={() => void confirmPaidSeat()}
+              >
+                {seatBusy ? "Continuing…" : "Continue to checkout"}
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={seatBusy}
+                onClick={() => setSeatPrompt(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

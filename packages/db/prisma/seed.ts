@@ -57,11 +57,13 @@ async function main() {
       planKey: "pro",
       trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
       setupCompletedAt: new Date(),
+      designerSeatsPaid: 1,
     },
     update: {
       name: "Acme Pools",
       subscriptionStatus: "trialing",
       setupCompletedAt: new Date(),
+      designerSeatsPaid: 1,
     },
   });
 
@@ -91,7 +93,7 @@ async function main() {
     });
   }
 
-  await prisma.user.upsert({
+  const admin = await prisma.user.upsert({
     where: { email: "admin@acme-pools.test" },
     create: {
       email: "admin@acme-pools.test",
@@ -104,8 +106,15 @@ async function main() {
     },
     update: { passwordHash, companyId: company.id, alsoDesigner: true },
   });
+  await prisma.userRoleGrant.deleteMany({ where: { userId: admin.id } });
+  await prisma.userRoleGrant.createMany({
+    data: [
+      { userId: admin.id, companyId: company.id, role: "company_admin" },
+      { userId: admin.id, companyId: company.id, role: "designer" },
+    ],
+  });
 
-  await prisma.user.upsert({
+  const designer = await prisma.user.upsert({
     where: { email: "designer@acme-pools.test" },
     create: {
       email: "designer@acme-pools.test",
@@ -116,6 +125,10 @@ async function main() {
       unitSystem: "imperial",
     },
     update: { passwordHash, companyId: company.id },
+  });
+  await prisma.userRoleGrant.deleteMany({ where: { userId: designer.id } });
+  await prisma.userRoleGrant.createMany({
+    data: [{ userId: designer.id, companyId: company.id, role: "designer" }],
   });
 
   const design = emptyDesignDocument(

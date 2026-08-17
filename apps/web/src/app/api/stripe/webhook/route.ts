@@ -3,6 +3,12 @@ import type Stripe from "stripe";
 import { prisma, type SubscriptionStatus } from "@pool-design/db";
 import { completeMilestone } from "@/lib/shares";
 import { getStripe, stripeConfigured } from "@/lib/stripe";
+import {
+  retrieveSubscription,
+  syncDesignerSeatsFromSubscription,
+} from "@/lib/designerSeats";
+import { grantRoles } from "@/lib/roleGrants";
+import { isCompanyStaffRole } from "@pool-design/shared";
 
 export const runtime = "nodejs";
 
@@ -47,6 +53,8 @@ async function applySubscription(
     },
   });
 
+  await syncDesignerSeatsFromSubscription(companyId, subscription);
+
   if (status === "active" || status === "trialing") {
     await completeMilestone(companyId, "subscription_active");
   }
@@ -78,13 +86,31 @@ export async function POST(request: Request) {
       const session = event.data.object as Stripe.Checkout.Session;
       const companyId = session.metadata?.companyId;
       const planKey = session.metadata?.planKey;
+      const kind = session.metadata?.kind;
       if (companyId && session.subscription) {
         const subId =
           typeof session.subscription === "string"
             ? session.subscription
             : session.subscription.id;
-        const subscription = await stripe.subscriptions.retrieve(subId);
-        await applySubscription(companyId, subscription, planKey);
+        const subscription = await retrieveSubscription(subId);
+        if (kind === "designer_seat") {
+          await syncDesignerSeatsFromSubscription(companyId, subscription);
+          const userId = session.metadata?.userId;
+          const roles = (session.metadata?.roles || "designer")
+            .split(",")
+            .filter(isCompanyStaffRole);
+          if (userId && roles.length > 0) {
+            await grantRoles({ userId, companyId, roles });
+          }
+          if (session.id) {
+            await prisma.seatCheckout.updateMany({
+              where: { stripeSessionId: session.id },
+              data: { status: "completed" },
+            });
+          }
+        } else {
+          await applySubscription(companyId, subscription, planKey);
+        }
       }
     } else if (
       event.type === "customer.subscription.updated" ||
@@ -112,13 +138,38 @@ export async function POST(request: Request) {
 
       if (companyId) {
         if (event.type === "customer.subscription.deleted") {
-          await prisma.company.update({
+          const company = await prisma.company.findUnique({
             where: { id: companyId },
-            data: {
-              subscriptionStatus: "canceled",
-              stripeSubscriptionId: subscription.id,
+            select: {
+              subscriptionStatus: true,
+              trialEndsAt: true,
             },
           });
+          const stillOnLocalTrial =
+            company?.subscriptionStatus === "trialing" &&
+            subscription.metadata?.kind === "designer_seat";
+          await prisma.company.update({
+            where: { id: companyId },
+            data: stillOnLocalTrial
+              ? {
+                  designerSeatsPaid: 0,
+                  stripeDesignerItemId: null,
+                  stripeSubscriptionId: null,
+                }
+              : {
+                  subscriptionStatus: "canceled",
+                  stripeSubscriptionId: subscription.id,
+                  designerSeatsPaid: 0,
+                },
+          });
+        } else if (
+          subscription.metadata?.kind === "designer_seat" &&
+          !subscription.metadata?.planKey
+        ) {
+          await syncDesignerSeatsFromSubscription(
+            companyId,
+            await retrieveSubscription(subscription.id),
+          );
         } else {
           await applySubscription(
             companyId,

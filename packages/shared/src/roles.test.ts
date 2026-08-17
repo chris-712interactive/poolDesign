@@ -10,6 +10,7 @@ describe("canUseCad", () => {
   it("allows company admins only when they take a designer seat", () => {
     assert.equal(canUseCad("company_admin"), false);
     assert.equal(canUseCad("company_admin", true), true);
+    assert.equal(canUseCad("company_admin", false, ["designer"]), true);
   });
 
   it("blocks estimators", () => {

@@ -19,11 +19,13 @@ export function isCompanyStaff(role: UserRole): boolean {
   return role === "company_admin" || role === "designer" || role === "estimator";
 }
 
-/** CAD is for designers. Admins opt in with a designer seat (`alsoDesigner`). */
+/** CAD is for a licensed designer grant (or the legacy alsoDesigner flag). */
 export function canUseCad(
   role: UserRole | string,
   alsoDesigner = false,
+  grantedRoles?: readonly string[],
 ): boolean {
+  if (grantedRoles?.includes("designer")) return true;
   if (role === "designer") return true;
   if (role === "company_admin" && alsoDesigner) return true;
   return false;
