@@ -28,7 +28,7 @@ export const DEFAULT_ONBOARDING_MILESTONES: MilestoneDefinition[] = [
   {
     key: "company_profile",
     title: "Company profile completed",
-    description: "Name, logo, region, and default units",
+    description: "Name, address, service area, and default units",
     sortOrder: 3,
   },
   {

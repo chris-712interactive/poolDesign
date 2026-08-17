@@ -53,6 +53,11 @@ async function main() {
       slug: "acme-pools",
       defaultUnitSystem: "imperial",
       region: "Southwest US",
+      street: "4100 Desert Bloom Rd",
+      city: "Scottsdale",
+      state: "AZ",
+      postalCode: "85251",
+      country: "US",
       subscriptionStatus: "trialing",
       planKey: "pro",
       trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
@@ -61,6 +66,12 @@ async function main() {
     },
     update: {
       name: "Acme Pools",
+      region: "Southwest US",
+      street: "4100 Desert Bloom Rd",
+      city: "Scottsdale",
+      state: "AZ",
+      postalCode: "85251",
+      country: "US",
       subscriptionStatus: "trialing",
       setupCompletedAt: new Date(),
       designerSeatsPaid: 1,
@@ -141,17 +152,31 @@ async function main() {
     where: { companyId: company.id, name: "Kendig Residence Pool" },
   });
 
+  const site = {
+    clientName: "Chris Kendig",
+    address: "123 Palm Ave, Tampa, FL 33602",
+    street: "123 Palm Ave",
+    city: "Tampa",
+    state: "FL",
+    postalCode: "33602",
+    country: "US",
+  };
+
   if (!existing) {
     await prisma.project.create({
       data: {
         companyId: company.id,
         name: "Kendig Residence Pool",
-        clientName: "Chris Kendig",
-        address: "123 Palm Ave",
+        ...site,
         designLevel: "residential",
         unitSystem: "imperial",
         designJson: JSON.stringify(design),
       },
+    });
+  } else {
+    await prisma.project.update({
+      where: { id: existing.id },
+      data: site,
     });
   }
 

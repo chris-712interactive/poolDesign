@@ -1,6 +1,7 @@
 export const ADMIN_SECTIONS = [
   "company",
   "team",
+  "markets",
   "prices",
   "billing",
 ] as const;

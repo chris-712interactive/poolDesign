@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, Fragment } from "react";
 import { useRouter } from "next/navigation";
-import { formatMoney, COMPANY_STAFF_ROLES, STAFF_ROLE_LABELS, DESIGNER_SEAT_MONTHLY_CENTS, type CompanyStaffRole } from "@pool-design/shared";
+import { formatMoney, COMPANY_STAFF_ROLES, STAFF_ROLE_LABELS, DESIGNER_SEAT_MONTHLY_CENTS, type CompanyStaffRole, type MarketStateRow } from "@pool-design/shared";
+import { AddressFields } from "@/components/AddressFields";
 import { BillingActions } from "@/components/BillingActions";
 import { type AdminSection } from "@/lib/adminSections";
 
@@ -12,6 +13,11 @@ type Profile = {
   region: string | null;
   defaultUnitSystem: "imperial" | "metric";
   slug: string;
+  street: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  country: string | null;
 };
 
 type PriceItem = {
@@ -34,12 +40,17 @@ const NAV: { id: AdminSection; label: string; hint: string }[] = [
   {
     id: "company",
     label: "Company",
-    hint: "Name, logo, region, and units",
+    hint: "Name, address, service area, and units",
   },
   {
     id: "team",
     label: "Team",
     hint: "Permissions, seats, and invites",
+  },
+  {
+    id: "markets",
+    label: "Markets",
+    hint: "Where jobs are coming from",
   },
   {
     id: "prices",
@@ -117,6 +128,12 @@ export function CompanyAdminClient({
   const [seatBusy, setSeatBusy] = useState(false);
   const [designerCapacity, setDesignerCapacity] = useState(1);
   const [paidDesignerSeats, setPaidDesignerSeats] = useState(0);
+  const [markets, setMarkets] = useState<{
+    total: number;
+    unlabeled: number;
+    byState: MarketStateRow[];
+  } | null>(null);
+  const [marketsLoaded, setMarketsLoaded] = useState(false);
   const [extraDesignerSeats, setExtraDesignerSeats] = useState(
     billing.extraDesignerSeats,
   );
@@ -145,6 +162,11 @@ export function CompanyAdminClient({
     void loadMembers();
   }, [section, membersLoaded]);
 
+  useEffect(() => {
+    if (section !== "markets" || marketsLoaded) return;
+    void loadMarkets();
+  }, [section, marketsLoaded]);
+
   async function loadMembers() {
     try {
       const res = await fetch("/api/company/members");
@@ -172,6 +194,28 @@ export function CompanyAdminClient({
       setTeamMsg("Could not load the team.");
     } finally {
       setMembersLoaded(true);
+    }
+  }
+
+  async function loadMarkets() {
+    try {
+      const res = await fetch("/api/company/markets");
+      const json = (await res.json()) as {
+        total?: number;
+        unlabeled?: number;
+        byState?: MarketStateRow[];
+        error?: string;
+      };
+      if (!res.ok) throw new Error(json.error || "Could not load markets");
+      setMarkets({
+        total: json.total ?? 0,
+        unlabeled: json.unlabeled ?? 0,
+        byState: json.byState ?? [],
+      });
+    } catch {
+      setMarkets({ total: 0, unlabeled: 0, byState: [] });
+    } finally {
+      setMarketsLoaded(true);
     }
   }
 
@@ -420,8 +464,32 @@ export function CompanyAdminClient({
                 required
               />
             </div>
+            <p className="muted" style={{ margin: 0 }}>
+              Headquarters address. Job sites use the same fields so Markets can
+              show where work is coming from.
+            </p>
+            <AddressFields
+              idPrefix="hq"
+              value={{
+                street: profile.street,
+                city: profile.city,
+                state: profile.state,
+                postalCode: profile.postalCode,
+                country: profile.country ?? "US",
+              }}
+              onChange={(next) =>
+                setProfile((p) => ({
+                  ...p,
+                  street: next.street ?? null,
+                  city: next.city ?? null,
+                  state: next.state ?? null,
+                  postalCode: next.postalCode ?? null,
+                  country: next.country ?? "US",
+                }))
+              }
+            />
             <div className="field">
-              <label htmlFor="region">Region</label>
+              <label htmlFor="region">Service area</label>
               <input
                 id="region"
                 value={profile.region ?? ""}
@@ -614,6 +682,62 @@ export function CompanyAdminClient({
               ) : null}
             </form>
           </>
+        ) : null}
+
+        {section === "markets" ? (
+          <div className="stack">
+            <p className="muted" style={{ margin: 0 }}>
+              Counts jobs by job-site city and state. Add city and state when
+              you create a project so this stays useful.
+            </p>
+            {!marketsLoaded ? (
+              <p className="muted">Loading markets…</p>
+            ) : !markets || markets.total === 0 ? (
+              <p className="muted">No projects yet.</p>
+            ) : (
+              <>
+                <p className="muted" style={{ margin: 0 }}>
+                  {markets.total} job{markets.total === 1 ? "" : "s"}
+                  {markets.unlabeled > 0
+                    ? ` · ${markets.unlabeled} without a city or state`
+                    : ""}
+                </p>
+                <div className="proposal-table-wrap">
+                  <table className="proposal-table">
+                    <thead>
+                      <tr>
+                        <th>State</th>
+                        <th>City</th>
+                        <th>Jobs</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {markets.byState.map((row) => (
+                        <Fragment key={row.state}>
+                          <tr>
+                            <td>
+                              <strong>{row.state}</strong>
+                            </td>
+                            <td className="muted">All cities</td>
+                            <td>
+                              <strong>{row.count}</strong>
+                            </td>
+                          </tr>
+                          {row.cities.map((city) => (
+                            <tr key={`${row.state}-${city.city}`}>
+                              <td />
+                              <td>{city.city}</td>
+                              <td>{city.count}</td>
+                            </tr>
+                          ))}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
         ) : null}
 
         {section === "prices" ? (

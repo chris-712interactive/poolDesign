@@ -49,6 +49,11 @@ export default async function CompanyAdminPage({
             region: company.region,
             defaultUnitSystem: company.defaultUnitSystem,
             slug: company.slug,
+            street: company.street,
+            city: company.city,
+            state: company.state,
+            postalCode: company.postalCode,
+            country: company.country,
           }}
           billing={{
             planKey: company.planKey,

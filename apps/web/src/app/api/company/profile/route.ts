@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@pool-design/db";
+import { formatAddressLine, normalizeAddress } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { completeMilestone } from "@/lib/shares";
 import { companyHasAppAccess } from "@/lib/subscription";
@@ -19,14 +20,38 @@ export async function PATCH(request: Request) {
     logoUrl?: string | null;
     region?: string | null;
     defaultUnitSystem?: "imperial" | "metric";
+    street?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
   };
+
+  const hq = normalizeAddress({
+    street: body.street,
+    city: body.city,
+    state: body.state,
+    postalCode: body.postalCode,
+    country: body.country,
+  });
 
   const data: {
     name?: string;
     logoUrl?: string | null;
     region?: string | null;
     defaultUnitSystem?: "imperial" | "metric";
-  } = {};
+    street?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
+  } = {
+    street: hq.street,
+    city: hq.city,
+    state: hq.state,
+    postalCode: hq.postalCode,
+    country: hq.country,
+  };
 
   if (typeof body.name === "string" && body.name.trim()) {
     data.name = body.name.trim();
@@ -46,7 +71,7 @@ export async function PATCH(request: Request) {
     data,
   });
 
-  if (company.name && company.region && company.defaultUnitSystem) {
+  if (company.name && company.city && company.state && company.defaultUnitSystem) {
     await completeMilestone(user.companyId, "company_profile");
   }
 
@@ -57,5 +82,11 @@ export async function PATCH(request: Request) {
     region: company.region,
     defaultUnitSystem: company.defaultUnitSystem,
     slug: company.slug,
+    street: company.street,
+    city: company.city,
+    state: company.state,
+    postalCode: company.postalCode,
+    country: company.country,
+    address: formatAddressLine(company),
   });
 }

@@ -58,6 +58,11 @@ model Company {
   enabledDesignLevels  String             @default("residential,commercial,water_park")
   logoUrl              String?
   region               String?
+  street               String?
+  city                 String?
+  state                String?
+  postalCode           String?
+  country              String?            @default("US")
   subscriptionStatus   SubscriptionStatus @default(trialing)
   planKey              String             @default("starter")
   stripeCustomerId     String?
@@ -105,6 +110,11 @@ model Project {
   name        String
   clientName  String?
   address     String?
+  street      String?
+  city        String?
+  state       String?
+  postalCode  String?
+  country     String?
   designLevel DesignLevel @default(residential)
   unitSystem  UnitSystem  @default(imperial)
   /** JSON DesignDocument */
@@ -119,6 +129,7 @@ model Project {
   liveSession ProjectLiveSession?
 
   @@index([companyId])
+  @@index([companyId, state])
 }
 
 /** Host-driven kitchen-table live session (finish swaps + approvals). */

@@ -44,9 +44,9 @@ export default async function ProjectsPage() {
               <p className="muted first-job-kicker">{company.name}</p>
               <h1>Open the first job</h1>
               <p>
-                Name the backyard and pick a design level. Next you will drop
-                the survey on the sheet — the same drawing drives 3D and
-                takeoff.
+                Name the backyard, pick a design level, and set the job-site
+                city and state. Next you will drop the survey on the sheet — the
+                same drawing drives 3D and takeoff.
               </p>
               {isAdmin ? (
                 <p className="muted">
@@ -73,10 +73,18 @@ export default async function ProjectsPage() {
                   Projects for designers and estimators. Choose a design level
                   when creating a job.
                 </p>
-                {isAdmin && trialActive ? (
+                {isAdmin ? (
                   <p className="muted">
-                    <Link href="/app/admin?section=team">Invite a designer</Link>
-                    {" — extra seats are free during the trial."}
+                    <Link href="/app/admin?section=markets">
+                      See where jobs are coming from
+                    </Link>
+                    {trialActive ? (
+                      <>
+                        {" · "}
+                        <Link href="/app/admin?section=team">Invite a designer</Link>
+                        {" — extra seats are free during the trial."}
+                      </>
+                    ) : null}
                   </p>
                 ) : null}
               </div>
@@ -91,6 +99,8 @@ export default async function ProjectsPage() {
                   name: project.name,
                   clientName: project.clientName,
                   address: project.address,
+                  city: project.city,
+                  state: project.state,
                   designLevel: project.designLevel as DesignLevel,
                 }))}
               />

@@ -40,3 +40,4 @@ export * from "./pool-gate-hardware";
 export * from "./survey-underlay";
 export * from "./site-lines";
 export * from "./seats";
+export * from "./address";

@@ -10,6 +10,8 @@ type ProjectRow = {
   name: string;
   clientName: string | null;
   address: string | null;
+  city: string | null;
+  state: string | null;
   designLevel: DesignLevel;
 };
 
@@ -51,7 +53,10 @@ export function ProjectList({ projects }: { projects: ProjectRow[] }) {
             </div>
             <div className="muted">
               {project.clientName || "No client"} ·{" "}
-              {project.address || "No address"}
+              {project.address ||
+                (project.city || project.state
+                  ? [project.city, project.state].filter(Boolean).join(", ")
+                  : "No job site")}
             </div>
           </Link>
           <button
