@@ -1586,6 +1586,49 @@ textarea {
   font-size: 0.92rem;
 }
 
+.success {
+  color: var(--accent-strong);
+  font-size: 0.92rem;
+}
+
+.account-meta {
+  display: grid;
+  gap: 0.65rem 1.25rem;
+  margin: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.account-meta div {
+  margin: 0;
+}
+
+.account-meta dt {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.account-meta dd {
+  margin: 0.15rem 0 0;
+  font-weight: 600;
+}
+
+.account-page h1,
+.account-page .panel h2 {
+  font-family: var(--font-display);
+  font-weight: 560;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+@media (max-width: 560px) {
+  .account-meta {
+    grid-template-columns: 1fr;
+  }
+}
+
 .patio-finish-picker {
   display: flex;
   flex-direction: column;

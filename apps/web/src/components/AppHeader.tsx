@@ -32,7 +32,6 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
           {user?.companyId && (
             <>
               <Link href="/app">Projects</Link>
-              <Link href="/app/settings">Settings</Link>
               {user.role === "company_admin" && (
                 <Link href="/app/admin">Company admin</Link>
               )}
@@ -40,6 +39,7 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
           )}
           {user ? (
             <>
+              <Link href="/app/settings">Account</Link>
               <span className="muted" style={{ color: "rgba(255,255,255,0.7)" }}>
                 {user.name}
               </span>
@@ -51,8 +51,8 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
             </>
           ) : (
             <>
-              <a href="/#features">Features</a>
-              <a href="/#pricing">Pricing</a>
+              <a href="/#product">Product</a>
+              <a href="/#plans">Plans</a>
               <Link href="/login">Sign in</Link>
               <Link className="btn" href="/signup">
                 Start free trial
