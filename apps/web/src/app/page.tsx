@@ -5,6 +5,7 @@ import { MarketingFooter } from "@/components/MarketingFooter";
 import { MarketingHeader } from "@/components/MarketingHeader";
 import { MarketingPlanGraphic } from "@/components/MarketingPlanGraphic";
 import {
+  DESIGNER_SEAT_MONTHLY_CENTS,
   formatMoney,
   PLAN_MARKETING,
   PLAN_PRICING,
@@ -17,6 +18,12 @@ const CAPABILITIES = [
   "Live client finish sessions",
   "Takeoff from the model",
   "Branded proposals",
+] as const;
+
+const PLAN_SEAT_HIGHLIGHTS = [
+  "1 designer license included",
+  `Additional designer licenses ${formatMoney(DESIGNER_SEAT_MONTHLY_CENTS)}/month each`,
+  "Unlimited admin and estimator seats",
 ] as const;
 
 const CHAPTERS = [
@@ -213,9 +220,8 @@ export default async function HomePage() {
             <p className="mkt-kicker">Plans</p>
             <h2>One subscription. The whole company.</h2>
             <p>
-              Trial is billed by PoolShape, not Stripe. After {TRIAL_DURATION_DAYS}{" "}
-              days, choose Sales or Builder. Card and invoices are handled by
-              Stripe.
+              No credit card required for the free trial. After{" "}
+              {TRIAL_DURATION_DAYS} days, choose Sales or Builder.
             </p>
           </div>
           <div className="mkt-plans">
@@ -228,6 +234,9 @@ export default async function HomePage() {
               <p className="mkt-plan-blurb">{PLAN_MARKETING.sales.blurb}</p>
               <ul>
                 {PLAN_MARKETING.sales.highlights.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+                {PLAN_SEAT_HIGHLIGHTS.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ul>
@@ -245,6 +254,9 @@ export default async function HomePage() {
               <p className="mkt-plan-blurb">{PLAN_MARKETING.builder.blurb}</p>
               <ul>
                 {PLAN_MARKETING.builder.highlights.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+                {PLAN_SEAT_HIGHLIGHTS.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ul>
