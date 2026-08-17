@@ -1,6 +1,9 @@
+import Image from "next/image";
 import Link from "next/link";
 import { getSessionUser } from "@/lib/auth";
-import { AppHeader } from "@/components/AppHeader";
+import { MarketingFooter } from "@/components/MarketingFooter";
+import { MarketingHeader } from "@/components/MarketingHeader";
+import { MarketingPlanGraphic } from "@/components/MarketingPlanGraphic";
 import {
   formatMoney,
   PLAN_MARKETING,
@@ -8,40 +11,81 @@ import {
   TRIAL_DURATION_DAYS,
 } from "@pool-design/shared";
 
-const FEATURES = [
+const CAPABILITIES = [
+  "Construction-true plan CAD",
+  "Photoreal 3D walkthrough",
+  "Live client finish sessions",
+  "Takeoff from the model",
+  "Branded proposals",
+] as const;
+
+const CHAPTERS = [
   {
-    title: "Design in plan and 3D",
-    body: "Draw pools, spas, patio, fence, and equipment with field-ready precision. Walk the job in 3D before you pour.",
+    id: "plan",
+    kicker: "01  /  Design",
+    title: "Draw the vessel the way you will build it.",
+    body: "Pool, spa, deck, fence, and equipment live in one plan. Vertex, bulge, and dimension tools stay in millimeters so the drawing remains construction-true whether your team works in feet or meters.",
+    points: [
+      "Freeform and geometric vessels, steps, benches, and waterline",
+      "Site lines, patio, and structure without a generic CAD tax",
+      "Survey underlay so the backyard sits on the sheet you were given",
+    ],
+    visual: "plan" as const,
   },
   {
-    title: "Close at the kitchen table",
-    body: "Share a client link. Host a live finish session so homeowners swap tile and patio while you watch.",
+    id: "walk",
+    kicker: "02  /  Present",
+    title: "Walk the backyard before anyone mobilizes.",
+    body: "The 3D view is the same model — not a separate artist’s file. Homeowners see water, stone, and night lighting. Your designer stays in control of the geometry.",
+    points: [
+      "Still captures and orbit clips for the proposal",
+      "Finishes that match what you will actually install",
+      "A client link you can send after the meeting — or during it",
+    ],
+    visual: "walk" as const,
+    image: {
+      src: "/marketing/walkthrough.jpg",
+      alt: "Twilight architectural view of a custom pool, spa, and limestone deck",
+    },
   },
   {
-    title: "Takeoffs that match the drawing",
-    body: "Material lists and company price books stay attached to the design — not a disconnected spreadsheet.",
-  },
-  {
-    title: "Quotes and draft packets",
-    body: "Builder plans export branded PDF quotes, CSV takeoffs, and a draft permit packet. Never marketed as PE-stamped.",
+    id: "close",
+    kicker: "03  /  Close",
+    title: "Let them choose tile at the table. Keep the drawing.",
+    body: "A live finish session puts waterline and patio in front of the homeowner without handing them the CAD file. You host. They decide. The model updates.",
+    points: [
+      "Share a proposal, not a project file",
+      "Swap finishes while you watch",
+      "The estimate follows the drawing — not a side spreadsheet",
+    ],
+    visual: "close" as const,
+    image: {
+      src: "/marketing/presentation.jpg",
+      alt: "Tablet on a dining table showing a pool design beside a printed plan",
+    },
   },
 ] as const;
 
-const STEPS = [
+const WORKFLOW = [
   {
-    n: "1",
-    title: "Start a company trial",
-    body: `Create your company in a minute. No card. ${TRIAL_DURATION_DAYS} days of full Builder features.`,
+    n: "01",
+    title: "Open the job",
+    body: "Create the project, set the design level, and bring the survey onto the sheet.",
   },
   {
-    n: "2",
-    title: "Design a real job",
-    body: "Invite designers, set your price book, and build the next backyard or commercial pool in CAD + 3D.",
+    n: "02",
+    title: "Design in plan",
+    body: "Draw the vessel and the hardscape. The same geometry drives 3D and takeoff.",
   },
   {
-    n: "3",
-    title: "Subscribe when it sticks",
-    body: "Pick Sales or Builder. Stripe handles the card and invoices — the trial never touches Stripe.",
+    n: "03",
+    title: "Present and lock finishes",
+    body: "Walk the model. Send a client link. Host a live session if the sale needs it.",
+  },
+  {
+    n: "04",
+    title: "Price and produce",
+    body: "Builder plans export quotes, CSV takeoff, and a draft packet for professional review.",
   },
 ] as const;
 
@@ -51,144 +95,184 @@ export default async function HomePage() {
     user?.role === "platform_owner" ? "/platform" : user ? "/app" : "/signup";
 
   return (
-    <div className="app-shell marketing">
-      <AppHeader user={user} />
+    <div className="mkt">
+      <MarketingHeader user={user} />
       <main>
-        <section className="hero marketing-hero">
-          <p className="marketing-kicker">For pool companies</p>
-          <h1>Sell and build water with one drawing.</h1>
-          <p className="hero-lede">
-            PoolShape is CAD, 3D, takeoffs, and client proposals for builders
-            who close in the backyard — not a generic drafting tool.
-          </p>
+        <section className="mkt-hero">
+          <Image
+            src="/marketing/hero-pool.jpg"
+            alt="Vanishing-edge pool at dusk with limestone deck and warm house light"
+            fill
+            priority
+            sizes="100vw"
+            className="mkt-hero-photo"
+          />
+          <div className="mkt-hero-veil" />
+          <div className="mkt-hero-copy">
+            <p className="mkt-kicker mkt-kicker-light">
+              For production pool companies
+            </p>
+            <h1>The drawing that carries the job.</h1>
+            <p className="mkt-lede">
+              PoolShape is plan, 3D, takeoff, and client presentation — built
+              for companies that design and build at scale. Residential,
+              commercial, and water-park work in one account.
+            </p>
+            <div className="mkt-hero-actions">
+              <Link className="mkt-btn" href={appHref}>
+                {user ? "Open workspace" : `Start a ${TRIAL_DURATION_DAYS}-day trial`}
+              </Link>
+              {!user ? (
+                <Link className="mkt-btn mkt-btn-ghost" href="/login">
+                  Sign in
+                </Link>
+              ) : null}
+            </div>
+            <p className="mkt-hero-note">
+              Full Builder features. No credit card. One subscription per
+              company.
+            </p>
+          </div>
+        </section>
+
+        <section className="mkt-ribbon" aria-label="Capabilities">
+          <ul>
+            {CAPABILITIES.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </section>
+
+        <section id="product" className="mkt-section">
+          <div className="mkt-section-intro">
+            <p className="mkt-kicker">Product</p>
+            <h2>Built for the sales cycle and the crew — not a generic drafting tool.</h2>
+            <p>
+              The model you draw is the model you present and the model you
+              price. That is how a production builder keeps the backyard from
+              fracturing across Sketch, CAD, and a spreadsheet.
+            </p>
+          </div>
+
+          {CHAPTERS.map((chapter) => (
+            <article
+              key={chapter.id}
+              className={`mkt-chapter${chapter.visual === "walk" ? " mkt-chapter-reverse" : ""}`}
+            >
+              <div className="mkt-chapter-copy">
+                <p className="mkt-kicker">{chapter.kicker}</p>
+                <h3>{chapter.title}</h3>
+                <p>{chapter.body}</p>
+                <ul className="mkt-points">
+                  {chapter.points.map((point) => (
+                    <li key={point}>{point}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="mkt-chapter-visual">
+                {"image" in chapter ? (
+                  <Image
+                    src={chapter.image.src}
+                    alt={chapter.image.alt}
+                    width={chapter.visual === "close" ? 1200 : 1600}
+                    height={900}
+                    sizes="(max-width: 900px) 100vw, 48vw"
+                    className="mkt-photo"
+                  />
+                ) : (
+                  <MarketingPlanGraphic />
+                )}
+              </div>
+            </article>
+          ))}
+        </section>
+
+        <section id="workflow" className="mkt-section mkt-section-dark">
+          <div className="mkt-section-intro">
+            <p className="mkt-kicker mkt-kicker-light">Workflow</p>
+            <h2>From first sketch to a drawing the field can use.</h2>
+            <p>
+              A {TRIAL_DURATION_DAYS}-day company trial is the full Builder
+              product. Subscribe to Sales or Builder when the team is already
+              working in it.
+            </p>
+          </div>
+          <ol className="mkt-workflow">
+            {WORKFLOW.map((step) => (
+              <li key={step.n}>
+                <span>{step.n}</span>
+                <h3>{step.title}</h3>
+                <p>{step.body}</p>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section id="plans" className="mkt-section">
+          <div className="mkt-section-intro">
+            <p className="mkt-kicker">Plans</p>
+            <h2>One subscription. The whole company.</h2>
+            <p>
+              Trial is billed by PoolShape, not Stripe. After {TRIAL_DURATION_DAYS}{" "}
+              days, choose Sales or Builder. Card and invoices are handled by
+              Stripe.
+            </p>
+          </div>
+          <div className="mkt-plans">
+            <article className="mkt-plan">
+              <h3>{PLAN_MARKETING.sales.name}</h3>
+              <p className="mkt-price">
+                {formatMoney(PLAN_PRICING.sales.monthlyCents)}
+                <span>/ month</span>
+              </p>
+              <p className="mkt-plan-blurb">{PLAN_MARKETING.sales.blurb}</p>
+              <ul>
+                {PLAN_MARKETING.sales.highlights.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              <Link className="mkt-btn mkt-btn-quiet" href="/signup">
+                Start on Sales
+              </Link>
+            </article>
+            <article className="mkt-plan mkt-plan-featured">
+              <p className="mkt-plan-tag">Included in the trial</p>
+              <h3>{PLAN_MARKETING.builder.name}</h3>
+              <p className="mkt-price">
+                {formatMoney(PLAN_PRICING.builder.monthlyCents)}
+                <span>/ month</span>
+              </p>
+              <p className="mkt-plan-blurb">{PLAN_MARKETING.builder.blurb}</p>
+              <ul>
+                {PLAN_MARKETING.builder.highlights.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              <Link className="mkt-btn" href="/signup">
+                Evaluate Builder
+              </Link>
+            </article>
+          </div>
+        </section>
+
+        <section className="mkt-close">
+          <p className="mkt-kicker mkt-kicker-light">Get started</p>
+          <h2>Put the next backyard on a drawing that can close.</h2>
           <p>
-            {TRIAL_DURATION_DAYS}-day company trial. No credit card. Full
-            Builder features while you evaluate, then Sales or Builder on
-            Stripe.
+            {TRIAL_DURATION_DAYS} days. Full Builder. No card until you
+            subscribe.
           </p>
-          <div className="row" style={{ marginTop: "1.5rem" }}>
-            <Link className="btn" href={appHref}>
-              {user ? "Open workspace" : "Start free trial"}
+          <div className="mkt-hero-actions">
+            <Link className="mkt-btn" href="/signup">
+              Start a company trial
             </Link>
-            {!user ? (
-              <Link className="btn ghost" href="/login">
-                Sign in
-              </Link>
-            ) : null}
-          </div>
-        </section>
-
-        <section id="features" className="marketing-section">
-          <div className="marketing-inner">
-            <h2>Built for the sales cycle and the job</h2>
-            <p className="muted marketing-lead">
-              Residential, commercial, and water-park levels in one company
-              account. Your team designs. Homeowners review. Estimating stays
-              on the same model.
-            </p>
-            <div className="grid-2 marketing-feature-grid">
-              {FEATURES.map((f) => (
-                <article key={f.title} className="panel stack">
-                  <h3>{f.title}</h3>
-                  <p className="muted" style={{ margin: 0 }}>
-                    {f.body}
-                  </p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="marketing-section">
-          <div className="marketing-inner">
-            <h2>How a trial works</h2>
-            <div className="grid-3">
-              {STEPS.map((s) => (
-                <article key={s.n} className="panel stack">
-                  <span className="marketing-step">{s.n}</span>
-                  <h3>{s.title}</h3>
-                  <p className="muted" style={{ margin: 0 }}>
-                    {s.body}
-                  </p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section id="pricing" className="marketing-section">
-          <div className="marketing-inner">
-            <h2>Company plans</h2>
-            <p className="muted marketing-lead">
-              One subscription per company. Trial is on us; paid plans bill
-              through Stripe after you subscribe. Usage credits for extra HQ
-              exports can come later — they are not required to start.
-            </p>
-            <div className="grid-2">
-              <article className="panel stack marketing-plan">
-                <h3>{PLAN_MARKETING.sales.name}</h3>
-                <p className="marketing-price">
-                  {formatMoney(PLAN_PRICING.sales.monthlyCents)}
-                  <span>/mo</span>
-                </p>
-                <p className="muted">{PLAN_MARKETING.sales.blurb}</p>
-                <ul className="marketing-list">
-                  {PLAN_MARKETING.sales.highlights.map((h) => (
-                    <li key={h}>{h}</li>
-                  ))}
-                </ul>
-                <Link className="btn secondary" href="/signup">
-                  Start trial
-                </Link>
-              </article>
-              <article className="panel stack marketing-plan marketing-plan-featured">
-                <p className="marketing-plan-tag">Included in the trial</p>
-                <h3>{PLAN_MARKETING.builder.name}</h3>
-                <p className="marketing-price">
-                  {formatMoney(PLAN_PRICING.builder.monthlyCents)}
-                  <span>/mo</span>
-                </p>
-                <p className="muted">{PLAN_MARKETING.builder.blurb}</p>
-                <ul className="marketing-list">
-                  {PLAN_MARKETING.builder.highlights.map((h) => (
-                    <li key={h}>{h}</li>
-                  ))}
-                </ul>
-                <Link className="btn" href="/signup">
-                  Start trial
-                </Link>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        <section className="marketing-section">
-          <div className="marketing-inner panel stack" style={{ textAlign: "center" }}>
-            <h2>Ready for the next backyard?</h2>
-            <p className="muted">
-              No card to start. Subscribe only when the team is using it.
-            </p>
-            <div className="row" style={{ justifyContent: "center" }}>
-              <Link className="btn" href="/signup">
-                Start {TRIAL_DURATION_DAYS}-day trial
-              </Link>
-              <Link className="btn secondary" href="/login">
-                Sign in
-              </Link>
-            </div>
+            <Link className="mkt-btn mkt-btn-ghost" href="/login">
+              Sign in
+            </Link>
           </div>
         </section>
       </main>
-      <footer className="marketing-footer">
-        <span>PoolShape</span>
-        <nav>
-          <Link href="/#features">Features</Link>
-          <Link href="/#pricing">Pricing</Link>
-          <Link href="/terms">Terms</Link>
-          <Link href="/privacy">Privacy</Link>
-          <Link href="/login">Sign in</Link>
-        </nav>
-      </footer>
+      <MarketingFooter />
     </div>
   );
 }

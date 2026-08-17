@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { AppHeader } from "@/components/AppHeader";
+import { MarketingFooter } from "@/components/MarketingFooter";
+import { MarketingHeader } from "@/components/MarketingHeader";
 
 export default function TermsPage() {
   return (
-    <div className="app-shell">
-      <AppHeader user={null} />
-      <main className="page" style={{ maxWidth: 720, margin: "0 auto" }}>
+    <div className="mkt">
+      <MarketingHeader user={null} />
+      <main className="mkt-doc">
         <div className="panel stack">
           <h1>Terms of use</h1>
           <p className="muted">Last updated August 14, 2026</p>
@@ -36,6 +37,7 @@ export default function TermsPage() {
           </p>
         </div>
       </main>
+      <MarketingFooter />
     </div>
   );
 }

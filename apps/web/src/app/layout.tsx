@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PoolShape — pool design software for builders",
+  title: "PoolShape — CAD, 3D, and takeoff for production pool companies",
   description:
-    "CAD, 3D, takeoffs, and client proposals for pool companies. 14-day trial, no credit card. Sales and Builder plans billed through Stripe.",
+    "Plan, photoreal 3D, live client finishes, and model-based takeoff for residential, commercial, and water-park builders. 14-day company trial. No credit card.",
   icons: {
     icon: [{ url: "/brand/mark.svg", type: "image/svg+xml" }],
     apple: [{ url: "/brand/mark.png" }],
@@ -26,7 +26,7 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
         <link
-          href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Source+Sans+3:wght@400;600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,650&family=Outfit:wght@400;500;600;700&family=Source+Sans+3:wght@400;600;700&display=swap"
           rel="stylesheet"
         />
       </head>

@@ -1,7 +1,8 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import { getSessionUser, setSessionCookie } from "@/lib/auth";
 import { createTrialCompany } from "@/lib/signup";
-import { AppHeader } from "@/components/AppHeader";
+import { MarketingFooter } from "@/components/MarketingFooter";
+import { MarketingHeader } from "@/components/MarketingHeader";
 import { TRIAL_DURATION_DAYS, needsCompanySetup } from "@pool-design/shared";
 import Link from "next/link";
 
@@ -41,9 +42,9 @@ export default async function SignupPage({
   const error = params.error ? decodeURIComponent(params.error) : null;
 
   return (
-    <div className="app-shell">
-      <AppHeader user={null} />
-      <main className="page" style={{ maxWidth: 520, margin: "0 auto" }}>
+    <div className="mkt">
+      <MarketingHeader user={null} />
+      <main className="mkt-doc">
         <div className="panel stack">
           <h1>Start your {TRIAL_DURATION_DAYS}-day trial</h1>
           <p className="muted">
@@ -106,6 +107,7 @@ export default async function SignupPage({
           </p>
         </div>
       </main>
+      <MarketingFooter />
     </div>
   );
 }

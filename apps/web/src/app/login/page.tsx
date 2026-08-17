@@ -1,6 +1,7 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import { authenticate, getSessionUser, setSessionCookie } from "@/lib/auth";
-import { AppHeader } from "@/components/AppHeader";
+import { MarketingFooter } from "@/components/MarketingFooter";
+import { MarketingHeader } from "@/components/MarketingHeader";
 import { appHomePath } from "@/lib/companyAccess";
 import Link from "next/link";
 
@@ -41,9 +42,9 @@ export default async function LoginPage({
   const showDemo = process.env.NODE_ENV !== "production";
 
   return (
-    <div className="app-shell">
-      <AppHeader user={null} />
-      <main className="page" style={{ maxWidth: 480, margin: "0 auto" }}>
+    <div className="mkt">
+      <MarketingHeader user={null} />
+      <main className="mkt-doc">
         <div className="panel stack">
           <h1>Sign in</h1>
           <p className="muted">
@@ -99,6 +100,7 @@ export default async function LoginPage({
           ) : null}
         </div>
       </main>
+      <MarketingFooter />
     </div>
   );
 }

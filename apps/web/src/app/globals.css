@@ -37,6 +37,10 @@ body {
     linear-gradient(180deg, #10222c 0%, #16303c 45%, #1a3a48 100%);
 }
 
+body:has(.mkt) {
+  background: #fbf8f2;
+}
+
 a {
   color: inherit;
   text-decoration: none;
@@ -1896,117 +1900,617 @@ textarea {
   overflow: hidden;
 }
 
-.marketing-hero {
-  max-width: 820px;
-  padding-bottom: 3.5rem;
+/* —— Public marketing site —— */
+.mkt {
+  --mkt-ink: #102126;
+  --mkt-muted: #5d6b70;
+  --mkt-stone: #f4f0e8;
+  --mkt-paper: #fbf8f2;
+  --mkt-line: #d8d0c4;
+  --mkt-teal: #085060;
+  --mkt-water: #38b8d0;
+  --mkt-bronze: #b08a5a;
+  --mkt-night: #071116;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--mkt-paper);
+  color: var(--mkt-ink);
+  font-family: Outfit, "Source Sans 3", "Segoe UI", sans-serif;
 }
 
-.marketing-kicker {
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  opacity: 0.75;
-  margin: 0 0 0.75rem;
+.mkt a {
+  color: inherit;
 }
 
-.marketing-section {
-  padding: 0 1.5rem 3rem;
+.mkt > main {
+  flex: 1;
 }
 
-.marketing-inner {
-  max-width: 960px;
+.mkt-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(251, 248, 242, 0.92);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--mkt-line);
+}
+
+.mkt-header-inner,
+.mkt-footer-inner {
+  max-width: 1180px;
   margin: 0 auto;
+  padding: 0 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
 }
 
-.marketing-inner > h2 {
+.mkt-header-inner {
+  min-height: 4.25rem;
+}
+
+.mkt-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
   font-family: var(--font-display);
-  color: var(--white);
-  margin: 0 0 0.5rem;
+  font-size: 1.45rem;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+  color: var(--mkt-teal);
 }
 
-.marketing-section .panel h2,
-.marketing-section .panel h3 {
-  color: var(--panel-ink);
-  font-family: var(--font-display);
-  margin: 0;
+.mkt-brand-mark {
+  width: 1.7rem;
+  height: 1.7rem;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 5px;
+  padding: 0.12rem;
+  box-sizing: content-box;
+  border: 1px solid var(--mkt-line);
 }
 
-.marketing-lead {
-  max-width: 40rem;
-  margin: 0 0 1.25rem;
-  color: rgba(255, 255, 255, 0.78);
+.mkt-nav {
+  display: flex;
+  align-items: center;
+  gap: 1.35rem;
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--mkt-ink);
 }
 
-.marketing-feature-grid .panel h3 {
-  font-size: 1.2rem;
+.mkt-nav a {
+  opacity: 0.78;
 }
 
-.marketing-step {
-  width: 1.75rem;
-  height: 1.75rem;
+.mkt-nav a:hover {
+  opacity: 1;
+}
+
+.mkt-nav-cta {
+  opacity: 1 !important;
+  background: var(--mkt-teal);
+  color: #fff !important;
+  padding: 0.55rem 0.95rem;
   border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-  font-weight: 700;
+  font-weight: 600;
+}
+
+.mkt-nav-cta:hover {
+  background: #063944;
+}
+
+.mkt-hero {
+  position: relative;
+  min-height: min(92vh, 820px);
+  display: flex;
+  align-items: flex-end;
+  color: #fff;
+  overflow: hidden;
+}
+
+.mkt-hero-photo {
+  object-fit: cover;
+  object-position: center 62%;
+}
+
+.mkt-hero-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(7, 17, 22, 0.18) 0%, rgba(7, 17, 22, 0.28) 38%, rgba(7, 17, 22, 0.78) 100%),
+    linear-gradient(90deg, rgba(7, 17, 22, 0.55) 0%, rgba(7, 17, 22, 0.12) 58%, transparent 100%);
+  z-index: 1;
+}
+
+.mkt-hero-copy {
+  position: relative;
+  z-index: 2;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 5.5rem 1.75rem 3.5rem;
+  width: 100%;
+}
+
+.mkt-hero-copy h1 {
+  font-family: var(--font-display);
+  font-weight: 560;
+  font-size: clamp(2.8rem, 6.4vw, 5.1rem);
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+  max-width: 14ch;
+  margin: 0 0 1.1rem;
+}
+
+.mkt-lede {
+  max-width: 38rem;
+  font-size: 1.18rem;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.88);
+  margin: 0 0 1.6rem;
+}
+
+.mkt-kicker {
+  margin: 0 0 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--mkt-teal);
+}
+
+.mkt-kicker-light {
+  color: var(--mkt-water);
+}
+
+.mkt-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.mkt-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  padding: 0.78rem 1.25rem;
+  border-radius: 999px;
+  background: var(--mkt-water);
+  color: #06242c;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: 1px solid transparent;
 }
 
-.marketing-price {
-  font-family: var(--font-display);
-  font-size: 2rem;
-  margin: 0;
-  color: var(--panel-ink);
+.mkt-btn:hover {
+  background: #7ee0ee;
 }
 
-.marketing-price span {
-  font-family: var(--font-body);
-  font-size: 1rem;
-  color: var(--muted);
-  margin-left: 0.2rem;
+.mkt-btn-ghost {
+  background: transparent;
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
-.marketing-list {
-  margin: 0;
-  padding-left: 1.1rem;
-  color: var(--panel-ink);
+.mkt-btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
-.marketing-list li + li {
-  margin-top: 0.35rem;
+.mkt-btn-quiet {
+  background: transparent;
+  color: var(--mkt-teal);
+  border-color: var(--mkt-teal);
 }
 
-.marketing-plan-featured {
-  border: 2px solid var(--accent);
+.mkt-btn-quiet:hover {
+  background: rgba(8, 80, 96, 0.06);
 }
 
-.marketing-plan-tag {
-  margin: 0;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--accent-strong);
+.mkt-hero-note {
+  margin: 1.1rem 0 0;
+  font-size: 0.92rem;
+  color: rgba(255, 255, 255, 0.72);
 }
 
-.marketing-footer {
+.mkt-ribbon {
+  background: var(--mkt-night);
+  color: rgba(255, 255, 255, 0.78);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.mkt-ribbon ul {
+  list-style: none;
+  margin: 0 auto;
+  padding: 1.05rem 1.75rem;
+  max-width: 1180px;
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0.75rem 1.5rem;
-  padding: 1.25rem 1.5rem 2rem;
-  color: rgba(255, 255, 255, 0.7);
+  gap: 0.65rem 1.75rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.mkt-ribbon li {
+  position: relative;
+}
+
+.mkt-ribbon li + li::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--mkt-water);
+  margin-right: 1.75rem;
+  vertical-align: middle;
+}
+
+.mkt-section {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 5.5rem 1.75rem 1rem;
+  scroll-margin-top: 5rem;
+}
+
+.mkt-section-dark {
+  max-width: none;
+  background: var(--mkt-night);
+  color: #f4f0e8;
+  padding: 5.5rem 0 4.5rem;
+  margin-top: 4rem;
+}
+
+.mkt-section-dark .mkt-section-intro,
+.mkt-section-dark .mkt-workflow {
+  max-width: 1180px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1.75rem;
+  padding-right: 1.75rem;
+}
+
+.mkt-section-intro {
+  max-width: 40rem;
+  margin-bottom: 3.25rem;
+}
+
+.mkt-section-intro h2,
+.mkt-chapter-copy h3,
+.mkt-workflow h3,
+.mkt-plan h3,
+.mkt-close h2 {
+  font-family: var(--font-display);
+  font-weight: 560;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+  margin: 0 0 0.85rem;
+}
+
+.mkt-section-intro h2 {
+  font-size: clamp(2rem, 3.4vw, 2.75rem);
+}
+
+.mkt-section-intro p,
+.mkt-chapter-copy p,
+.mkt-workflow p {
+  margin: 0;
+  color: var(--mkt-muted);
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.mkt-section-dark .mkt-section-intro p,
+.mkt-section-dark .mkt-workflow p {
+  color: rgba(244, 240, 232, 0.72);
+}
+
+.mkt-chapter {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 3.5rem;
+  align-items: center;
+  margin-bottom: 5.5rem;
+}
+
+.mkt-chapter-reverse {
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+}
+
+.mkt-chapter-reverse .mkt-chapter-copy {
+  order: 2;
+}
+
+.mkt-chapter-copy h3 {
+  font-size: clamp(1.7rem, 2.6vw, 2.2rem);
+}
+
+.mkt-points {
+  list-style: none;
+  margin: 1.35rem 0 0;
+  padding: 0;
+}
+
+.mkt-points li {
+  position: relative;
+  padding: 0.7rem 0 0.7rem 1.15rem;
+  border-top: 1px solid var(--mkt-line);
+  color: var(--mkt-ink);
+  font-size: 0.98rem;
+  line-height: 1.45;
+}
+
+.mkt-points li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 1.15rem;
+  width: 7px;
+  height: 1px;
+  background: var(--mkt-bronze);
+}
+
+.mkt-chapter-visual {
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--mkt-stone);
+  box-shadow: 0 30px 80px rgba(16, 33, 38, 0.12);
+}
+
+.mkt-photo {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.mkt-plan-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.mkt-workflow {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.5rem;
+}
+
+.mkt-workflow li {
+  padding-top: 1.1rem;
+  border-top: 1px solid rgba(56, 184, 208, 0.35);
+}
+
+.mkt-workflow span {
+  display: block;
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  color: var(--mkt-water);
+  margin-bottom: 0.85rem;
+}
+
+.mkt-workflow h3 {
+  font-size: 1.35rem;
+  color: #fff;
+}
+
+.mkt-plans {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.mkt-plan {
+  background: #fff;
+  border: 1px solid var(--mkt-line);
+  border-radius: 6px;
+  padding: 2rem 1.75rem 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.mkt-plan-featured {
+  background: var(--mkt-teal);
+  border-color: var(--mkt-teal);
+  color: #fff;
+}
+
+.mkt-plan-tag {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mkt-water);
+  font-weight: 600;
+}
+
+.mkt-price {
+  font-family: var(--font-display);
+  font-size: 2.6rem;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+.mkt-price span {
+  font-family: Outfit, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  margin-left: 0.35rem;
+  opacity: 0.65;
+}
+
+.mkt-plan-blurb {
+  margin: 0;
+  color: var(--mkt-muted);
+}
+
+.mkt-plan-featured .mkt-plan-blurb,
+.mkt-plan-featured .mkt-price span {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.mkt-plan ul {
+  margin: 0.4rem 0 1rem;
+  padding: 0;
+  list-style: none;
+  flex: 1;
+}
+
+.mkt-plan li {
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--mkt-line);
+  font-size: 0.95rem;
+}
+
+.mkt-plan-featured li {
+  border-top-color: rgba(255, 255, 255, 0.14);
+}
+
+.mkt-plan .mkt-btn {
+  align-self: flex-start;
+}
+
+.mkt-plan-featured .mkt-btn {
+  background: var(--mkt-water);
+  color: #06242c;
+}
+
+.mkt-close {
+  margin: 3rem 1.75rem 0;
+  padding: 4.5rem 1.75rem;
+  background:
+    linear-gradient(180deg, rgba(7, 17, 22, 0.35), rgba(7, 17, 22, 0.78)),
+    url("/marketing/hero-pool.jpg") center 70% / cover no-repeat;
+  color: #fff;
+  text-align: center;
+}
+
+.mkt-close h2 {
+  font-size: clamp(2rem, 4vw, 3rem);
+  max-width: 16ch;
+  margin: 0 auto 0.85rem;
+}
+
+.mkt-close p {
+  margin: 0 auto 1.6rem;
+  max-width: 32rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.mkt-close .mkt-hero-actions {
+  justify-content: center;
+}
+
+.mkt-footer {
+  background: var(--mkt-stone);
+  border-top: 1px solid var(--mkt-line);
+  padding: 2.25rem 0 1.75rem;
+  color: var(--mkt-muted);
   font-size: 0.9rem;
 }
 
-.marketing-footer nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
+.mkt-footer-inner {
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
 }
 
-.marketing-footer a:hover {
-  color: var(--white);
+.mkt-footer-brand {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  color: var(--mkt-ink);
 }
+
+.mkt-footer-brand strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 560;
+  color: var(--mkt-teal);
+}
+
+.mkt-footer-brand p {
+  margin: 0.2rem 0 0;
+  color: var(--mkt-muted);
+}
+
+.mkt-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.35rem;
+}
+
+.mkt-footer nav a:hover {
+  color: var(--mkt-ink);
+}
+
+.mkt-footer-note {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 1.75rem;
+  font-size: 0.78rem;
+}
+
+.mkt-doc {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+}
+
+@media (max-width: 900px) {
+  .mkt-chapter,
+  .mkt-chapter-reverse {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+    margin-bottom: 3.5rem;
+  }
+
+  .mkt-chapter-reverse .mkt-chapter-copy {
+    order: 0;
+  }
+
+  .mkt-workflow,
+  .mkt-plans {
+    grid-template-columns: 1fr;
+  }
+
+  .mkt-hero-copy h1 {
+    max-width: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .mkt-nav a:not(.mkt-nav-cta) {
+    display: none;
+  }
+
+  .mkt-header-inner,
+  .mkt-footer-inner,
+  .mkt-hero-copy,
+  .mkt-section,
+  .mkt-ribbon ul {
+    padding-left: 1.15rem;
+    padding-right: 1.15rem;
+  }
+
+  .mkt-section-dark .mkt-section-intro,
+  .mkt-section-dark .mkt-workflow {
+    padding-left: 1.15rem;
+    padding-right: 1.15rem;
+  }
+
+  .mkt-close {
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
+
