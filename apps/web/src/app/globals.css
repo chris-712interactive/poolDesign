@@ -292,6 +292,31 @@ textarea {
   gap: 1rem;
 }
 
+.first-job {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+  gap: 2rem;
+  align-items: start;
+}
+
+.first-job-kicker {
+  margin: 0 0 0.35rem;
+  text-transform: none;
+}
+
+.first-job-copy h1 {
+  margin: 0 0 0.65rem;
+}
+
+.first-job-copy p {
+  margin: 0 0 0.85rem;
+  max-width: 38rem;
+}
+
+.first-job-copy p:last-child {
+  margin-bottom: 0;
+}
+
 .grid-3 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -300,8 +325,10 @@ textarea {
 
 @media (max-width: 900px) {
   .grid-2,
-  .grid-3 {
+  .grid-3,
+  .first-job {
     grid-template-columns: 1fr;
+  }
   }
 }
 
@@ -2381,7 +2408,7 @@ textarea {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.25rem;
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
 }
 
 .mkt-plan {
@@ -2427,6 +2454,49 @@ textarea {
 .mkt-plan-blurb {
   margin: 0;
   color: var(--mkt-muted);
+}
+
+.mkt-plan-seats {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.15rem 0 0;
+  padding: 0.9rem 0;
+  border-top: 1px solid var(--mkt-line);
+  border-bottom: 1px solid var(--mkt-line);
+}
+
+.mkt-plan-seats > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  font-size: 0.92rem;
+}
+
+.mkt-plan-seats dt {
+  margin: 0;
+  color: var(--mkt-muted);
+  font-weight: 500;
+}
+
+.mkt-plan-seats dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
+.mkt-plan-featured .mkt-plan-seats {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.mkt-plan-featured .mkt-plan-seats dt {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.mkt-plans-note {
+  text-align: center;
+  color: var(--mkt-muted);
+  margin: 0 0 2rem;
 }
 
 .mkt-plan-featured .mkt-plan-blurb,

@@ -7,6 +7,7 @@ import { MarketingPlanGraphic } from "@/components/MarketingPlanGraphic";
 import {
   DESIGNER_SEAT_MONTHLY_CENTS,
   formatMoney,
+  INCLUDED_DESIGNER_SEATS,
   PLAN_MARKETING,
   PLAN_PRICING,
   TRIAL_DURATION_DAYS,
@@ -20,10 +21,19 @@ const CAPABILITIES = [
   "Branded proposals",
 ] as const;
 
-const PLAN_SEAT_HIGHLIGHTS = [
-  "1 designer license included",
-  `Additional designer licenses ${formatMoney(DESIGNER_SEAT_MONTHLY_CENTS)}/month each`,
-  "Unlimited admin and estimator seats",
+const PLAN_SEATS = [
+  {
+    label: "Designer licenses",
+    value: `${INCLUDED_DESIGNER_SEATS} included`,
+  },
+  {
+    label: "Additional designers",
+    value: `${formatMoney(DESIGNER_SEAT_MONTHLY_CENTS)}/month each`,
+  },
+  {
+    label: "Admin & estimator",
+    value: "Unlimited",
+  },
 ] as const;
 
 const CHAPTERS = [
@@ -232,16 +242,21 @@ export default async function HomePage() {
                 <span>/ month</span>
               </p>
               <p className="mkt-plan-blurb">{PLAN_MARKETING.sales.blurb}</p>
+              <dl className="mkt-plan-seats">
+                {PLAN_SEATS.map((row) => (
+                  <div key={row.label}>
+                    <dt>{row.label}</dt>
+                    <dd>{row.value}</dd>
+                  </div>
+                ))}
+              </dl>
               <ul>
                 {PLAN_MARKETING.sales.highlights.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
-                {PLAN_SEAT_HIGHLIGHTS.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
               </ul>
               <Link className="mkt-btn mkt-btn-quiet" href="/signup">
-                Start on Sales
+                Start free trial
               </Link>
             </article>
             <article className="mkt-plan mkt-plan-featured">
@@ -252,19 +267,28 @@ export default async function HomePage() {
                 <span>/ month</span>
               </p>
               <p className="mkt-plan-blurb">{PLAN_MARKETING.builder.blurb}</p>
+              <dl className="mkt-plan-seats">
+                {PLAN_SEATS.map((row) => (
+                  <div key={row.label}>
+                    <dt>{row.label}</dt>
+                    <dd>{row.value}</dd>
+                  </div>
+                ))}
+              </dl>
               <ul>
                 {PLAN_MARKETING.builder.highlights.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
-                {PLAN_SEAT_HIGHLIGHTS.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
               </ul>
               <Link className="mkt-btn" href="/signup">
-                Evaluate Builder
+                Start free trial
               </Link>
             </article>
           </div>
+          <p className="mkt-plans-note">
+            The trial is the full Builder product. No credit card. Choose Sales
+            or Builder when you subscribe.
+          </p>
         </section>
 
         <section className="mkt-close">

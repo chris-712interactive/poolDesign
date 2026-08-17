@@ -545,8 +545,9 @@ export function CompanyAdminClient({
             <form className="stack" onSubmit={(e) => void sendInvite(e)}>
               <h3 style={{ margin: 0 }}>Invite teammate</h3>
               <p className="muted" style={{ margin: 0 }}>
-                Creates an invite link and one-time temporary password. Share
-                both with the teammate.
+                {trialActive
+                  ? "Invite a designer during the trial — extra seats are free until you subscribe. Share the link and one-time password."
+                  : `Creates an invite link and one-time temporary password. Extra designer seats are ${formatMoney(DESIGNER_SEAT_MONTHLY_CENTS)}/month on your plan.`}
               </p>
               <div className="grid-2">
                 <div className="field">

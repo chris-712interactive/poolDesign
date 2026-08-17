@@ -94,8 +94,8 @@ export function SetupWizardClient({ companyName }: { companyName: string }) {
     >
       <h1>Set up {companyName}</h1>
       <p className="muted">
-        Company admins handle billing. Designers open CAD. You can do both,
-        or invite someone to design while you run the company.
+        Company admins handle billing. Designers open CAD. Extra designer seats
+        are free during the trial.
       </p>
 
       <div className="setup-choices" role="radiogroup" aria-label="Who will design">
@@ -107,8 +107,7 @@ export function SetupWizardClient({ companyName }: { companyName: string }) {
         >
           <strong>I&apos;ll design</strong>
           <span className="muted">
-            Keep company admin and add a designer seat on your account so you
-            can open CAD now.
+            Keep company admin and open CAD yourself.
           </span>
         </button>
         <button
@@ -119,7 +118,8 @@ export function SetupWizardClient({ companyName }: { companyName: string }) {
         >
           <strong>Invite a designer</strong>
           <span className="muted">
-            You stay on billing and company settings. They get CAD access.
+            You stay on billing and company settings. They get CAD — extra seats
+            are free until you subscribe.
           </span>
         </button>
         <button
@@ -130,7 +130,8 @@ export function SetupWizardClient({ companyName }: { companyName: string }) {
         >
           <strong>Both</strong>
           <span className="muted">
-            You design, and you invite a teammate who can design too.
+            You design, and you invite a teammate who can design too. Extra
+            seats are free during the trial.
           </span>
         </button>
       </div>

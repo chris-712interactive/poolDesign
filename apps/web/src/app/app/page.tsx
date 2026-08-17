@@ -1,6 +1,11 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { prisma } from "@pool-design/db";
-import { needsCompanySetup, type DesignLevel } from "@pool-design/shared";
+import {
+  isLocalTrialActive,
+  needsCompanySetup,
+  type DesignLevel,
+} from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
 import { CreateProjectForm } from "@/components/CreateProjectForm";
@@ -21,6 +26,8 @@ export default async function ProjectsPage() {
 
   const company = user.company!;
   const enabled = company.enabledDesignLevels.split(",") as DesignLevel[];
+  const trialActive = isLocalTrialActive(company);
+  const isAdmin = user.role === "company_admin";
 
   const projects = await prisma.project.findMany({
     where: { companyId: user.companyId },
@@ -31,33 +38,65 @@ export default async function ProjectsPage() {
     <div className="app-shell">
       <AppHeader user={user} />
       <main className="page stack">
-        <div className="panel grid-2">
-          <div>
-            <h1>{company.name}</h1>
-            <p className="muted">
-              Projects for designers and estimators. Choose a design level when
-              creating a job.
-            </p>
-          </div>
-          <CreateProjectForm enabledLevels={enabled} />
-        </div>
-
-        <div className="panel">
-          <h2>Projects</h2>
-          {projects.length === 0 ? (
-            <p className="muted">No projects yet. Create your first one.</p>
-          ) : (
-            <ProjectList
-              projects={projects.map((project) => ({
-                id: project.id,
-                name: project.name,
-                clientName: project.clientName,
-                address: project.address,
-                designLevel: project.designLevel as DesignLevel,
-              }))}
+        {projects.length === 0 ? (
+          <div className="panel first-job">
+            <div className="first-job-copy">
+              <p className="muted first-job-kicker">{company.name}</p>
+              <h1>Open the first job</h1>
+              <p>
+                Name the backyard and pick a design level. Next you will drop
+                the survey on the sheet — the same drawing drives 3D and
+                takeoff.
+              </p>
+              {isAdmin ? (
+                <p className="muted">
+                  Need a teammate on CAD?{" "}
+                  <Link href="/app/admin?section=team">Invite a designer</Link>
+                  {trialActive
+                    ? " Extra seats are free during the trial."
+                    : " Extra designer seats bill with your plan."}
+                </p>
+              ) : null}
+            </div>
+            <CreateProjectForm
+              enabledLevels={enabled}
+              heading="Job details"
+              submitLabel="Create and open"
             />
-          )}
-        </div>
+          </div>
+        ) : (
+          <>
+            <div className="panel grid-2">
+              <div>
+                <h1>{company.name}</h1>
+                <p className="muted">
+                  Projects for designers and estimators. Choose a design level
+                  when creating a job.
+                </p>
+                {isAdmin && trialActive ? (
+                  <p className="muted">
+                    <Link href="/app/admin?section=team">Invite a designer</Link>
+                    {" — extra seats are free during the trial."}
+                  </p>
+                ) : null}
+              </div>
+              <CreateProjectForm enabledLevels={enabled} />
+            </div>
+
+            <div className="panel">
+              <h2>Projects</h2>
+              <ProjectList
+                projects={projects.map((project) => ({
+                  id: project.id,
+                  name: project.name,
+                  clientName: project.clientName,
+                  address: project.address,
+                  designLevel: project.designLevel as DesignLevel,
+                }))}
+              />
+            </div>
+          </>
+        )}
       </main>
     </div>
   );

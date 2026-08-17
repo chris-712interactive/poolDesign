@@ -73,12 +73,16 @@ async function createProjectAction(formData: FormData) {
 
 export function CreateProjectForm({
   enabledLevels,
+  heading = "New project",
+  submitLabel = "Create project",
 }: {
   enabledLevels: DesignLevel[];
+  heading?: string;
+  submitLabel?: string;
 }) {
   return (
     <form action={createProjectAction} className="stack">
-      <h2>New project</h2>
+      <h2>{heading}</h2>
       <div className="field">
         <label htmlFor="name">Project name</label>
         <input id="name" name="name" required placeholder="Smith Residence Pool" />
@@ -102,7 +106,7 @@ export function CreateProjectForm({
         </select>
       </div>
       <button className="btn" type="submit">
-        Create project
+        {submitLabel}
       </button>
     </form>
   );
