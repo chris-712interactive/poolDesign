@@ -6,6 +6,7 @@ import {
   designerSeatCapacity,
   extraDesignerSeatsNeeded,
   isCompanyStaffRole,
+  isLocalTrialActive,
   userHasLicensedDesignerSeat,
 } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
@@ -59,13 +60,18 @@ export async function GET() {
     .map((m) => m.id);
 
   const paid = user.company?.designerSeatsPaid ?? 0;
-  const capacity = designerSeatCapacity(paid);
+  const trialActive = isLocalTrialActive(user.company);
+  const extraDesignerSeats = extraDesignerSeatsNeeded(designerIds.length);
+  const capacity = trialActive
+    ? Math.max(designerIds.length, INCLUDED_DESIGNER_SEATS)
+    : designerSeatCapacity(paid);
 
   return NextResponse.json({
+    trialActive,
     includedDesignerSeats: INCLUDED_DESIGNER_SEATS,
     paidDesignerSeats: paid,
     designerCapacity: capacity,
-    extraDesignerSeats: extraDesignerSeatsNeeded(designerIds.length),
+    extraDesignerSeats,
     seatMonthlyCents: DESIGNER_SEAT_MONTHLY_CENTS,
     members: members.map((member) => {
       const roles = member.roleGrants
@@ -81,6 +87,7 @@ export async function GET() {
           userId: member.id,
           designerUserIdsOldestFirst: designerIds,
           paidExtraSeats: paid,
+          trialActive,
         }),
       };
     }),

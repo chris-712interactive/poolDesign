@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@pool-design/db";
+import { extraDesignerSeatsNeeded } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import {
   appBaseUrl,
@@ -8,9 +9,13 @@ import {
   priceIdForPlan,
   stripeConfigured,
 } from "@/lib/stripe";
-import { retrieveSubscription } from "@/lib/designerSeats";
+import {
+  ensurePaidDesignerSeatQuantity,
+  retrieveSubscription,
+} from "@/lib/designerSeats";
+import { designerUserIdsOldestFirst } from "@/lib/roleGrants";
 
-/** Start Stripe Checkout for the current company. */
+/** Start Stripe Checkout for Sales/Builder, including extra designer seats. */
 export async function POST(request: Request) {
   const user = await getSessionUser();
   if (!user?.companyId || user.role !== "company_admin") {
@@ -41,6 +46,9 @@ export async function POST(request: Request) {
   if (!company) {
     return NextResponse.json({ error: "Company not found" }, { status: 404 });
   }
+
+  const designerIds = await designerUserIdsOldestFirst(company.id);
+  const extrasNeeded = extraDesignerSeatsNeeded(designerIds.length);
 
   const stripe = getStripe();
   let customerId = company.stripeCustomerId;
@@ -75,6 +83,11 @@ export async function POST(request: Request) {
     await stripe.subscriptions.update(subscription.id, {
       metadata: { companyId: company.id, planKey },
     });
+    await ensurePaidDesignerSeatQuantity(
+      company.id,
+      await retrieveSubscription(subscription.id),
+      extrasNeeded,
+    );
     return NextResponse.json({
       url: `${appBaseUrl()}/app/admin?section=billing`,
     });
@@ -84,10 +97,10 @@ export async function POST(request: Request) {
     { price: priceId, quantity: 1 },
   ];
   const designerPrice = designerSeatPriceId();
-  if (designerPrice && company.designerSeatsPaid > 0) {
+  if (designerPrice && extrasNeeded > 0) {
     lineItems.push({
       price: designerPrice,
-      quantity: company.designerSeatsPaid,
+      quantity: extrasNeeded,
     });
   }
 

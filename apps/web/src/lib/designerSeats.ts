@@ -51,3 +51,38 @@ export async function retrieveSubscription(
     expand: ["items.data.price"],
   });
 }
+
+/** Raise extra-seat quantity to match the team; never lower a prepaid quantity. */
+export async function ensurePaidDesignerSeatQuantity(
+  companyId: string,
+  subscription: Stripe.Subscription,
+  extrasNeeded: number,
+): Promise<Stripe.Subscription> {
+  const priceId = designerSeatPriceId();
+  if (!priceId || extrasNeeded <= 0) {
+    await syncDesignerSeatsFromSubscription(companyId, subscription);
+    return subscription;
+  }
+  const stripe = getStripe();
+  const existing = designerSeatItem(subscription);
+  const currentQty = existing?.quantity ?? 0;
+  if (existing && extrasNeeded > currentQty) {
+    await stripe.subscriptionItems.update(existing.id, {
+      quantity: extrasNeeded,
+      proration_behavior: "create_prorations",
+    });
+  } else if (!existing) {
+    await stripe.subscriptionItems.create({
+      subscription: subscription.id,
+      price: priceId,
+      quantity: extrasNeeded,
+      proration_behavior: "create_prorations",
+    });
+  } else {
+    await syncDesignerSeatsFromSubscription(companyId, subscription);
+    return subscription;
+  }
+  const updated = await retrieveSubscription(subscription.id);
+  await syncDesignerSeatsFromSubscription(companyId, updated);
+  return updated;
+}

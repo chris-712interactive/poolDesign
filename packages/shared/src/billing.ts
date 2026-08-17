@@ -1,6 +1,8 @@
 /**
  * Company billing: local no-card trial, then Stripe for paid Sales/Builder.
  * Stripe Checkout must never use trial_period_days — we own the trial clock.
+ * Extra designer seats are not billed during trial; they attach to Sales/Builder
+ * Checkout from the current designer count (one seat included).
  */
 
 import type { PlanKey, PlanTier } from "./entitlements";

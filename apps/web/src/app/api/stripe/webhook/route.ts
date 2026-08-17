@@ -94,6 +94,7 @@ export async function POST(request: Request) {
             : session.subscription.id;
         const subscription = await retrieveSubscription(subId);
         if (kind === "designer_seat") {
+          // Legacy seat-only Checkout. New extra seats attach to Sales/Builder.
           await syncDesignerSeatsFromSubscription(companyId, subscription);
           const userId = session.metadata?.userId;
           const roles = (session.metadata?.roles || "designer")

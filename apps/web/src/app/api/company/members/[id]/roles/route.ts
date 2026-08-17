@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@pool-design/db";
 import {
   DESIGNER_SEAT_MONTHLY_CENTS,
+  designerAssignmentNeedsPaidSeat,
   designerSeatWarning,
-  extraDesignerSeatsNeeded,
   isCompanyStaffRole,
+  isLocalTrialActive,
 } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { companyHasAppAccess } from "@/lib/subscription";
@@ -63,9 +64,13 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   if (addingDesigner) {
     const designerIds = await designerUserIdsOldestFirst(admin.companyId);
-    const extrasNeeded = extraDesignerSeatsNeeded(designerIds.length + 1);
-    const paid = admin.company?.designerSeatsPaid ?? 0;
-    if (extrasNeeded > paid) {
+    if (
+      designerAssignmentNeedsPaidSeat({
+        nextDesignerCount: designerIds.length + 1,
+        paidExtraSeats: admin.company?.designerSeatsPaid ?? 0,
+        trialActive: isLocalTrialActive(admin.company),
+      })
+    ) {
       return NextResponse.json(
         {
           requiresCheckout: true,

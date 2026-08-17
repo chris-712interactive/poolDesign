@@ -1,5 +1,6 @@
 import {
   canUseCad,
+  isLocalTrialActive,
   needsCompanySetup,
   userHasLicensedDesignerSeat,
 } from "@pool-design/shared";
@@ -30,5 +31,6 @@ export async function userHasLicensedCadAccess(
     userId: user.id,
     designerUserIdsOldestFirst: ids,
     paidExtraSeats: user.company.designerSeatsPaid,
+    trialActive: isLocalTrialActive(user.company),
   });
 }

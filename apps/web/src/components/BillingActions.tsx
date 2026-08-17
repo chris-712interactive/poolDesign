@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  DESIGNER_SEAT_MONTHLY_CENTS,
   formatMoney,
   PLAN_MARKETING,
   PLAN_PRICING,
@@ -14,6 +15,7 @@ type Props = {
   planKey: string;
   status: string;
   trialEndsAt?: string | Date | null;
+  extraDesignerSeats?: number;
 };
 
 export function BillingActions({
@@ -21,6 +23,7 @@ export function BillingActions({
   planKey,
   status,
   trialEndsAt,
+  extraDesignerSeats = 0,
 }: Props) {
   const [busy, setBusy] = useState<"checkout" | "portal" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +76,15 @@ export function BillingActions({
           </strong>{" "}
           Full Builder features are unlocked until then. No card on file — pick a
           plan when you are ready.
+        </p>
+      ) : null}
+      {converting ? (
+        <p className="muted" style={{ margin: 0 }}>
+          {extraDesignerSeats > 0
+            ? `Checkout includes ${extraDesignerSeats} extra designer license${
+                extraDesignerSeats === 1 ? "" : "s"
+              } at ${formatMoney(DESIGNER_SEAT_MONTHLY_CENTS)}/mo each. One designer seat is included with Sales and Builder.`
+            : `Sales and Builder include one designer seat. Extra seats are ${formatMoney(DESIGNER_SEAT_MONTHLY_CENTS)}/mo and are added at checkout if the team has more designers.`}
         </p>
       ) : null}
       <div className="grid-2">

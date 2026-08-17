@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   alsoDesignerFromGrants,
+  designerAssignmentNeedsPaidSeat,
   designerSeatCapacity,
   extraDesignerSeatsNeeded,
   primaryRoleFromGrants,
@@ -47,6 +48,42 @@ describe("designer seats", () => {
         userId: "c",
         designerUserIdsOldestFirst: ids,
         paidExtraSeats: 1,
+      }),
+      false,
+    );
+    assert.equal(
+      userHasLicensedDesignerSeat({
+        userId: "c",
+        designerUserIdsOldestFirst: ids,
+        paidExtraSeats: 0,
+        trialActive: true,
+      }),
+      true,
+    );
+  });
+
+  it("does not bill extra seats during an active trial", () => {
+    assert.equal(
+      designerAssignmentNeedsPaidSeat({
+        nextDesignerCount: 3,
+        paidExtraSeats: 0,
+        trialActive: true,
+      }),
+      false,
+    );
+    assert.equal(
+      designerAssignmentNeedsPaidSeat({
+        nextDesignerCount: 2,
+        paidExtraSeats: 0,
+        trialActive: false,
+      }),
+      true,
+    );
+    assert.equal(
+      designerAssignmentNeedsPaidSeat({
+        nextDesignerCount: 2,
+        paidExtraSeats: 1,
+        trialActive: false,
       }),
       false,
     );

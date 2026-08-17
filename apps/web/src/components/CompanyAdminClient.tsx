@@ -77,6 +77,7 @@ type Props = {
     hasCustomer: boolean;
     stripeCustomerId: string | null;
     trialEndsAt: string | null;
+    extraDesignerSeats: number;
   };
   rootDomain: string;
   initialSection?: AdminSection;
@@ -116,6 +117,12 @@ export function CompanyAdminClient({
   const [seatBusy, setSeatBusy] = useState(false);
   const [designerCapacity, setDesignerCapacity] = useState(1);
   const [paidDesignerSeats, setPaidDesignerSeats] = useState(0);
+  const [extraDesignerSeats, setExtraDesignerSeats] = useState(
+    billing.extraDesignerSeats,
+  );
+  const [trialActive, setTrialActive] = useState(
+    billing.status === "trialing",
+  );
 
   function goTo(next: AdminSection) {
     setSection(next);
@@ -145,6 +152,8 @@ export function CompanyAdminClient({
         members?: Member[];
         designerCapacity?: number;
         paidDesignerSeats?: number;
+        extraDesignerSeats?: number;
+        trialActive?: boolean;
       };
       if (json.members) setMembers(json.members);
       if (typeof json.designerCapacity === "number") {
@@ -152,6 +161,12 @@ export function CompanyAdminClient({
       }
       if (typeof json.paidDesignerSeats === "number") {
         setPaidDesignerSeats(json.paidDesignerSeats);
+      }
+      if (typeof json.extraDesignerSeats === "number") {
+        setExtraDesignerSeats(json.extraDesignerSeats);
+      }
+      if (typeof json.trialActive === "boolean") {
+        setTrialActive(json.trialActive);
       }
     } catch {
       setTeamMsg("Could not load the team.");
@@ -224,7 +239,14 @@ export function CompanyAdminClient({
         url?: string;
         error?: string;
         ok?: boolean;
+        requiresPlanCheckout?: boolean;
       };
+      if (res.status === 409 && json.requiresPlanCheckout) {
+        setSeatPrompt(null);
+        goTo("billing");
+        setTeamMsg(json.error || "Subscribe to Sales or Builder first.");
+        return;
+      }
       if (!res.ok) throw new Error(json.error || "Checkout failed");
       if (json.url) {
         window.location.href = json.url;
@@ -448,13 +470,16 @@ export function CompanyAdminClient({
             <div className="stack">
               <h3 style={{ margin: 0 }}>Permissions</h3>
               <p className="muted" style={{ margin: 0 }}>
-                Assign every role a person needs. Admin and estimator are
-                included. Extra designer seats are {formatMoney(4000)}/month on
-                Stripe and stay valid only while that license renews.
+                {trialActive
+                  ? `During the trial, every designer can use CAD. Sales and Builder include one designer seat; extras are ${formatMoney(DESIGNER_SEAT_MONTHLY_CENTS)}/month and are added when you subscribe.`
+                  : `Assign every role a person needs. Admin and estimator are included. Extra designer seats are ${formatMoney(DESIGNER_SEAT_MONTHLY_CENTS)}/month on your Sales or Builder subscription and stay valid only while that license renews.`}
               </p>
               <p className="muted" style={{ margin: 0 }}>
-                Designer seats: {designerCapacity} available ({paidDesignerSeats}{" "}
-                paid extra).
+                {trialActive
+                  ? extraDesignerSeats > 0
+                    ? `Trial: ${designerCapacity} designer${designerCapacity === 1 ? "" : "s"} licensed. Checkout will add ${extraDesignerSeats} extra seat${extraDesignerSeats === 1 ? "" : "s"}.`
+                    : `Trial: ${designerCapacity} designer${designerCapacity === 1 ? "" : "s"} licensed. No extra seats yet.`
+                  : `Designer seats: ${designerCapacity} available (${paidDesignerSeats} paid extra).`}
               </p>
               {teamMsg ? <p className="muted">{teamMsg}</p> : null}
               <div className="proposal-table-wrap">
@@ -675,6 +700,7 @@ export function CompanyAdminClient({
               planKey={billing.planKey}
               status={billing.status}
               trialEndsAt={billing.trialEndsAt}
+              extraDesignerSeats={extraDesignerSeats}
             />
             <div className="muted">
               Stripe customer: {billing.stripeCustomerId || "Not connected yet"}
@@ -704,7 +730,7 @@ export function CompanyAdminClient({
                 disabled={seatBusy}
                 onClick={() => void confirmPaidSeat()}
               >
-                {seatBusy ? "Continuing…" : "Continue to checkout"}
+                {seatBusy ? "Continuing…" : "Add paid license"}
               </button>
               <button
                 type="button"

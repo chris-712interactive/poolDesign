@@ -3,8 +3,9 @@ import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
 import { CompanyAdminClient } from "@/components/CompanyAdminClient";
 import { parseAdminSection } from "@/lib/adminSections";
+import { designerUserIdsOldestFirst } from "@/lib/roleGrants";
 import { companyHasAppAccess } from "@/lib/subscription";
-import { needsCompanySetup } from "@pool-design/shared";
+import { extraDesignerSeatsNeeded, needsCompanySetup } from "@pool-design/shared";
 
 export default async function CompanyAdminPage({
   searchParams,
@@ -19,6 +20,9 @@ export default async function CompanyAdminPage({
 
   const { section, seat } = await searchParams;
   const company = user.company;
+  const extraDesignerSeats = extraDesignerSeatsNeeded(
+    (await designerUserIdsOldestFirst(company.id)).length,
+  );
   const rootDomain =
     process.env.NEXT_PUBLIC_ROOT_DOMAIN || "localhost:3000";
 
@@ -52,6 +56,7 @@ export default async function CompanyAdminPage({
             hasCustomer: Boolean(company.stripeCustomerId),
             stripeCustomerId: company.stripeCustomerId,
             trialEndsAt: company.trialEndsAt?.toISOString() ?? null,
+            extraDesignerSeats,
           }}
           rootDomain={rootDomain}
         />
