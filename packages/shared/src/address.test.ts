@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   formatAddressLine,
+  formatProjectMetaLine,
   locationLabel,
   normalizeAddress,
   rollupJobMarkets,
@@ -49,5 +50,13 @@ describe("address", () => {
     assert.equal(report.byState[0]?.cities[0]?.city, "Tampa");
     assert.equal(report.byState[0]?.cities[0]?.count, 2);
     assert.equal(locationLabel({ city: "Tampa", state: "FL" }), "Tampa, FL");
+    assert.equal(
+      formatProjectMetaLine({
+        clientName: "Chris Kendig",
+        phone: "407-555-0142",
+        address: "Tampa, FL",
+      }),
+      "Chris Kendig · 407-555-0142 · Tampa, FL",
+    );
   });
 });

@@ -42,6 +42,7 @@ export async function GET(_request: Request, context: RouteContext) {
     project: {
       name: share.project.name,
       clientName: share.project.clientName,
+      phone: share.project.phone,
       address: share.project.address,
       designLevel: share.project.designLevel,
       unitSystem: share.project.unitSystem,

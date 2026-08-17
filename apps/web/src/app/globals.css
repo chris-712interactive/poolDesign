@@ -910,6 +910,12 @@ textarea {
   flex-shrink: 0;
 }
 
+.project-row-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
 .milestone {
   display: grid;
   grid-template-columns: 28px 1fr auto;

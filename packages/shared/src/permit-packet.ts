@@ -25,6 +25,7 @@ import {
 import { computePoolHydraulics } from "./pool-hydraulics";
 import { isPadEquipment } from "./plumbing-route";
 import { outlineBounds } from "./spa-defaults";
+import { formatProjectMetaLine } from "./address";
 import { formatLength, mmToFeet, MM_PER_FOOT, type UnitSystem } from "./units";
 
 export type PermitPacketBodySummary = {
@@ -630,6 +631,7 @@ export type PermitDocMeta = {
   companyName: string;
   projectName: string;
   clientName?: string | null;
+  phone?: string | null;
   address?: string | null;
 };
 
@@ -696,7 +698,11 @@ export function buildPermitPacketHtml(
         <h1>Site plan — sheet 1 of 3</h1>
         <p style="margin:0"><strong>${esc(meta.companyName)}</strong></p>
         <p style="margin:0.15rem 0 0">${esc(meta.projectName)}</p>
-        <p class="muted" style="margin:0.15rem 0 0">${[meta.clientName, meta.address].filter(Boolean).map(String).map(esc).join(" · ") || "—"}</p>
+        <p class="muted" style="margin:0.15rem 0 0">${esc(formatProjectMetaLine({
+          clientName: meta.clientName,
+          phone: meta.phone,
+          address: meta.address,
+        }) || "—")}</p>
       </div>
       <div class="stamp">DRAFT<br/>NOT FOR PERMIT</div>
     </div>

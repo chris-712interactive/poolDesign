@@ -15,6 +15,7 @@ type Company = {
 type Project = {
   name: string;
   clientName: string | null;
+  phone: string | null;
   address: string | null;
 };
 
@@ -102,9 +103,9 @@ export function PublicProposalClient({
               {liveActive ? "Live design session" : "Residential proposal"}
             </p>
             <h1>{project.name}</h1>
-            {(project.clientName || project.address) && (
+            {(project.clientName || project.phone || project.address) && (
               <p className="proposal-meta">
-                {[project.clientName, project.address]
+                {[project.clientName, project.phone, project.address]
                   .filter(Boolean)
                   .join(" · ")}
               </p>

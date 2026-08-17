@@ -107,6 +107,17 @@ export function formatAddressLine(parts: AddressParts): string | null {
   return line || null;
 }
 
+export function formatProjectMetaLine(parts: {
+  clientName?: string | null;
+  phone?: string | null;
+  address?: string | null;
+}): string | null {
+  const line = [clean(parts.clientName), clean(parts.phone), clean(parts.address)]
+    .filter(Boolean)
+    .join(" · ");
+  return line || null;
+}
+
 export function locationLabel(parts: {
   city?: string | null;
   state?: string | null;

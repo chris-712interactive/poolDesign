@@ -3,6 +3,7 @@
  */
 
 import { formatMoney } from "./catalog";
+import { formatProjectMetaLine } from "./address";
 import { formatQuantity, type TakeoffResult } from "./takeoff";
 
 export type QuoteDocMeta = {
@@ -11,6 +12,7 @@ export type QuoteDocMeta = {
   companyRegion?: string | null;
   projectName: string;
   clientName?: string | null;
+  phone?: string | null;
   address?: string | null;
   generatedAt?: string;
   planLabel?: string;
@@ -125,7 +127,11 @@ export function buildQuoteHtml(
     </header>
     <h1>${esc(meta.projectName)}</h1>
     <p class="muted">
-      ${[meta.clientName, meta.address].filter(Boolean).map((s) => esc(String(s))).join(" · ") || "—"}
+      ${esc(formatProjectMetaLine({
+        clientName: meta.clientName,
+        phone: meta.phone,
+        address: meta.address,
+      }) || "—")}
     </p>
     <table>
       <thead>

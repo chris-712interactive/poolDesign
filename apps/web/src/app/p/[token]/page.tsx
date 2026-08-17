@@ -19,6 +19,7 @@ async function loadShare(token: string) {
         select: {
           name: true,
           clientName: true,
+          phone: true,
           address: true,
           company: {
             select: {
@@ -90,6 +91,7 @@ export default async function PublicProposalPage({ params }: PageProps) {
       project={{
         name: project.name,
         clientName: project.clientName,
+        phone: project.phone,
         address: project.address,
       }}
       initialHasPreview={false}

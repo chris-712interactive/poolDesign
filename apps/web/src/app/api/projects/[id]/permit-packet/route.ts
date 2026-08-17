@@ -34,6 +34,7 @@ export async function GET(
       companyName: project.company.name,
       projectName: project.name,
       clientName: project.clientName,
+      phone: project.phone,
       address: project.address,
     },
     packet,

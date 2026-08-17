@@ -20,6 +20,7 @@ export async function createProjectAction(formData: FormData) {
 
   const name = String(formData.get("name") || "").trim();
   const clientName = String(formData.get("clientName") || "").trim() || null;
+  const phone = String(formData.get("phone") || "").trim() || null;
   const designLevel = String(
     formData.get("designLevel") || "residential",
   ) as DesignLevel;
@@ -52,6 +53,7 @@ export async function createProjectAction(formData: FormData) {
       companyId: user.companyId,
       name,
       clientName,
+      phone,
       address: formatAddressLine(site),
       street: site.street,
       city: site.city,

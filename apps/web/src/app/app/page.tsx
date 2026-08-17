@@ -98,6 +98,7 @@ export default async function ProjectsPage() {
                   id: project.id,
                   name: project.name,
                   clientName: project.clientName,
+                  phone: project.phone,
                   address: project.address,
                   city: project.city,
                   state: project.state,

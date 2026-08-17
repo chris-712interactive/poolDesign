@@ -154,6 +154,7 @@ async function main() {
 
   const site = {
     clientName: "Chris Kendig",
+    phone: "407-555-0142",
     address: "123 Palm Ave, Tampa, FL 33602",
     street: "123 Palm Ave",
     city: "Tampa",

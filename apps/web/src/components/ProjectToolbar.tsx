@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type {
   DesignDocument,
@@ -246,6 +247,12 @@ export function ProjectToolbar({
           <div className="project-toolbar-title">
             <strong>{projectName}</strong>
             <span className="badge">{DESIGN_LEVEL_LABELS[designLevel]}</span>
+            <Link
+              className="btn secondary"
+              href={`/app/projects/${projectId}/details`}
+            >
+              Details
+            </Link>
           </div>
         </div>
 

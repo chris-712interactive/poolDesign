@@ -35,6 +35,7 @@ export async function GET(
       companyRegion: project.company.region,
       projectName: project.name,
       clientName: project.clientName,
+      phone: project.phone,
       address: project.address,
       planLabel: planDisplayName(project.company.planKey),
     },

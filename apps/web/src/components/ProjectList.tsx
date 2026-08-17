@@ -9,6 +9,7 @@ type ProjectRow = {
   id: string;
   name: string;
   clientName: string | null;
+  phone: string | null;
   address: string | null;
   city: string | null;
   state: string | null;
@@ -52,21 +53,34 @@ export function ProjectList({ projects }: { projects: ProjectRow[] }) {
               </span>
             </div>
             <div className="muted">
-              {project.clientName || "No client"} ·{" "}
-              {project.address ||
-                (project.city || project.state
-                  ? [project.city, project.state].filter(Boolean).join(", ")
-                  : "No job site")}
+              {[
+                project.clientName,
+                project.phone,
+                project.address ||
+                  (project.city || project.state
+                    ? [project.city, project.state].filter(Boolean).join(", ")
+                    : null),
+              ]
+                .filter(Boolean)
+                .join(" · ") || "No contact or job site yet"}
             </div>
           </Link>
-          <button
-            type="button"
-            className="btn danger"
-            disabled={busyId === project.id}
-            onClick={() => void remove(project)}
-          >
-            {busyId === project.id ? "Deleting…" : "Delete"}
-          </button>
+          <div className="project-row-actions">
+            <Link
+              href={`/app/projects/${project.id}/details`}
+              className="btn secondary"
+            >
+              Details
+            </Link>
+            <button
+              type="button"
+              className="btn danger"
+              disabled={busyId === project.id}
+              onClick={() => void remove(project)}
+            >
+              {busyId === project.id ? "Deleting…" : "Delete"}
+            </button>
+          </div>
         </div>
       ))}
     </div>

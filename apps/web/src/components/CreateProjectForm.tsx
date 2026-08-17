@@ -38,9 +38,26 @@ export function CreateProjectForm({
           placeholder="Smith Residence Pool"
         />
       </div>
-      <div className="field">
-        <label htmlFor="clientName">Client</label>
-        <input id="clientName" name="clientName" placeholder="Client name" />
+      <div className="grid-2">
+        <div className="field">
+          <label htmlFor="clientName">Contact name</label>
+          <input
+            id="clientName"
+            name="clientName"
+            placeholder="Who to call on site"
+            autoComplete="name"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="phone">Phone</label>
+          <input
+            id="phone"
+            name="phone"
+            type="tel"
+            placeholder="407-555-0142"
+            autoComplete="tel"
+          />
+        </div>
       </div>
       <div>
         <p className="muted" style={{ margin: "0 0 0.5rem" }}>
