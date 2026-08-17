@@ -109,6 +109,89 @@ textarea {
   padding: 1.5rem;
 }
 
+.admin-layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  position: sticky;
+  top: 1rem;
+}
+
+.admin-nav-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.admin-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.admin-nav-item {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.admin-nav-item:hover {
+  background: rgba(31, 138, 112, 0.08);
+}
+
+.admin-nav-item.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.admin-nav-item strong {
+  font-size: 0.95rem;
+}
+
+.admin-nav-item .muted {
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.admin-pane {
+  min-height: 24rem;
+}
+
+@media (max-width: 900px) {
+  .admin-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-nav {
+    position: static;
+  }
+
+  .admin-nav-list {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .admin-nav-item {
+    min-width: 10.5rem;
+  }
+}
+
 .setup-choices {
   display: grid;
   gap: 0.7rem;

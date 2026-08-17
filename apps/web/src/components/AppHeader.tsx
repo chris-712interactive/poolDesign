@@ -66,7 +66,7 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
           {trialDays === 0
             ? "Your trial ends today."
             : `${trialDays} day${trialDays === 1 ? "" : "s"} left in your trial.`}{" "}
-          <Link href="/app/admin">Choose Sales or Builder</Link>
+          <Link href="/app/admin?section=billing">Choose Sales or Builder</Link>
         </div>
       ) : null}
     </div>

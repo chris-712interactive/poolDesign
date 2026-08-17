@@ -1,18 +1,22 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
-import { CompanyAdminClient } from "@/components/CompanyAdminClient";
+import { CompanyAdminClient, parseAdminSection } from "@/components/CompanyAdminClient";
 import { companyHasAppAccess } from "@/lib/subscription";
 import { needsCompanySetup } from "@pool-design/shared";
 
-export default async function CompanyAdminPage() {
+export default async function CompanyAdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ section?: string }>;
+}) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
   if (user.role !== "company_admin") redirect("/app");
   if (!user.company) redirect("/login");
   if (needsCompanySetup(user)) redirect("/app/setup");
 
-  // Admins may always reach billing to renew; other admin tools still load.
+  const { section } = await searchParams;
   const company = user.company;
   const rootDomain =
     process.env.NEXT_PUBLIC_ROOT_DOMAIN || "localhost:3000";
@@ -31,6 +35,7 @@ export default async function CompanyAdminPage() {
         ) : null}
         <CompanyAdminClient
           alsoDesigner={user.alsoDesigner}
+          initialSection={parseAdminSection(section)}
           initialProfile={{
             name: company.name,
             logoUrl: company.logoUrl,
