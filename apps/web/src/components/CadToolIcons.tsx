@@ -415,7 +415,8 @@ export const TOOL_META: {
     label: "Measure",
     icon: (
       <Svg>
-        <path d="M4 18L18 4M8 18h.01M12 14h.01M16 10h.01" />
+        <path d="M4.5 16.5 15 6l4 4-10.5 10.5z" />
+        <path d="m7.2 13.8 1.5-1.5M9.9 11.1 11 10M12.6 8.4l1.5-1.5" />
       </Svg>
     ),
   },
