@@ -74,6 +74,14 @@ export function formatLength(mm: number, unitSystem: UnitSystem): string {
   return `${sign}${feet}'-${inchPart}"`;
 }
 
+/** Format plan area from canonical square millimeters. */
+export function formatArea(mm2: number, unitSystem: UnitSystem): string {
+  if (unitSystem === "metric") {
+    return `${(mm2 / 1_000_000).toFixed(2)} m²`;
+  }
+  return `${(mm2 / 92903.04).toFixed(1)} ft²`;
+}
+
 /** Parse a mixed-number inch token: 8, 8.5, 8 1/2, 1/2 */
 function parseInchToken(token: string): number | null {
   const t = token.trim();

@@ -190,6 +190,7 @@ import {
   type WaterBodyKind,
 } from "@pool-design/shared";
 import { EstimatePanel } from "@/components/EstimatePanel";
+import { MeasurementsPanel } from "@/components/MeasurementsPanel";
 import { GradeWalkPanel } from "@/components/GradeWalkPanel";
 import { ProjectToolbar } from "@/components/ProjectToolbar";
 import { CadScene3DDynamic } from "@/components/CadScene3DDynamic";
@@ -241,7 +242,7 @@ import {
 import { SurveyUnderlayPanel } from "@/components/SurveyUnderlayPanel";
 import { ImportSurveyPrompt } from "@/components/ImportSurveyPrompt";
 
-type WorkspaceView = "design" | "estimate";
+type WorkspaceView = "design" | "estimate" | "measurements";
 type DesignMode = "2d" | "3d";
 type SideTab = "tools" | "properties" | "layers";
 type Tool = ToolId;
@@ -3719,6 +3720,8 @@ export function CadWorkspace({
           catalog={catalog}
           entitlements={planEntitlements}
         />
+      ) : view === "measurements" ? (
+        <MeasurementsPanel design={design} unitSystem={unitSystem} />
       ) : (
         <>
           {surveyPromptOpen ? (

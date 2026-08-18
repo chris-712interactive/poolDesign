@@ -480,6 +480,38 @@ textarea {
   vertical-align: top;
 }
 
+.measurements-panel {
+  max-width: 52rem;
+}
+
+.measurements-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.measurements-panel-head h1 {
+  margin-bottom: 0.35rem;
+}
+
+.measurements-group h2 {
+  margin: 0.35rem 0 0.15rem;
+  font-size: 1.05rem;
+}
+
+.measurements-table {
+  font-size: 0.9rem;
+}
+
+.measurements-table th:nth-child(2),
+.measurements-qty {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-weight: 650;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
