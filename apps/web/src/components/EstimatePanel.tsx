@@ -10,6 +10,7 @@ import {
   type CatalogUnit,
   type DesignDocument,
   type EstimateCustomLine,
+  type EstimateRecipe,
   type PlanEntitlements,
   type UnitSystem,
 } from "@pool-design/shared";
@@ -21,6 +22,7 @@ type Props = {
   onDesignChange: (next: DesignDocument) => void;
   /** Optional company price-book catalog */
   catalog?: CatalogItem[];
+  estimateRecipe?: EstimateRecipe | null;
   entitlements?: PlanEntitlements;
 };
 
@@ -72,11 +74,12 @@ export function EstimatePanel({
   unitSystem,
   onDesignChange,
   catalog,
+  estimateRecipe,
   entitlements,
 }: Props) {
   const takeoff = useMemo(
-    () => buildTakeoff(design, unitSystem, catalog),
-    [design, unitSystem, catalog],
+    () => buildTakeoff(design, unitSystem, catalog, estimateRecipe),
+    [design, unitSystem, catalog, estimateRecipe],
   );
   const [milestoneState, setMilestoneState] = useState<
     "idle" | "saving" | "saved" | "error"
@@ -218,8 +221,12 @@ export function EstimatePanel({
         <div>
           <h2 style={{ margin: 0 }}>Material list & estimate</h2>
           <p className="muted" style={{ margin: "0.35rem 0 0" }}>
-            Construction takeoff from the design. Furniture is layout-only and
-            not billed. Remove or add lines as needed.
+            Construction takeoff from the design
+            {estimateRecipe
+              ? " using your company estimate recipe"
+              : ""}
+            . Furniture is layout-only and not billed. Remove or add lines as
+            needed.
           </p>
         </div>
         <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>

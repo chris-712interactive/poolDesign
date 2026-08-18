@@ -5,7 +5,7 @@ import { CompanyAdminClient } from "@/components/CompanyAdminClient";
 import { parseAdminSection } from "@/lib/adminSections";
 import { designerUserIdsOldestFirst } from "@/lib/roleGrants";
 import { companyHasAppAccess } from "@/lib/subscription";
-import { extraDesignerSeatsNeeded, needsCompanySetup } from "@pool-design/shared";
+import { extraDesignerSeatsNeeded, needsCompanySetup, companyHasEntitlement } from "@pool-design/shared";
 
 export default async function CompanyAdminPage({
   searchParams,
@@ -63,6 +63,7 @@ export default async function CompanyAdminPage({
             trialEndsAt: company.trialEndsAt?.toISOString() ?? null,
             extraDesignerSeats,
           }}
+          canEditRecipe={companyHasEntitlement(company, "estimateRecipe")}
           rootDomain={rootDomain}
         />
       </main>

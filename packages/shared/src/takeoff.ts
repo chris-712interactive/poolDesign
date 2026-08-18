@@ -1,4 +1,8 @@
 import { catalogForLevel, type CatalogItem, type CatalogUnit } from "./catalog";
+import {
+  applyEstimateRecipe,
+  type EstimateRecipe,
+} from "./estimate-recipe";
 import type { DesignDocument, PointMm, PoolBody } from "./design-model";
 import {
   approximateIntersectionAreaMm2,
@@ -108,10 +112,16 @@ export function buildTakeoff(
   design: DesignDocument,
   unitSystem: UnitSystem = design.unitSystem,
   catalog: CatalogItem[] = catalogForLevel(design.designLevel),
+  recipe?: EstimateRecipe | null,
 ): TakeoffResult {
   const byId = new Map(catalog.map((c) => [c.id, c]));
   const lines: TakeoffLine[] = [];
+  const useRecipe = Boolean(recipe?.lines.some((l) => l.enabled));
+  if (useRecipe && recipe) {
+    lines.push(...applyEstimateRecipe(design, recipe, catalog, unitSystem));
+  }
 
+  if (!useRecipe) {
   const pools = design.poolBodies.filter((p) => (p.kind ?? "pool") !== "spa");
   const spas = design.poolBodies.filter((p) => (p.kind ?? "pool") === "spa");
   const spaInsides: PointMm[][] = spas.map((p) =>
@@ -554,6 +564,16 @@ export function buildTakeoff(
     mm2ToSf(sunshelfAreaMm2) * 0.15;
   push("labor_install", roundQty(laborHrs, 1), "hr", "Estimated install hours");
 
+  if (bubblerLedCount > 0) {
+    push(
+      "bubbler_led",
+      bubblerLedCount,
+      "ea",
+      "Optional LED under bubbler fountain",
+    );
+  }
+  }
+
   // Group placed library objects (furniture is layout-only — not sold/billed).
   const objectCounts = new Map<string, number>();
   for (const obj of design.objects ?? []) {
@@ -582,16 +602,6 @@ export function buildTakeoff(
       note,
       lineKey: takeoffLineKey(catalogItemId, note),
     });
-  }
-
-  // Optional niche LEDs under bubbler fountains.
-  if (bubblerLedCount > 0) {
-    push(
-      "bubbler_led",
-      bubblerLedCount,
-      "ea",
-      "Optional LED under bubbler fountain",
-    );
   }
 
   const removedKeys = new Set(design.estimate?.removedLineKeys ?? []);

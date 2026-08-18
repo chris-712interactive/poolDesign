@@ -15,6 +15,8 @@ export type PlanEntitlements = {
   pdfQuote: boolean;
   /** CSV takeoff export for estimators */
   csvTakeoff: boolean;
+  /** Company estimate recipe: bind prices to plan quantities */
+  estimateRecipe: boolean;
   /** Draft (non-stamped) permit plan packet */
   permitPacket: boolean;
   /** Import AR / phone grade-walk samples into the design */
@@ -38,6 +40,7 @@ export const ENTITLEMENTS_BY_TIER: Record<PlanTier, PlanEntitlements> = {
     liveClientSession: true,
     pdfQuote: false,
     csvTakeoff: false,
+    estimateRecipe: false,
     permitPacket: false,
     arGradeImport: false,
     hqExportUnlimited: false,
@@ -46,6 +49,7 @@ export const ENTITLEMENTS_BY_TIER: Record<PlanTier, PlanEntitlements> = {
     liveClientSession: true,
     pdfQuote: true,
     csvTakeoff: true,
+    estimateRecipe: true,
     permitPacket: true,
     arGradeImport: true,
     hqExportUnlimited: true,

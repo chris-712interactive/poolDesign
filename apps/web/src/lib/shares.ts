@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { catalogForLevel, type CatalogItem } from "@pool-design/shared";
+import { catalogForLevel, parseEstimateRecipe, type CatalogItem } from "@pool-design/shared";
 import type { DesignLevel } from "@pool-design/shared";
 import { prisma } from "@pool-design/db";
 
@@ -26,6 +26,14 @@ export async function catalogWithCompanyPrices(
     const cents = map.get(item.id);
     return cents != null ? { ...item, unitPriceCents: cents } : item;
   });
+}
+
+export async function loadCompanyEstimateRecipe(companyId: string) {
+  const row = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { estimateRecipeJson: true },
+  });
+  return parseEstimateRecipe(row?.estimateRecipeJson);
 }
 
 export async function completeMilestone(

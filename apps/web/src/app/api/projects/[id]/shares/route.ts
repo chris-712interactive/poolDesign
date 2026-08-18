@@ -12,6 +12,7 @@ import { appBaseUrl } from "@/lib/app-url";
 import {
   catalogWithCompanyPrices,
   completeMilestone,
+  loadCompanyEstimateRecipe,
   newShareToken,
 } from "@/lib/shares";
 
@@ -95,7 +96,8 @@ export async function POST(request: Request, context: RouteContext) {
       user.companyId,
       project.designLevel as DesignLevel,
     );
-    const takeoff = buildTakeoff(design, project.unitSystem, catalog);
+    const recipe = await loadCompanyEstimateRecipe(user.companyId);
+    const takeoff = buildTakeoff(design, project.unitSystem, catalog, recipe);
     estimateSnapshotJson = JSON.stringify(takeoff);
   }
 

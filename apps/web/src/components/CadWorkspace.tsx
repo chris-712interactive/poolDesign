@@ -165,6 +165,7 @@ import {
   type BuildingOpeningKind,
   type DepthTransition,
   type CatalogItem,
+  type EstimateRecipe,
   type DesignDocument,
   type DesignLevel,
   type FenceGate,
@@ -364,6 +365,7 @@ type Props = {
   unitSystem: UnitSystem;
   initialDesign: DesignDocument;
   catalog?: CatalogItem[];
+  estimateRecipe?: EstimateRecipe | null;
   entitlements?: PlanEntitlements;
   /** First open after creating a project — ask to import a survey underlay. */
   promptSurveyImport?: boolean;
@@ -493,6 +495,7 @@ export function CadWorkspace({
   unitSystem,
   initialDesign,
   catalog,
+  estimateRecipe,
   entitlements,
   promptSurveyImport = false,
 }: Props) {
@@ -500,6 +503,7 @@ export function CadWorkspace({
     liveClientSession: true,
     pdfQuote: true,
     csvTakeoff: true,
+    estimateRecipe: true,
     permitPacket: true,
     arGradeImport: true,
     hqExportUnlimited: true,
@@ -3718,6 +3722,7 @@ export function CadWorkspace({
           unitSystem={unitSystem}
           onDesignChange={commitDesign}
           catalog={catalog}
+          estimateRecipe={estimateRecipe}
           entitlements={planEntitlements}
         />
       ) : view === "measurements" ? (

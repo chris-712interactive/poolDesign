@@ -9,7 +9,7 @@ import {
 } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { companyHasAppAccess } from "@/lib/subscription";
-import { catalogWithCompanyPrices } from "@/lib/shares";
+import { catalogWithCompanyPrices, loadCompanyEstimateRecipe } from "@/lib/shares";
 
 type RouteContext = { params: Promise<{ id: string; shareId: string }> };
 
@@ -109,7 +109,8 @@ export async function PATCH(request: Request, context: RouteContext) {
         user.companyId,
         project.designLevel as DesignLevel,
       );
-      const takeoff = buildTakeoff(design, project.unitSystem, catalog);
+      const recipe = await loadCompanyEstimateRecipe(user.companyId);
+      const takeoff = buildTakeoff(design, project.unitSystem, catalog, recipe);
       data.estimateSnapshotJson = JSON.stringify(takeoff);
     }
   }

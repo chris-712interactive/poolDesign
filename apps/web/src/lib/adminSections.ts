@@ -3,6 +3,7 @@ export const ADMIN_SECTIONS = [
   "team",
   "markets",
   "prices",
+  "recipe",
   "billing",
 ] as const;
 

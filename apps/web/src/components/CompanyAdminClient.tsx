@@ -2,9 +2,10 @@
 
 import { useEffect, useState, type FormEvent, Fragment } from "react";
 import { useRouter } from "next/navigation";
-import { formatMoney, COMPANY_STAFF_ROLES, STAFF_ROLE_LABELS, DESIGNER_SEAT_MONTHLY_CENTS, type CompanyStaffRole, type MarketStateRow } from "@pool-design/shared";
+import { formatMoney, COMPANY_STAFF_ROLES, STAFF_ROLE_LABELS, DESIGNER_SEAT_MONTHLY_CENTS, type CompanyStaffRole, type EstimateRecipe, type MarketStateRow } from "@pool-design/shared";
 import { AddressFields } from "@/components/AddressFields";
 import { BillingActions } from "@/components/BillingActions";
+import { EstimateRecipeEditor } from "@/components/EstimateRecipeEditor";
 import { type AdminSection } from "@/lib/adminSections";
 
 type Profile = {
@@ -58,6 +59,11 @@ const NAV: { id: AdminSection; label: string; hint: string }[] = [
     hint: "Catalog prices for estimates",
   },
   {
+    id: "recipe",
+    label: "Estimate recipe",
+    hint: "What to bill from the plan",
+  },
+  {
     id: "billing",
     label: "Billing",
     hint: "Trial, Sales, and Builder plans",
@@ -90,6 +96,7 @@ type Props = {
     trialEndsAt: string | null;
     extraDesignerSeats: number;
   };
+  canEditRecipe?: boolean;
   rootDomain: string;
   initialSection?: AdminSection;
   seatFlash?: "success" | "canceled" | null;
@@ -98,6 +105,7 @@ type Props = {
 export function CompanyAdminClient({
   initialProfile,
   billing,
+  canEditRecipe = false,
   rootDomain,
   initialSection = "company",
   seatFlash = null,
@@ -114,6 +122,10 @@ export function CompanyAdminClient({
   const [items, setItems] = useState<PriceItem[]>([]);
   const [priceMsg, setPriceMsg] = useState<string | null>(null);
   const [pricesLoaded, setPricesLoaded] = useState(false);
+  const [recipe, setRecipe] = useState<EstimateRecipe | null>(null);
+  const [recipeDefault, setRecipeDefault] = useState(true);
+  const [recipeLoaded, setRecipeLoaded] = useState(false);
+  const [recipeMsg, setRecipeMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [membersLoaded, setMembersLoaded] = useState(false);
@@ -156,6 +168,18 @@ export function CompanyAdminClient({
       })
       .catch(() => undefined);
   }, [section, pricesLoaded]);
+
+  useEffect(() => {
+    if (section !== "recipe" || recipeLoaded) return;
+    void fetch("/api/company/estimate-recipe?level=residential")
+      .then((r) => r.json())
+      .then((json: { recipe?: EstimateRecipe; isDefault?: boolean }) => {
+        if (json.recipe) setRecipe(json.recipe);
+        setRecipeDefault(json.isDefault !== false);
+        setRecipeLoaded(true);
+      })
+      .catch(() => undefined);
+  }, [section, recipeLoaded]);
 
   useEffect(() => {
     if (section !== "team" || membersLoaded) return;
@@ -407,6 +431,35 @@ export function CompanyAdminClient({
       }
     } catch (err) {
       setPriceMsg(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveRecipe(reset: boolean) {
+    setBusy(true);
+    setRecipeMsg(null);
+    try {
+      const res = await fetch("/api/company/estimate-recipe", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(reset ? { reset: true } : { recipe }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        recipe?: EstimateRecipe;
+      };
+      if (!res.ok) throw new Error(json.error || "Save failed");
+      if (reset) {
+        setRecipeLoaded(false);
+        setRecipeMsg("Back to PoolShape default takeoff");
+      } else {
+        if (json.recipe) setRecipe(json.recipe);
+        setRecipeDefault(false);
+        setRecipeMsg("Estimate recipe saved — jobs will use these lines");
+      }
+    } catch (err) {
+      setRecipeMsg(err instanceof Error ? err.message : "Save failed");
     } finally {
       setBusy(false);
     }
@@ -744,6 +797,8 @@ export function CompanyAdminClient({
           <div className="stack">
             <p className="muted" style={{ margin: 0 }}>
               Override catalog unit prices for estimates, or accept defaults.
+              To change <em>what</em> is billed from the plan (pavers, seat
+              tile, plumbing), use Estimate recipe.
             </p>
             <div className="row">
               <button
@@ -815,6 +870,62 @@ export function CompanyAdminClient({
                 </tbody>
               </table>
             </div>
+          </div>
+        ) : null}
+
+        {section === "recipe" ? (
+          <div className="stack">
+            <p className="muted" style={{ margin: 0 }}>
+              This is the fillable form behind every job estimate: each line
+              pulls a quantity from the plan (paver SF, spa seat perimeter,
+              plumbing LF, …), then multiplies by your unit price. Sales still
+              uses the result; only Builder can edit the recipe.
+            </p>
+            {!canEditRecipe ? (
+              <p className="muted" style={{ margin: 0 }}>
+                Upgrade to Builder to save a company recipe. Until then,
+                estimates use the PoolShape catalog and price book.
+              </p>
+            ) : null}
+            {recipeDefault ? (
+              <p className="muted" style={{ margin: 0 }}>
+                Showing PoolShape defaults. Save to use this recipe on every
+                project.
+              </p>
+            ) : (
+              <p className="muted" style={{ margin: 0 }}>
+                This company has a saved recipe. Jobs in Estimate / BOM use it
+                instead of the built-in takeoff mapping.
+              </p>
+            )}
+            <div className="row" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || !canEditRecipe || !recipe}
+                onClick={() => void saveRecipe(false)}
+              >
+                Save recipe
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={busy || !canEditRecipe}
+                onClick={() => void saveRecipe(true)}
+              >
+                Reset to defaults
+              </button>
+            </div>
+            {recipeMsg ? <p className="muted">{recipeMsg}</p> : null}
+            {recipe ? (
+              <EstimateRecipeEditor
+                recipe={recipe}
+                onChange={setRecipe}
+                disabled={!canEditRecipe}
+              />
+            ) : (
+              <p className="muted">Loading recipe…</p>
+            )}
           </div>
         ) : null}
 

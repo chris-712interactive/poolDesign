@@ -28,6 +28,7 @@ describe("entitlements", () => {
       trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
     assert.equal(e.pdfQuote, true);
+    assert.equal(e.estimateRecipe, true);
     assert.equal(e.permitPacket, true);
   });
 
@@ -45,6 +46,13 @@ describe("entitlements", () => {
         "pdfQuote",
       ),
       true,
+    );
+    assert.equal(
+      companyHasEntitlement(
+        { planKey: "starter", subscriptionStatus: "active" },
+        "estimateRecipe",
+      ),
+      false,
     );
   });
 });

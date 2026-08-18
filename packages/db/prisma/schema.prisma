@@ -73,6 +73,8 @@ model Company {
   /** Extra designer seats billed on Stripe (beyond the one included seat). */
   designerSeatsPaid    Int                @default(0)
   stripeDesignerItemId String?
+  /** Builder estimate recipe JSON (EstimateRecipe). Null = built-in takeoff. */
+  estimateRecipeJson   String?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 

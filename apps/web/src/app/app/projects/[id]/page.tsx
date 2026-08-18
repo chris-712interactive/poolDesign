@@ -12,7 +12,7 @@ import { CadWorkspace } from "@/components/CadWorkspace";
 import { SubscriptionBlocked } from "@/components/SubscriptionBlocked";
 import { companyHasAppAccess } from "@/lib/subscription";
 import { userCanUseCad, userHasLicensedCadAccess } from "@/lib/companyAccess";
-import { catalogWithCompanyPrices } from "@/lib/shares";
+import { catalogWithCompanyPrices, loadCompanyEstimateRecipe } from "@/lib/shares";
 
 export default async function ProjectCadPage({
   params,
@@ -47,6 +47,7 @@ export default async function ProjectCadPage({
     user.companyId,
     project.designLevel,
   );
+  const estimateRecipe = await loadCompanyEstimateRecipe(user.companyId);
   const entitlements = entitlementsForCompany(user.company);
 
   const hasDesignerRole = userCanUseCad(user);
@@ -90,6 +91,7 @@ export default async function ProjectCadPage({
           unitSystem={user.unitSystem}
           initialDesign={design}
           catalog={catalog}
+          estimateRecipe={estimateRecipe}
           entitlements={entitlements}
           promptSurveyImport={survey === "1"}
         />

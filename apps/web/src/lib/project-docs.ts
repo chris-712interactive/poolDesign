@@ -7,7 +7,10 @@ import {
   type DesignLevel,
   type TakeoffResult,
 } from "@pool-design/shared";
-import { catalogWithCompanyPrices } from "@/lib/shares";
+import {
+  catalogWithCompanyPrices,
+  loadCompanyEstimateRecipe,
+} from "@/lib/shares";
 import type { SessionUser } from "@/lib/auth";
 
 export async function loadCompanyProject(
@@ -58,6 +61,7 @@ export async function takeoffForProject(
     project.companyId,
     project.designLevel as DesignLevel,
   );
-  const takeoff = buildTakeoff(design, user.unitSystem, catalog);
+  const recipe = await loadCompanyEstimateRecipe(project.companyId);
+  const takeoff = buildTakeoff(design, user.unitSystem, catalog, recipe);
   return { design, takeoff };
 }

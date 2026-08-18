@@ -2191,11 +2191,15 @@ textarea {
   vertical-align: top;
 }
 
-.proposal-table th {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+.recipe-table select,
+.recipe-table input[type="number"],
+.recipe-table input[type="text"],
+.recipe-table input:not([type]) {
+  font-size: 0.85rem;
+}
+
+.recipe-table select {
+  max-width: 16rem;
 }
 
 .proposal-footer {
