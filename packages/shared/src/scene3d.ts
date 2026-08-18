@@ -217,6 +217,18 @@ export function clampOpeningStory(
   return Math.min(max, Math.max(1, n));
 }
 
+/**
+ * Story to place a new door/window from the 2D plan filter.
+ * A specific upper-story filter (2+) places on that story; "all" and
+ * ground-floor-only place on story 1.
+ */
+export function openingStoryFromPlanFilter(
+  filter: "all" | number,
+): number {
+  if (filter === "all" || !Number.isFinite(filter) || filter < 2) return 1;
+  return Math.round(filter);
+}
+
 /** Default sill above finished floor for a given opening kind. */
 export function defaultSillAboveFloorMm(kind: BuildingOpeningKind): number {
   return kind === "window" ? WINDOW_SILL_ABOVE_FLOOR_MM : 0;

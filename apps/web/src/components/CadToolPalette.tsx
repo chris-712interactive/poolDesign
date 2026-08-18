@@ -72,7 +72,6 @@ type Props = {
   fenceKind: FenceKind;
   gateKind: GateKind;
   openingKind: BuildingOpeningKind;
-  openingStory: number;
   planStoryFilter: "all" | number;
   houseStories: number;
   placeItemId: string | null;
@@ -90,7 +89,6 @@ type Props = {
   onFenceKind: (kind: FenceKind) => void;
   onGateKind: (kind: GateKind) => void;
   onOpeningKind: (kind: BuildingOpeningKind) => void;
-  onOpeningStory: (n: number) => void;
   onPlanStoryFilter: (v: "all" | number) => void;
   onHouseStories: (n: number) => void;
   onPlaceItemId: (id: string) => void;
@@ -104,7 +102,6 @@ export function CadToolPalette({
   fenceKind,
   gateKind,
   openingKind,
-  openingStory,
   planStoryFilter,
   houseStories,
   placeItemId,
@@ -122,7 +119,6 @@ export function CadToolPalette({
   onFenceKind,
   onGateKind,
   onOpeningKind,
-  onOpeningStory,
   onPlanStoryFilter,
   onHouseStories,
   onPlaceItemId,
@@ -644,32 +640,6 @@ export function CadToolPalette({
                         ))}
                       </div>
                       <div className="field" style={{ margin: 0 }}>
-                        <label htmlFor="opening-story-tool">Place on story</label>
-                        <input
-                          id="opening-story-tool"
-                          type="number"
-                          min={1}
-                          max={12}
-                          step={1}
-                          value={openingStory}
-                          onChange={(e) => {
-                            const n = Number(e.target.value);
-                            if (Number.isFinite(n)) {
-                              onOpeningStory(
-                                Math.max(1, Math.min(12, Math.round(n))),
-                              );
-                            }
-                          }}
-                        />
-                        <p
-                          className="muted"
-                          style={{ margin: "0.25rem 0 0", fontSize: "0.75rem" }}
-                        >
-                          1 = ground floor. Clamped to the house story count
-                          when placed.
-                        </p>
-                      </div>
-                      <div className="field" style={{ margin: 0 }}>
                         <label htmlFor="plan-story-filter-tool">
                           Show on plan
                         </label>
@@ -683,11 +653,7 @@ export function CadToolPalette({
                           onChange={(e) => {
                             const v = e.target.value;
                             if (v === "all") onPlanStoryFilter("all");
-                            else {
-                              const n = Number(v);
-                              onPlanStoryFilter(n);
-                              onOpeningStory(n);
-                            }
+                            else onPlanStoryFilter(Number(v));
                           }}
                         >
                           <option value="all">All stories</option>
@@ -707,7 +673,8 @@ export function CadToolPalette({
                           style={{ margin: "0.25rem 0 0", fontSize: "0.75rem" }}
                         >
                           Hide other stories so overlapping windows are
-                          selectable.
+                          selectable. New doors and windows go on this story
+                          (ground floor when All).
                         </p>
                       </div>
                     </>

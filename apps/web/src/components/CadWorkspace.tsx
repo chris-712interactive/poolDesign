@@ -126,6 +126,7 @@ import {
   COVER_POST_SIZE_MM,
   buildingHeightMm,
   clampOpeningStory,
+  openingStoryFromPlanFilter,
   clampOpeningT,
   coverSupportFootingSizeMm,
   coverSupportPostSizeMm,
@@ -532,7 +533,6 @@ export function CadWorkspace({
   const [gateKind, setGateKind] = useState<GateKind>("swing");
   const [openingKind, setOpeningKind] =
     useState<BuildingOpeningKind>("door");
-  const [openingStory, setOpeningStory] = useState(1);
   /** Plan view: which story's openings to show ("all" or a 1-based story). */
   const [planStoryFilter, setPlanStoryFilter] = useState<"all" | number>(
     "all",
@@ -1591,7 +1591,10 @@ export function CadWorkspace({
       t,
       widthMm: size.widthMm,
       heightMm: size.heightMm,
-      story: clampOpeningStory(openingStory, stories),
+      story: clampOpeningStory(
+        openingStoryFromPlanFilter(planStoryFilter),
+        stories,
+      ),
       sillAboveFloorMm: defaultSillAboveFloorMm(openingKind),
     };
     commitDesign({
@@ -3608,7 +3611,11 @@ export function CadWorkspace({
       : tool === "house_poly"
         ? "Trace the house footprint. Hold Shift for 90°. Close near start. Set stories below."
         : tool === "opening"
-          ? `Click a house wall to place a ${openingKindLabel(openingKind).toLowerCase()} on story ${openingStory}. Edit story/size in Properties; drag to slide along the wall.`
+          ? `Click a house wall to place a ${openingKindLabel(openingKind).toLowerCase()} on ${
+              openingStoryFromPlanFilter(planStoryFilter) === 1
+                ? "the ground floor"
+                : `story ${openingStoryFromPlanFilter(planStoryFilter)}`
+            }. Edit story/size in Properties; drag to slide along the wall.`
           : tool === "cover_rect"
           ? draftPoints.length === 0
             ? coverKind === "roof"
@@ -3953,7 +3960,6 @@ export function CadWorkspace({
                   fenceKind={fenceKind}
                   gateKind={gateKind}
                   openingKind={openingKind}
-                  openingStory={openingStory}
                   planStoryFilter={planStoryFilter}
                   houseStories={Math.max(houseStories, maxPlanStories)}
                   placeItemId={placeItemId}
@@ -3995,7 +4001,6 @@ export function CadWorkspace({
                   onGateKind={setGateKind}
                   onOpeningKind={setOpeningKind}
                   onPlanStoryFilter={setPlanStoryFilter}
-                  onOpeningStory={setOpeningStory}
                   onHouseStories={setHouseStories}
                   onPlaceItemId={setPlaceItemId}
                   onFinishDraft={finishDraft}
@@ -6143,7 +6148,9 @@ export function CadWorkspace({
                       style={{ margin: "0.35rem 0 0", fontSize: "0.78rem" }}
                     >
                       Hide other stories&apos; doors/windows on the 2D plan so
-                      overlapping openings are easier to select.
+                      overlapping openings are easier to select. New doors and
+                      windows go on this story — ground floor when All is
+                      selected.
                     </p>
                   </div>
                 )}

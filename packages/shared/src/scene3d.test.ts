@@ -8,6 +8,7 @@ import {
   WINDOW_SILL_ABOVE_FLOOR_MM,
   buildingHeightMm,
   clampOpeningStory,
+  openingStoryFromPlanFilter,
   defaultObjectHeightMm,
   designBoundsMm,
   mmToMeters,
@@ -77,6 +78,10 @@ describe("scene3d helpers", () => {
   it("places openings on the chosen story sill", () => {
     assert.equal(clampOpeningStory(5, 2), 2);
     assert.equal(clampOpeningStory(undefined, 3), 1);
+    assert.equal(openingStoryFromPlanFilter("all"), 1);
+    assert.equal(openingStoryFromPlanFilter(1), 1);
+    assert.equal(openingStoryFromPlanFilter(2), 2);
+    assert.equal(openingStoryFromPlanFilter(3), 3);
     assert.equal(openingSillMm("door", 1, 2), 0);
     assert.equal(openingSillMm("window", 1, 2), WINDOW_SILL_ABOVE_FLOOR_MM);
     assert.equal(
