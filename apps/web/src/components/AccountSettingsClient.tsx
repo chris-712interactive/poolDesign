@@ -2,11 +2,12 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { USER_ROLE_LABELS, type UserRole } from "@pool-design/shared";
+import { USER_ROLE_LABELS, canUseCad, type UserRole } from "@pool-design/shared";
 import {
   type AccountSection,
   parseAccountSection,
 } from "@/lib/accountSections";
+import { clearTourDone } from "@/lib/onboardingTour";
 
 type Profile = {
   name: string;
@@ -42,12 +43,14 @@ const ALL_NAV: {
 ];
 
 type Props = {
+  userId: string;
   showUnits: boolean;
   initialProfile: Profile;
   initialSection?: AccountSection;
 };
 
 export function AccountSettingsClient({
+  userId,
   showUnits,
   initialProfile,
   initialSection = "profile",
@@ -68,6 +71,11 @@ export function AccountSettingsClient({
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [tourMsg, setTourMsg] = useState<string | null>(null);
+
+  const showCadTour =
+    canUseCad(profile.role, profile.alsoDesigner) &&
+    profile.role !== "platform_owner";
 
   function goTo(next: AccountSection) {
     setSection(next);
@@ -318,6 +326,47 @@ export function AccountSettingsClient({
             {passwordError ? <p className="error">{passwordError}</p> : null}
             {passwordMsg ? <p className="success">{passwordMsg}</p> : null}
           </form>
+        ) : null}
+
+        {section === "profile" && profile.role !== "platform_owner" ? (
+          <div className="stack" style={{ marginTop: "1rem" }}>
+            <h3 style={{ margin: 0 }}>Setup tour</h3>
+            <p className="muted" style={{ margin: 0 }}>
+              A short walkthrough of what to set up. You can skip it anytime.
+            </p>
+            <div className="row" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => {
+                  const tour =
+                    profile.role === "company_admin" ? "admin" : "staff";
+                  clearTourDone(userId, tour);
+                  setTourMsg(null);
+                  router.push(
+                    profile.role === "company_admin"
+                      ? "/app?tour=admin&step=0"
+                      : "/app?tour=staff&step=0",
+                  );
+                }}
+              >
+                Show setup tour
+              </button>
+              {showCadTour ? (
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => {
+                    clearTourDone(userId, "cad");
+                    setTourMsg("Open a job — the drawing tour starts there.");
+                  }}
+                >
+                  Reset drawing tour
+                </button>
+              ) : null}
+            </div>
+            {tourMsg ? <p className="muted">{tourMsg}</p> : null}
+          </div>
         ) : null}
       </section>
     </div>

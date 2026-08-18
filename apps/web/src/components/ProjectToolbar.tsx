@@ -295,6 +295,7 @@ export function ProjectToolbar({
             <button
               type="button"
               className={`btn ${view === "design" ? "" : "secondary"}`}
+              data-tour="view-design"
               onClick={() => onViewChange("design")}
             >
               Design
@@ -302,6 +303,7 @@ export function ProjectToolbar({
             <button
               type="button"
               className={`btn ${view === "measurements" ? "" : "secondary"}`}
+              data-tour="view-measurements"
               onClick={() => onViewChange("measurements")}
             >
               Measurements
@@ -309,6 +311,7 @@ export function ProjectToolbar({
             <button
               type="button"
               className={`btn ${view === "estimate" ? "" : "secondary"}`}
+              data-tour="view-estimate"
               onClick={() => onViewChange("estimate")}
             >
               Estimate / BOM

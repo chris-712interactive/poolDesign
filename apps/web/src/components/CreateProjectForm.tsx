@@ -29,7 +29,7 @@ export function CreateProjectForm({
   });
 
   return (
-    <form action={createProjectAction} className="stack">
+    <form action={createProjectAction} className="stack" data-tour="create-project">
       {compact ? null : <h2>{heading}</h2>}
       <div className="field">
         <label htmlFor="name">Project name</label>

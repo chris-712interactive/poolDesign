@@ -26,6 +26,7 @@ export default async function SettingsPage({
       <AppHeader user={user} />
       <main className="page">
         <AccountSettingsClient
+          userId={user.id}
           showUnits={showUnits}
           initialSection={parseAccountSection(section, allowed)}
           initialProfile={{

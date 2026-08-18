@@ -7,6 +7,7 @@ import { AddressFields } from "@/components/AddressFields";
 import { BillingActions } from "@/components/BillingActions";
 import { EstimateRecipeEditor } from "@/components/EstimateRecipeEditor";
 import { type AdminSection } from "@/lib/adminSections";
+import { TOUR_QUERY, TOUR_STEP_QUERY } from "@/lib/onboardingTour";
 
 type Profile = {
   name: string;
@@ -153,9 +154,22 @@ export function CompanyAdminClient({
     billing.status === "trialing",
   );
 
+  useEffect(() => {
+    setSection(initialSection);
+  }, [initialSection]);
+
   function goTo(next: AdminSection) {
     setSection(next);
-    router.replace(`/app/admin?section=${next}`, { scroll: false });
+    const params = new URLSearchParams();
+    params.set("section", next);
+    if (typeof window !== "undefined") {
+      const cur = new URLSearchParams(window.location.search);
+      const tour = cur.get(TOUR_QUERY);
+      const step = cur.get(TOUR_STEP_QUERY);
+      if (tour) params.set(TOUR_QUERY, tour);
+      if (step) params.set(TOUR_STEP_QUERY, step);
+    }
+    router.replace(`/app/admin?${params.toString()}`, { scroll: false });
   }
 
   useEffect(() => {
@@ -487,6 +501,7 @@ export function CompanyAdminClient({
               role="tab"
               aria-selected={section === item.id}
               className={`admin-nav-item${section === item.id ? " active" : ""}`}
+              data-tour={`admin-nav-${item.id}`}
               onClick={() => goTo(item.id)}
             >
               <strong>{item.label}</strong>

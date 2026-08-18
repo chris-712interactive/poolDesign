@@ -1,6 +1,8 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import type { SessionUser } from "@/lib/auth";
 import { isLocalTrialActive, trialDaysRemaining } from "@pool-design/shared";
+import { OnboardingTour } from "@/components/OnboardingTour";
 
 export function AppHeader({
   user,
@@ -37,15 +39,21 @@ export function AppHeader({
           )}
           {user?.companyId && (
             <>
-              <Link href="/app">Projects</Link>
+              <Link href="/app" data-tour="nav-projects">
+                Projects
+              </Link>
               {user.role === "company_admin" && (
-                <Link href="/app/admin">Company admin</Link>
+                <Link href="/app/admin" data-tour="nav-admin">
+                  Company admin
+                </Link>
               )}
             </>
           )}
           {user ? (
             <>
-              <Link href="/app/settings">Account</Link>
+              <Link href="/app/settings" data-tour="nav-account">
+                Account
+              </Link>
               {!compact ? (
                 <span className="muted" style={{ color: "rgba(255,255,255,0.7)" }}>
                   {user.name}
@@ -83,6 +91,15 @@ export function AppHeader({
             : `${trialDays} day${trialDays === 1 ? "" : "s"} left in your trial.`}{" "}
           <Link href="/app/admin?section=billing">Choose Sales or Builder</Link>
         </div>
+      ) : null}
+      {user?.companyId && user.role !== "platform_owner" ? (
+        <Suspense fallback={null}>
+          <OnboardingTour
+            userId={user.id}
+            role={user.role}
+            alsoDesigner={user.alsoDesigner === true}
+          />
+        </Suspense>
       ) : null}
     </div>
   );
