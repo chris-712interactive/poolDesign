@@ -2,7 +2,13 @@ import Link from "next/link";
 import type { SessionUser } from "@/lib/auth";
 import { isLocalTrialActive, trialDaysRemaining } from "@pool-design/shared";
 
-export function AppHeader({ user }: { user: SessionUser | null }) {
+export function AppHeader({
+  user,
+  compact = false,
+}: {
+  user: SessionUser | null;
+  compact?: boolean;
+}) {
   const trialDays = user?.company
     ? trialDaysRemaining(user.company)
     : null;
@@ -13,8 +19,8 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
   );
 
   return (
-    <div className="app-chrome">
-      <header className="topbar">
+    <div className={`app-chrome${compact ? " app-chrome-cad" : ""}`}>
+      <header className={`topbar${compact ? " topbar-cad" : ""}`}>
         <Link href="/" className="brand">
           <img
             src="/brand/mark.svg"
@@ -40,9 +46,18 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
           {user ? (
             <>
               <Link href="/app/settings">Account</Link>
-              <span className="muted" style={{ color: "rgba(255,255,255,0.7)" }}>
-                {user.name}
-              </span>
+              {!compact ? (
+                <span className="muted" style={{ color: "rgba(255,255,255,0.7)" }}>
+                  {user.name}
+                </span>
+              ) : null}
+              {showTrial && compact && trialDays != null ? (
+                <Link href="/app/admin?section=billing" className="trial-chip">
+                  {trialDays === 0
+                    ? "Trial ends today"
+                    : `${trialDays}d trial`}
+                </Link>
+              ) : null}
               <form action="/api/auth/logout" method="post">
                 <button className="btn ghost" type="submit">
                   Sign out
@@ -61,7 +76,7 @@ export function AppHeader({ user }: { user: SessionUser | null }) {
           )}
         </nav>
       </header>
-      {showTrial && trialDays != null ? (
+      {showTrial && trialDays != null && !compact ? (
         <div className="trial-banner">
           {trialDays === 0
             ? "Your trial ends today."

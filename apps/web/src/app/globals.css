@@ -75,6 +75,41 @@ textarea {
   backdrop-filter: blur(10px);
 }
 
+.topbar-cad {
+  padding: 0.4rem 1.1rem;
+}
+
+.topbar-cad .brand {
+  font-size: 1.12rem;
+  gap: 0.4rem;
+}
+
+.topbar-cad .brand-mark {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.topbar-cad nav {
+  gap: 0.75rem;
+}
+
+.trial-chip {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #8fe0c8;
+  background: rgba(143, 224, 200, 0.12);
+  border: 1px solid rgba(143, 224, 200, 0.28);
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  text-decoration: none;
+}
+
+.trial-chip:hover {
+  color: #b7f0de;
+  opacity: 1;
+}
+
 .brand {
   font-family: var(--font-display);
   font-size: 1.35rem;
@@ -111,6 +146,15 @@ textarea {
 
 .page {
   padding: 1.5rem;
+}
+
+.page-cad {
+  padding: 0.55rem 0.75rem 0.75rem;
+  min-height: 0;
+}
+
+.cad-workspace {
+  gap: 0.5rem;
 }
 
 .admin-layout {
@@ -442,6 +486,22 @@ textarea {
   flex-direction: column;
   gap: 0;
   padding: 0.85rem 1.1rem;
+}
+
+.page-cad .project-toolbar {
+  padding: 0.4rem 0.75rem;
+}
+
+.project-toolbar-details {
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.project-toolbar-details:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .project-toolbar-row {
@@ -952,10 +1012,14 @@ textarea {
 
 .cad-layout {
   display: grid;
-  grid-template-columns: 1fr minmax(300px, 340px);
-  gap: 0.85rem;
+  grid-template-columns: 1fr minmax(280px, 320px);
+  gap: 0.65rem;
   min-height: calc(100vh - 110px);
   align-items: stretch;
+}
+
+.page-cad .cad-layout {
+  min-height: calc(100vh - 148px);
 }
 
 @media (max-width: 900px) {
@@ -965,11 +1029,71 @@ textarea {
 }
 
 .cad-canvas-panel {
-  padding: 0.65rem;
+  padding: 0.5rem;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.4rem;
+}
+
+.cad-canvas-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.cad-draw-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  flex: 0 0 46px;
+  width: 46px;
+  padding: 0.32rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  align-self: stretch;
+}
+
+.cad-draw-rail .tool-icon-btn {
+  width: 100%;
+  flex: 0 0 auto;
+  border-radius: 8px;
+}
+
+.cad-draw-rail-rule {
+  display: block;
+  height: 1px;
+  background: var(--line);
+  margin: 0.12rem 0.15rem;
+}
+
+@media (max-width: 900px) {
+  .cad-canvas-body {
+    flex-direction: column;
+  }
+
+  .cad-draw-rail {
+    flex-direction: row;
+    flex: 0 0 auto;
+    width: auto;
+    overflow-x: auto;
+    align-self: stretch;
+  }
+
+  .cad-draw-rail .tool-icon-btn {
+    width: 40px;
+    flex: 0 0 40px;
+  }
+
+  .cad-draw-rail-rule {
+    width: 1px;
+    height: auto;
+    align-self: stretch;
+    margin: 0.15rem 0.12rem;
+  }
 }
 
 .cad-canvas-toolbar {
@@ -977,6 +1101,14 @@ textarea {
   justify-content: flex-start;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.page-cad .cad-canvas-toolbar {
+  gap: 0.5rem;
+}
+
+.page-cad .cad-mode-toggle .btn {
+  padding: 0.28rem 0.7rem;
 }
 
 .cad-mode-toggle {
@@ -1000,7 +1132,12 @@ textarea {
   border-radius: 14px;
   overflow: hidden;
   flex: 1;
+  min-width: 0;
   min-height: calc(100vh - 200px);
+}
+
+.page-cad .cad-canvas-wrap {
+  min-height: calc(100vh - 210px);
 }
 
 .cad-canvas-wrap-3d {
@@ -1248,11 +1385,17 @@ textarea {
 .cad-right-rail {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.6rem;
   min-height: 0;
   max-height: calc(100vh - 110px);
   height: calc(100vh - 110px);
   overflow: hidden;
+}
+
+.page-cad .cad-right-rail {
+  max-height: calc(100vh - 148px);
+  height: calc(100vh - 148px);
+  padding: 0.55rem 0.65rem;
 }
 
 /* Scroll the active tab body; do not let flex-shrink collapse it onto siblings. */
@@ -1417,9 +1560,9 @@ textarea {
   background: transparent;
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: 0.65rem;
+  gap: 0.5rem;
   align-items: center;
-  padding: 0.7rem 0.75rem;
+  padding: 0.48rem 0.6rem;
   cursor: pointer;
   text-align: left;
   color: var(--panel-ink);
@@ -1435,9 +1578,9 @@ textarea {
 }
 
 .cad-tool-group-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   border: 1px solid var(--line);
   display: inline-flex;
   align-items: center;
@@ -1475,8 +1618,8 @@ textarea {
 .cad-tool-group-body {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  padding: 0.7rem 0.75rem 0.8rem;
+  gap: 0.45rem;
+  padding: 0.5rem 0.6rem 0.6rem;
 }
 
 .cad-tool-group-note {
@@ -1656,9 +1799,35 @@ textarea {
 .cad-compact-list {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.2rem;
   max-height: 160px;
   overflow: auto;
+}
+
+.cad-place-row {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--panel-ink);
+  border-radius: 8px;
+  padding: 0.32rem 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.25;
+}
+
+.cad-place-row:hover {
+  background: #f4f7f9;
+  border-color: var(--line);
+}
+
+.cad-place-row.active {
+  background: color-mix(in srgb, var(--accent) 12%, white);
+  border-color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .error {

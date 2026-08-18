@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import {
-  ACTION_ICONS,
   PAD_EQUIP_TOOLS,
   TOOL_GROUPS,
   TOOL_REALMS,
@@ -19,7 +18,6 @@ import {
   isCoverAccessoryId,
   isSunshelfLayoutId,
   fenceKindLabel,
-  formatMoney,
   gateKindLabel,
   openingKindLabel,
   FENCE_KINDS,
@@ -31,7 +29,41 @@ import {
   type PlaceableItem,
   type WaterBodyKind,
 } from "@pool-design/shared";
-import { DEFAULT_VIEWPORT, type Viewport } from "@/lib/cad/math";
+
+function PlaceList({
+  items,
+  tool,
+  placeItemId,
+  group,
+  onPlace,
+  tall,
+}: {
+  items: PlaceableItem[];
+  tool: ToolId;
+  placeItemId: string | null;
+  group: ToolGroupId;
+  onPlace: (id: string, group: ToolGroupId) => void;
+  tall?: boolean;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className={`cad-compact-list${tall ? " cad-compact-list-tall" : ""}`}>
+      {items.map((item) => {
+        const active = tool === "place" && placeItemId === item.id;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            className={`cad-place-row${active ? " active" : ""}`}
+            onClick={() => onPlace(item.id, group)}
+          >
+            {item.name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 type Props = {
   tool: ToolId;
@@ -48,12 +80,6 @@ type Props = {
   poolFixtureLibrary: PlaceableItem[];
   spaFixtureLibrary: PlaceableItem[];
   toolHelp: string;
-  ortho: boolean;
-  angleSnap: boolean;
-  zoomUnlocked: boolean;
-  zDown: boolean;
-  canUndo: boolean;
-  canRedo: boolean;
   lengthBuffer: string;
   canFinishDraft: boolean;
   finishDraftLabel: string;
@@ -68,13 +94,7 @@ type Props = {
   onPlanStoryFilter: (v: "all" | number) => void;
   onHouseStories: (n: number) => void;
   onPlaceItemId: (id: string) => void;
-  onOrtho: () => void;
-  onAngleSnap: () => void;
-  onUndo: () => void;
-  onRedo: () => void;
-  onToggleZoom: () => void;
   onFinishDraft: () => void;
-  setVp: (vp: Viewport | ((v: Viewport) => Viewport)) => void;
 };
 
 export function CadToolPalette({
@@ -92,12 +112,6 @@ export function CadToolPalette({
   poolFixtureLibrary,
   spaFixtureLibrary,
   toolHelp,
-  ortho,
-  angleSnap,
-  zoomUnlocked,
-  zDown,
-  canUndo,
-  canRedo,
   lengthBuffer,
   canFinishDraft,
   finishDraftLabel,
@@ -112,13 +126,7 @@ export function CadToolPalette({
   onPlanStoryFilter,
   onHouseStories,
   onPlaceItemId,
-  onOrtho,
-  onAngleSnap,
-  onUndo,
-  onRedo,
-  onToggleZoom,
   onFinishDraft,
-  setVp,
 }: Props) {
   const activeGroup = toolGroupForTool(tool, waterKind, placeItemId);
   const [realm, setRealm] = useState<ToolRealm>(
@@ -171,39 +179,6 @@ export function CadToolPalette({
 
   return (
     <div className="cad-tab-panel" role="tabpanel">
-      <div className="cad-icon-toolbar cad-icon-toolbar-3 cad-tools-core">
-        <button
-          type="button"
-          className={`tool-icon-btn ${tool === "select" ? "active" : ""}`}
-          title="Select / edit"
-          aria-label="Select / edit"
-          onClick={() => onTool("select")}
-        >
-          {toolMeta("select").icon}
-          <ToolTooltip label="Select / edit" />
-        </button>
-        <button
-          type="button"
-          className={`tool-icon-btn ${tool === "measure" ? "active" : ""}`}
-          title="Measure"
-          aria-label="Measure"
-          onClick={() => onTool("measure")}
-        >
-          {toolMeta("measure").icon}
-          <ToolTooltip label="Measure" />
-        </button>
-        <button
-          type="button"
-          className={`tool-icon-btn ${tool === "survey_calibrate" ? "active" : ""}`}
-          title="Calibrate survey"
-          aria-label="Calibrate survey"
-          onClick={() => onTool("survey_calibrate")}
-        >
-          {toolMeta("survey_calibrate").icon}
-          <ToolTooltip label="Calibrate survey" />
-        </button>
-      </div>
-
       <div className="cad-side-tabs" role="tablist" aria-label="Tool realm">
         {TOOL_REALMS.map((r) => (
           <button
@@ -236,13 +211,13 @@ export function CadToolPalette({
               <button
                 type="button"
                 className="cad-tool-group-head"
+                title={group.hint}
                 aria-expanded={open}
                 onClick={() => toggleGroup(group.id)}
               >
                 <span className="cad-tool-group-icon">{group.icon}</span>
                 <span className="cad-tool-group-text">
                   <strong>{group.label}</strong>
-                  <span className="muted">{group.hint}</span>
                 </span>
                 <span className="cad-tool-group-chevron" aria-hidden>
                   {open ? "▾" : "▸"}
@@ -252,61 +227,32 @@ export function CadToolPalette({
               {open && (
                 <div className="cad-tool-group-body">
                   {group.id === "pad" && (
-                    <>
-                      <p className="muted cad-tool-group-note">
-                        Click a tool, then click the plan to place. Draw
-                        pools/spas after for auto plumbing.
-                      </p>
-                      <div className="cad-icon-toolbar">
-                        {PAD_EQUIP_TOOLS.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className={`tool-icon-btn ${tool === item.id ? "active" : ""}`}
-                            title={item.label}
-                            aria-label={item.label}
-                            onClick={() => onTool(item.id)}
-                          >
-                            {item.icon}
-                            <ToolTooltip label={item.label} />
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-
-                  {group.id === "furniture" && (
-                    <div className="cad-compact-list cad-compact-list-tall">
-                      {placeLibrary.map((item) => (
+                    <div className="cad-icon-toolbar">
+                      {PAD_EQUIP_TOOLS.map((item) => (
                         <button
                           key={item.id}
                           type="button"
-                          className="card-link"
-                          style={{
-                            textAlign: "left",
-                            padding: "0.65rem 0.75rem",
-                            borderColor:
-                              tool === "place" && placeItemId === item.id
-                                ? "var(--accent)"
-                                : undefined,
-                          }}
-                          onClick={() => activatePlace(item.id, "furniture")}
+                          className={`tool-icon-btn ${tool === item.id ? "active" : ""}`}
+                          title={item.label}
+                          aria-label={item.label}
+                          onClick={() => onTool(item.id)}
                         >
-                          <strong>{item.name}</strong>
-                          <div
-                            className="muted"
-                            style={{
-                              fontSize: "0.8rem",
-                              textTransform: "capitalize",
-                            }}
-                          >
-                            {item.category === "furniture"
-                              ? "Layout only · not billed"
-                              : `${item.category} · ${formatMoney(item.unitPriceCents)}`}
-                          </div>
+                          {item.icon}
+                          <ToolTooltip label={item.label} />
                         </button>
                       ))}
                     </div>
+                  )}
+
+                  {group.id === "furniture" && (
+                    <PlaceList
+                      items={placeLibrary}
+                      tool={tool}
+                      placeItemId={placeItemId}
+                      group="furniture"
+                      onPlace={activatePlace}
+                      tall
+                    />
                   )}
 
                   {group.id === "patio" && (
@@ -343,11 +289,6 @@ export function CadToolPalette({
                           <ToolTooltip label="Grade point" />
                         </button>
                       </div>
-                      <p className="muted cad-tool-group-note">
-                        Grade points: drop/rise from house FFE. Set patio strategy
-                        for fill and/or retaining. After drawing, drag the circle
-                        on an edge to add a curve.
-                      </p>
                     </>
                   )}
 
@@ -375,12 +316,6 @@ export function CadToolPalette({
                           <ToolTooltip label="Easement" />
                         </button>
                       </div>
-                      <p className="muted cad-tool-group-note">
-                        Trace from the calibrated survey. Click near the start to
-                        close a loop. Set easement width in Properties. Confirm
-                        with the recorded plat — these are not official survey
-                        lines.
-                      </p>
                     </>
                   )}
 
@@ -410,42 +345,18 @@ export function CadToolPalette({
                           </button>
                         ))}
                       </div>
-                      <p className="muted cad-tool-group-note">
-                        3-click rectangle: side, then depth. Links to nearest
-                        patio when possible.
-                      </p>
                       <strong className="cad-tool-subgroup-label">
                         Fans & lights
                       </strong>
-                      <div className="cad-compact-list">
-                        {placeLibrary
-                          .filter((item) => isCoverAccessoryId(item.id))
-                          .map((item) => (
-                            <button
-                              key={item.id}
-                              type="button"
-                              className="card-link"
-                              style={{
-                                textAlign: "left",
-                                padding: "0.65rem 0.75rem",
-                                borderColor:
-                                  tool === "place" && placeItemId === item.id
-                                    ? "var(--accent)"
-                                    : undefined,
-                              }}
-                              onClick={() => activatePlace(item.id, "cover")}
-                            >
-                              <strong>{item.name}</strong>
-                              <div
-                                className="muted"
-                                style={{ fontSize: "0.8rem" }}
-                              >
-                                {item.description ?? "Cover"} ·{" "}
-                                {formatMoney(item.unitPriceCents)}
-                              </div>
-                            </button>
-                          ))}
-                      </div>
+                      <PlaceList
+                        items={placeLibrary.filter((item) =>
+                          isCoverAccessoryId(item.id),
+                        )}
+                        tool={tool}
+                        placeItemId={placeItemId}
+                        group="cover"
+                        onPlace={activatePlace}
+                      />
                     </>
                   )}
 
@@ -509,10 +420,6 @@ export function CadToolPalette({
                           </button>
                         ))}
                       </div>
-                      <p className="muted cad-tool-group-note">
-                        Draw fence as a path, then place gates on fence
-                        segments. Color is set in Properties.
-                      </p>
                     </>
                   )}
 
@@ -578,66 +485,25 @@ export function CadToolPalette({
                       <strong className="cad-tool-subgroup-label">
                         Fixtures
                       </strong>
-                      <div className="cad-compact-list">
-                        {poolFixtureLibrary.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className="card-link"
-                            style={{
-                              textAlign: "left",
-                              padding: "0.65rem 0.75rem",
-                              borderColor:
-                                tool === "place" && placeItemId === item.id
-                                  ? "var(--accent)"
-                                  : undefined,
-                            }}
-                            onClick={() => activatePlace(item.id, "pool")}
-                          >
-                            <strong>{item.name}</strong>
-                            <div
-                              className="muted"
-                              style={{ fontSize: "0.8rem" }}
-                            >
-                              {item.description ?? "Pool"} ·{" "}
-                              {formatMoney(item.unitPriceCents)}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
+                      <PlaceList
+                        items={poolFixtureLibrary}
+                        tool={tool}
+                        placeItemId={placeItemId}
+                        group="pool"
+                        onPlace={activatePlace}
+                      />
                       <strong className="cad-tool-subgroup-label">
                         Sunshelf
                       </strong>
-                      <div className="cad-compact-list">
-                        {placeLibrary
-                          .filter((item) => isSunshelfLayoutId(item.id))
-                          .map((item) => (
-                            <button
-                              key={item.id}
-                              type="button"
-                              className="card-link"
-                              style={{
-                                textAlign: "left",
-                                padding: "0.65rem 0.75rem",
-                                borderColor:
-                                  tool === "place" && placeItemId === item.id
-                                    ? "var(--accent)"
-                                    : undefined,
-                              }}
-                              onClick={() => activatePlace(item.id, "pool")}
-                            >
-                              <strong>{item.name}</strong>
-                              <div
-                                className="muted"
-                                style={{ fontSize: "0.8rem" }}
-                              >
-                                {item.category === "furniture"
-                                  ? "Layout only · not billed"
-                                  : `${item.description ?? "Sunshelf"} · ${formatMoney(item.unitPriceCents)}`}
-                              </div>
-                            </button>
-                          ))}
-                      </div>
+                      <PlaceList
+                        items={placeLibrary.filter((item) =>
+                          isSunshelfLayoutId(item.id),
+                        )}
+                        tool={tool}
+                        placeItemId={placeItemId}
+                        group="pool"
+                        onPlace={activatePlace}
+                      />
                     </>
                   )}
 
@@ -673,33 +539,13 @@ export function CadToolPalette({
                       <strong className="cad-tool-subgroup-label">
                         Fixtures
                       </strong>
-                      <div className="cad-compact-list">
-                        {spaFixtureLibrary.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className="card-link"
-                            style={{
-                              textAlign: "left",
-                              padding: "0.65rem 0.75rem",
-                              borderColor:
-                                tool === "place" && placeItemId === item.id
-                                  ? "var(--accent)"
-                                  : undefined,
-                            }}
-                            onClick={() => activatePlace(item.id, "spa")}
-                          >
-                            <strong>{item.name}</strong>
-                            <div
-                              className="muted"
-                              style={{ fontSize: "0.8rem" }}
-                            >
-                              {item.description ?? "Spa"} ·{" "}
-                              {formatMoney(item.unitPriceCents)}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
+                      <PlaceList
+                        items={spaFixtureLibrary}
+                        tool={tool}
+                        placeItemId={placeItemId}
+                        group="spa"
+                        onPlace={activatePlace}
+                      />
                     </>
                   )}
 
@@ -873,102 +719,9 @@ export function CadToolPalette({
         })}
       </div>
 
-      <div className="cad-action-row">
-        <button
-          type="button"
-          className={`tool-icon-btn ${ortho ? "active" : ""}`}
-          title={
-            ortho
-              ? "Ortho on — 90° lines sticky (or hold Shift)"
-              : "Ortho off — hold Shift for temporary 90°"
-          }
-          aria-label="Toggle ortho"
-          onClick={onOrtho}
-        >
-          {ACTION_ICONS.ortho}
-          <ToolTooltip
-            label={
-              ortho
-                ? "Ortho on (90° sticky)"
-                : "Ortho off — hold Shift for 90°"
-            }
-          />
-        </button>
-        <button
-          type="button"
-          className={`tool-icon-btn ${angleSnap ? "active" : ""}`}
-          title={`15° snap ${angleSnap ? "on" : "off"}`}
-          aria-label="Toggle angle snap"
-          onClick={onAngleSnap}
-        >
-          {ACTION_ICONS.angle}
-          <ToolTooltip label={angleSnap ? "15° snap on" : "15° snap off"} />
-        </button>
-        <button
-          type="button"
-          className="tool-icon-btn"
-          title="Undo"
-          aria-label="Undo"
-          onClick={onUndo}
-          disabled={!canUndo}
-        >
-          {ACTION_ICONS.undo}
-          <ToolTooltip label="Undo" />
-        </button>
-        <button
-          type="button"
-          className="tool-icon-btn"
-          title="Redo"
-          aria-label="Redo"
-          onClick={onRedo}
-          disabled={!canRedo}
-        >
-          {ACTION_ICONS.redo}
-          <ToolTooltip label="Redo" />
-        </button>
-        <button
-          type="button"
-          className={`tool-icon-btn ${zoomUnlocked || zDown ? "active" : ""}`}
-          title={
-            zoomUnlocked
-              ? "Scroll-zoom unlocked — click to lock (or hold Z)"
-              : "Scroll-zoom locked — hold Z to zoom, or click to unlock"
-          }
-          aria-label="Toggle scroll zoom"
-          aria-pressed={zoomUnlocked}
-          onClick={onToggleZoom}
-        >
-          {ACTION_ICONS.zoom}
-          <ToolTooltip
-            label={
-              zoomUnlocked
-                ? "Zoom unlocked (scroll)"
-                : "Zoom locked — hold Z"
-            }
-          />
-        </button>
-        <button
-          type="button"
-          className="tool-icon-btn"
-          title="Reset view"
-          aria-label="Reset view"
-          onClick={() => setVp(DEFAULT_VIEWPORT)}
-        >
-          {ACTION_ICONS.reset}
-          <ToolTooltip label="Reset view" />
-        </button>
-      </div>
-
       <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>
         {isPadEquipTool(tool) ? toolHelp : helpText}
       </p>
-      {!zoomUnlocked && (
-        <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
-          {zDown
-            ? "Zoom active — scroll to zoom"
-            : "Scroll-zoom locked. Hold Z + scroll, or unlock with the zoom button."}
-        </p>
-      )}
       {lengthBuffer && (
         <div className="badge warn">Length: {lengthBuffer}_</div>
       )}

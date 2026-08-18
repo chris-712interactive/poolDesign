@@ -81,8 +81,8 @@ export default async function ProjectCadPage({
 
   return (
     <div className="app-shell">
-      <AppHeader user={user} />
-      <main className="page" style={{ paddingTop: "0.85rem" }}>
+      <AppHeader user={user} compact />
+      <main className="page page-cad">
         <CadWorkspace
           projectId={project.id}
           projectName={project.name}

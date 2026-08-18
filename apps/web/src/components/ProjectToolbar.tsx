@@ -243,12 +243,11 @@ export function ProjectToolbar({
     <div className="panel project-toolbar">
       <div className="project-toolbar-row">
         <div className="project-toolbar-identity">
-          <div className="muted project-toolbar-label">Project</div>
           <div className="project-toolbar-title">
             <strong>{projectName}</strong>
             <span className="badge">{DESIGN_LEVEL_LABELS[designLevel]}</span>
             <Link
-              className="btn secondary"
+              className="project-toolbar-details"
               href={`/app/projects/${projectId}/details`}
             >
               Details

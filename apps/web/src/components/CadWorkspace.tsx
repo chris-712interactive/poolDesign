@@ -202,6 +202,7 @@ import {
   type ToolId,
 } from "@/components/CadToolIcons";
 import { CadToolPalette } from "@/components/CadToolPalette";
+import { CadDrawRail } from "@/components/CadDrawRail";
 import {
   DEFAULT_VIEWPORT,
   applyAngleSnap,
@@ -1441,6 +1442,23 @@ export function CadWorkspace({
     setLengthBuffer("");
     if (suppressNextClickMs > 0) {
       suppressDraftUntilRef.current = performance.now() + suppressNextClickMs;
+    }
+  }
+
+  function chooseTool(next: Tool) {
+    if (next === "survey_calibrate") {
+      startSurveyCalibrate();
+      return;
+    }
+    toolRef.current = next;
+    setTool(next);
+    clearDraft();
+    if (next !== "measure") setMeasurePoints([]);
+    setCalibratePoints([]);
+    if (next === "select") {
+      if (selection) setSideTab("properties");
+    } else if (next !== "measure") {
+      setSideTab("tools");
     }
   }
 
@@ -3664,7 +3682,7 @@ export function CadWorkspace({
                           : "Select to move/edit. Drag a side midpoint to stretch; drag the circle on an edge to curve it; drag a corner to reshape. Hold Shift on a corner for 90° edges.";
 
   return (
-    <div className="stack" style={{ gap: "0.85rem" }}>
+    <div className="stack cad-workspace">
       <ProjectToolbar
         projectId={projectId}
         projectName={projectName}
@@ -3736,6 +3754,23 @@ export function CadWorkspace({
                 </span>
               ) : null}
             </div>
+            <div className="cad-canvas-body">
+            <CadDrawRail
+              tool={tool}
+              ortho={ortho}
+              angleSnap={angleSnap}
+              zoomUnlocked={zoomUnlocked}
+              zDown={zDown}
+              canUndo={past.length > 0}
+              canRedo={future.length > 0}
+              onTool={chooseTool}
+              onOrtho={() => setOrtho((v) => !v)}
+              onAngleSnap={() => setAngleSnap((v) => !v)}
+              onUndo={undo}
+              onRedo={redo}
+              onToggleZoom={() => setZoomUnlocked((v) => !v)}
+              setVp={setVp}
+            />
             <div
               className={`cad-canvas-wrap ${designMode === "3d" ? "cad-canvas-wrap-3d" : ""}`}
               style={{
@@ -3884,13 +3919,14 @@ export function CadWorkspace({
                 </>
               )}
             </div>
+            </div>
           </section>
 
           <aside className="panel cad-right-rail stack">
             <div className="cad-side-tabs" role="tablist" aria-label="Side panel">
               {(
                 [
-                  ["tools", "Tools"],
+                  ["tools", "Catalog"],
                   ["properties", "Properties"],
                   ["layers", "Layers"],
                 ] as const
@@ -3925,12 +3961,6 @@ export function CadWorkspace({
                   poolFixtureLibrary={poolFixtureLibrary}
                   spaFixtureLibrary={spaFixtureLibrary}
                   toolHelp={toolHelp}
-                  ortho={ortho}
-                  angleSnap={angleSnap}
-                  zoomUnlocked={zoomUnlocked}
-                  zDown={zDown}
-                  canUndo={past.length > 0}
-                  canRedo={future.length > 0}
                   lengthBuffer={lengthBuffer}
                   showFinishDraft={
                     tool === "pool_poly" ||
@@ -3958,14 +3988,7 @@ export function CadWorkspace({
                       ? draftPoints.length >= 2
                       : draftPoints.length >= 3
                   }
-                  onTool={(next) => {
-                    toolRef.current = next;
-                    setTool(next);
-                    clearDraft();
-                    if (next !== "measure") setMeasurePoints([]);
-                    if (next !== "survey_calibrate") setCalibratePoints([]);
-                    if (next === "survey_calibrate") startSurveyCalibrate();
-                  }}
+                  onTool={chooseTool}
                   onWaterKind={setWaterKind}
                   onCoverKind={setCoverKind}
                   onFenceKind={setFenceKind}
@@ -3975,36 +3998,8 @@ export function CadWorkspace({
                   onOpeningStory={setOpeningStory}
                   onHouseStories={setHouseStories}
                   onPlaceItemId={setPlaceItemId}
-                  onOrtho={() => setOrtho((v) => !v)}
-                  onAngleSnap={() => setAngleSnap((v) => !v)}
-                  onUndo={undo}
-                  onRedo={redo}
-                  onToggleZoom={() => setZoomUnlocked((v) => !v)}
                   onFinishDraft={finishDraft}
-                  setVp={setVp}
                 />
-                <div className="stack cad-side-section">
-                  <strong>Checklist</strong>
-                  {guideSteps.map((step) => (
-                    <div key={step.id} className="row" style={{ gap: "0.4rem" }}>
-                      <span
-                        className={`dot ${step.done ? "completed" : ""}`}
-                        style={{ marginTop: 2 }}
-                      />
-                      <span
-                        style={{
-                          fontSize: "0.88rem",
-                          textDecoration: step.done ? "line-through" : "none",
-                          opacity: step.done ? 0.6 : 1,
-                        }}
-                      >
-                        {step.title}
-                      </span>
-                    </div>
-                  ))}
-                  <BarrierChecklistPanel design={design} />
-                </div>
-
                 <button
                   type="button"
                   className="btn secondary"
@@ -6152,6 +6147,27 @@ export function CadWorkspace({
                     </p>
                   </div>
                 )}
+                <div className="stack cad-side-section">
+                  <strong>Checklist</strong>
+                  {guideSteps.map((step) => (
+                    <div key={step.id} className="row" style={{ gap: "0.4rem" }}>
+                      <span
+                        className={`dot ${step.done ? "completed" : ""}`}
+                        style={{ marginTop: 2 }}
+                      />
+                      <span
+                        style={{
+                          fontSize: "0.88rem",
+                          textDecoration: step.done ? "line-through" : "none",
+                          opacity: step.done ? 0.6 : 1,
+                        }}
+                      >
+                        {step.title}
+                      </span>
+                    </div>
+                  ))}
+                  <BarrierChecklistPanel design={design} />
+                </div>
               </div>
             )}
           </aside>
