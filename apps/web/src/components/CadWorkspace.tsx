@@ -105,8 +105,10 @@ import {
   insetClosedOutline,
   pointInPolygon,
   resolveEquipmentConnection,
+  alignSurveyUnderlayToAxis,
   calibrateSurveyUnderlay,
   moveSurveyUnderlay,
+  squareSurveyUnderlayToImageLine,
   parseSurveyKnownLengthToMm,
   pointInSurveyUnderlay,
   createSiteLine,
@@ -242,6 +244,7 @@ import {
 } from "@/lib/cad/draw";
 import { SurveyUnderlayPanel } from "@/components/SurveyUnderlayPanel";
 import { ImportSurveyPrompt } from "@/components/ImportSurveyPrompt";
+import { detectSurveyImageSkew } from "@/lib/cad/surveyDeskew";
 
 type WorkspaceView = "design" | "estimate" | "measurements";
 type DesignMode = "2d" | "3d";
@@ -528,6 +531,9 @@ export function CadWorkspace({
   const calibratePointsRef = useRef<PointMm[]>([]);
   calibratePointsRef.current = calibratePoints;
   const [surveyImage, setSurveyImage] = useState<HTMLImageElement | null>(null);
+  const [surveyAlignMode, setSurveyAlignMode] = useState(false);
+  const surveyAlignModeRef = useRef(false);
+  surveyAlignModeRef.current = surveyAlignMode;
   const [past, setPast] = useState<DesignDocument[]>([]);
   const [future, setFuture] = useState<DesignDocument[]>([]);
   const [vp, setVp] = useState<Viewport>(DEFAULT_VIEWPORT);
@@ -1392,12 +1398,74 @@ export function CadWorkspace({
   }
 
   function startSurveyCalibrate() {
+    surveyAlignModeRef.current = false;
+    setSurveyAlignMode(false);
     toolRef.current = "survey_calibrate";
     setDesignMode("2d");
     setSideTab("layers");
     setTool("survey_calibrate");
     setCalibratePoints([]);
     setLengthBuffer("");
+  }
+
+  function startSurveyAlign() {
+    surveyAlignModeRef.current = true;
+    setSurveyAlignMode(true);
+    toolRef.current = "survey_calibrate";
+    setDesignMode("2d");
+    setSideTab("layers");
+    setTool("survey_calibrate");
+    setCalibratePoints([]);
+    setLengthBuffer("");
+  }
+
+  function cancelSurveyCalibrate() {
+    surveyAlignModeRef.current = false;
+    setSurveyAlignMode(false);
+    setCalibratePoints([]);
+    setLengthBuffer("");
+    setTool("select");
+  }
+
+  function applySurveyAlign(a: PointMm, b: PointMm): boolean {
+    const current = designRef.current;
+    const underlay = current.surveyUnderlay;
+    if (!underlay || segmentLengthMm(a, b) < 8) return false;
+    commitDesign({
+      ...current,
+      surveyUnderlay: alignSurveyUnderlayToAxis(underlay, a, b),
+    });
+    surveyAlignModeRef.current = false;
+    setSurveyAlignMode(false);
+    setCalibratePoints([]);
+    setLengthBuffer("");
+    setTool("select");
+    return true;
+  }
+
+  function squareSurveyToGrid(): string | null {
+    const current = designRef.current;
+    const underlay = current.surveyUnderlay;
+    if (!underlay) return "Upload a survey first.";
+    if (!surveyImage) {
+      return "Wait for the survey image to finish loading, then try again.";
+    }
+    const hint = detectSurveyImageSkew(
+      surveyImage,
+      underlay.pixelWidth,
+      underlay.pixelHeight,
+    );
+    if (!hint) {
+      return "Couldn't detect a slight skew automatically. Use Align a wall and click two points along a house wall.";
+    }
+    commitDesign({
+      ...current,
+      surveyUnderlay: squareSurveyUnderlayToImageLine(
+        underlay,
+        hint.imageLineDeg,
+      ),
+    });
+    return null;
   }
 
   function dismissSurveyPrompt() {
@@ -1461,6 +1529,8 @@ export function CadWorkspace({
     setTool(next);
     clearDraft();
     if (next !== "measure") setMeasurePoints([]);
+    surveyAlignModeRef.current = false;
+    setSurveyAlignMode(false);
     setCalibratePoints([]);
     if (next === "select") {
       if (selection) setSideTab("properties");
@@ -2588,6 +2658,13 @@ export function CadWorkspace({
     if (toolRef.current === "survey_calibrate" || tool === "survey_calibrate") {
       const pick = worldFromEvent(e, false);
       setCursor(pick);
+      if (surveyAlignModeRef.current) {
+        const pts = calibratePointsRef.current;
+        const next = pts.length >= 2 ? [pick] : [...pts, pick];
+        setCalibratePoints(next);
+        if (next.length >= 2) applySurveyAlign(next[0], next[1]);
+        return;
+      }
       setCalibratePoints((pts) => (pts.length >= 2 ? [pick] : [...pts, pick]));
       return;
     }
@@ -3549,6 +3626,7 @@ export function CadWorkspace({
     if (e.key === "Enter") {
       if (
         tool === "survey_calibrate" &&
+        !surveyAlignMode &&
         calibratePoints.length >= 2 &&
         lengthBuffer
       ) {
@@ -3578,7 +3656,9 @@ export function CadWorkspace({
     // Typed length while drawing
     if (
       (draftPoints.length > 0 ||
-        (tool === "survey_calibrate" && calibratePoints.length >= 2)) &&
+        (tool === "survey_calibrate" &&
+          !surveyAlignMode &&
+          calibratePoints.length >= 2)) &&
       (tool === "plumbing" ||
         tool === "fence" ||
         tool === "property_line" ||
@@ -3688,11 +3768,15 @@ export function CadWorkspace({
                         : tool === "measure"
                           ? "Click two points to measure distance. Esc clears."
                           : tool === "survey_calibrate"
-                            ? calibratePoints.length === 0
-                              ? "Click the first end of a printed dimension on the survey."
-                              : calibratePoints.length === 1
-                                ? "Click the other end of that dimension."
-                                : "Type the printed length (e.g. 50) and Enter, or Apply scale in Layers."
+                            ? surveyAlignMode
+                              ? calibratePoints.length === 0
+                                ? "Click one end of a house wall that should be horizontal or vertical."
+                                : "Click the other end of that wall."
+                              : calibratePoints.length === 0
+                                ? "Click the first end of a printed dimension on the survey."
+                                : calibratePoints.length === 1
+                                  ? "Click the other end of that dimension."
+                                  : "Type the printed length (e.g. 50) and Enter, or Apply scale in Layers."
                           : "Select to move/edit. Drag a side midpoint to stretch; drag the circle on an edge to curve it; drag a corner to reshape. Hold Shift on a corner for 90° edges.";
 
   return (
@@ -3846,11 +3930,15 @@ export function CadWorkspace({
                     <div className="cad-survey-hint" role="status">
                       <div className="cad-survey-hint-copy">
                         {tool === "survey_calibrate"
-                          ? calibratePoints.length === 0
-                            ? "Mark the first end of a printed scale on the survey — a scale bar, dimension callout, or known property line."
-                            : calibratePoints.length === 1
-                              ? "Mark the other end of that same scale."
-                              : "Type the printed length in Layers (e.g. 50 for 50′) and Apply scale."
+                          ? surveyAlignMode
+                            ? calibratePoints.length === 0
+                              ? "Click one end of a house wall (or lot line) that should line up with the CAD grid."
+                              : "Click the other end of that same wall."
+                            : calibratePoints.length === 0
+                              ? "Mark the first end of a printed scale on the survey — a scale bar, dimension callout, or known property line."
+                              : calibratePoints.length === 1
+                                ? "Mark the other end of that same scale."
+                                : "Type the printed length in Layers (e.g. 50 for 50′) and Apply scale."
                           : "This survey isn’t scaled to CAD yet. Mark both ends of a printed scale on the sheet so the drawing matches real dimensions."}
                       </div>
                       {tool !== "survey_calibrate" ? (
@@ -6053,16 +6141,15 @@ export function CadWorkspace({
                   projectId={projectId}
                   design={design}
                   unitSystem={unitSystem}
-                  calibrating={tool === "survey_calibrate"}
+                  calibrating={tool === "survey_calibrate" && !surveyAlignMode}
+                  aligning={tool === "survey_calibrate" && surveyAlignMode}
                   calibratePoints={calibratePoints}
                   onDesignChange={commitDesign}
                   onStartCalibrate={startSurveyCalibrate}
+                  onStartAlign={startSurveyAlign}
+                  onSquareToGrid={squareSurveyToGrid}
                   onApplyCalibrate={(knownMm) => applySurveyCalibration(knownMm)}
-                  onCancelCalibrate={() => {
-                    setCalibratePoints([]);
-                    setLengthBuffer("");
-                    setTool("select");
-                  }}
+                  onCancelCalibrate={cancelSurveyCalibrate}
                 />
                 <div className="field" style={{ marginTop: "1rem" }}>
                   <label htmlFor="site-north">True north</label>

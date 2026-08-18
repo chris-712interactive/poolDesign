@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MM_PER_FOOT } from "./units";
 import {
+  alignSurveyUnderlayToAxis,
+  axisAlignDeltaDeg,
   calibrateSurveyUnderlay,
   createSurveyUnderlay,
   parseSurveyKnownLengthToMm,
   pointInSurveyUnderlay,
   rotateSurveyUnderlay,
+  squareSurveyUnderlayToImageLine,
   surveyMmPerPixel,
   surveyUnderlayCenter,
 } from "./survey-underlay";
@@ -59,6 +62,41 @@ describe("survey underlay calibration", () => {
     const c2 = surveyUnderlayCenter(turned);
     assert.ok(Math.abs(c.x - c2.x) < 1e-6);
     assert.ok(Math.abs(c.y - c2.y) < 1e-6);
+  });
+
+  it("snaps a world line to the nearest CAD axis", () => {
+    assert.ok(Math.abs(axisAlignDeltaDeg(4) + 4) < 1e-6);
+    assert.ok(Math.abs(axisAlignDeltaDeg(88) - 2) < 1e-6);
+
+    const underlay = createSurveyUnderlay({
+      imageUrl: "https://example.com/plat.png",
+      pixelWidth: 1000,
+      pixelHeight: 800,
+    });
+    const a = { x: 0, y: 0 };
+    const b = { x: 1000, y: 80 };
+    const next = alignSurveyUnderlayToAxis(underlay, a, b);
+    const worldB = {
+      x:
+        Math.cos((next.rotationDeg * Math.PI) / 180) * 1000 -
+        Math.sin((next.rotationDeg * Math.PI) / 180) * 80,
+      y:
+        Math.sin((next.rotationDeg * Math.PI) / 180) * 1000 +
+        Math.cos((next.rotationDeg * Math.PI) / 180) * 80,
+    };
+    const worldDeg = (Math.atan2(worldB.y, worldB.x) * 180) / Math.PI;
+    assert.ok(Math.abs(axisAlignDeltaDeg(worldDeg)) < 0.15);
+    assert.ok(Math.abs(next.rotationDeg) > 0.5);
+  });
+
+  it("squares a bitmap line onto the grid", () => {
+    const underlay = createSurveyUnderlay({
+      imageUrl: "https://example.com/plat.png",
+      pixelWidth: 400,
+      pixelHeight: 400,
+    });
+    const next = squareSurveyUnderlayToImageLine(underlay, 6);
+    assert.ok(Math.abs(axisAlignDeltaDeg(next.rotationDeg + 6)) < 0.15);
   });
 
   it("reads survey callouts as feet, including prime quotes", () => {

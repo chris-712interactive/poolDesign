@@ -18,9 +18,12 @@ type Props = {
   design: DesignDocument;
   unitSystem: UnitSystem;
   calibrating: boolean;
+  aligning: boolean;
   calibratePoints: PointMm[];
   onDesignChange: (next: DesignDocument) => void;
   onStartCalibrate: () => void;
+  onStartAlign: () => void;
+  onSquareToGrid: () => string | null;
   onApplyCalibrate: (knownMm: number) => boolean;
   onCancelCalibrate: () => void;
 };
@@ -30,9 +33,12 @@ export function SurveyUnderlayPanel({
   design,
   unitSystem,
   calibrating,
+  aligning,
   calibratePoints,
   onDesignChange,
   onStartCalibrate,
+  onStartAlign,
+  onSquareToGrid,
   onApplyCalibrate,
   onCancelCalibrate,
 }: Props) {
@@ -88,14 +94,25 @@ export function SurveyUnderlayPanel({
   }
 
   const lengthLabel = unitSystem === "metric" ? "m" : "ft";
-  const showCalibrateUi = Boolean(underlay) && (calibrating || calibratePoints.length > 0);
+  const showCalibrateUi =
+    Boolean(underlay) &&
+    !aligning &&
+    (calibrating || calibratePoints.length > 0);
+
+  function squareToGrid() {
+    setError(null);
+    const message = onSquareToGrid();
+    if (message) setError(message);
+  }
 
   return (
     <div className="stack" style={{ gap: "0.55rem", marginTop: "1.1rem" }}>
       <strong>Survey underlay</strong>
       <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
-        Upload a PNG/JPG of the plat. Click <em>Calibrate scale</em>, then click
-        both ends of a printed dimension on the sheet and type that length.
+        Upload a PNG/JPG of the plat. If the scan is slightly skewed, use{" "}
+        <em>Square to grid</em> or <em>Align a wall</em> so house lines match
+        the CAD axes. Then click <em>Calibrate scale</em>, mark both ends of a
+        printed dimension, and type that length.
       </p>
       <input
         type="file"
@@ -147,17 +164,29 @@ export function SurveyUnderlayPanel({
             <button
               type="button"
               className="btn secondary"
-              onClick={() => patch(rotateSurveyUnderlay(underlay, -15))}
+              onClick={squareToGrid}
             >
-              −15°
+              Square to grid
             </button>
             <button
               type="button"
-              className="btn secondary"
-              onClick={() => patch(rotateSurveyUnderlay(underlay, 15))}
+              className={aligning ? "btn" : "btn secondary"}
+              onClick={onStartAlign}
             >
-              +15°
+              {aligning ? "Click a wall…" : "Align a wall"}
             </button>
+          </div>
+          <div className="row" style={{ gap: "0.4rem", flexWrap: "wrap" }}>
+            {([-15, -5, -1, 1, 5, 15] as const).map((deg) => (
+              <button
+                key={deg}
+                type="button"
+                className="btn secondary"
+                onClick={() => patch(rotateSurveyUnderlay(underlay, deg))}
+              >
+                {deg > 0 ? `+${deg}°` : `−${Math.abs(deg)}°`}
+              </button>
+            ))}
             <button
               type="button"
               className={calibrating ? "btn" : "btn secondary"}
@@ -166,6 +195,22 @@ export function SurveyUnderlayPanel({
               {calibrating ? "Calibrating…" : "Calibrate scale"}
             </button>
           </div>
+          {aligning ? (
+            <div className="stack" style={{ gap: "0.35rem" }}>
+              <span className="muted" style={{ fontSize: "0.85rem" }}>
+                {calibratePoints.length === 0
+                  ? "On the plan, click two points along a house wall that should be horizontal or vertical."
+                  : "Click the other end of that wall."}
+              </span>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={onCancelCalibrate}
+              >
+                Cancel align
+              </button>
+            </div>
+          ) : null}
           {showCalibrateUi ? (
             <div className="stack" style={{ gap: "0.35rem" }}>
               <span className="muted" style={{ fontSize: "0.85rem" }}>

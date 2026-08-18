@@ -143,6 +143,65 @@ export function moveSurveyUnderlay(
   };
 }
 
+/** Smallest signed turn from `fromDeg` to `toDeg` in (-180, 180]. */
+export function shortestSignedDeltaDeg(fromDeg: number, toDeg: number): number {
+  return ((((toDeg - fromDeg) % 360) + 540) % 360) - 180;
+}
+
+/** 0 / 90 / 180 / 270 nearest to `deg` (Y-down plan, 0 = +X). */
+export function nearestCardinalDeg(deg: number): number {
+  const n = ((deg % 360) + 360) % 360;
+  const cards = [0, 90, 180, 270];
+  let best = 0;
+  let bestDist = Infinity;
+  for (const c of cards) {
+    const d = Math.abs(shortestSignedDeltaDeg(n, c));
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
+  return best;
+}
+
+/** Degrees to rotate so a line at `lineDeg` matches the CAD grid. */
+export function axisAlignDeltaDeg(lineDeg: number): number {
+  return shortestSignedDeltaDeg(lineDeg, nearestCardinalDeg(lineDeg));
+}
+
+/**
+ * Rotate the sheet so world segment a→b becomes horizontal or vertical
+ * (whichever is closer). House / lot lines then match the CAD grid.
+ */
+export function alignSurveyUnderlayToAxis(
+  underlay: SurveyUnderlay,
+  a: PointMm,
+  b: PointMm,
+): SurveyUnderlay {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  if (Math.hypot(dx, dy) < 1) return underlay;
+  const lineDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  const delta = axisAlignDeltaDeg(lineDeg);
+  if (Math.abs(delta) < 0.05) return underlay;
+  return rotateSurveyUnderlay(underlay, delta);
+}
+
+/**
+ * `imageLineDeg` is a dominant line in the bitmap (0 = top edge / +X).
+ * Rotates the underlay so that line — and the house walls along it — sit on
+ * the CAD grid.
+ */
+export function squareSurveyUnderlayToImageLine(
+  underlay: SurveyUnderlay,
+  imageLineDeg: number,
+): SurveyUnderlay {
+  const worldLineDeg = underlay.rotationDeg + imageLineDeg;
+  const delta = axisAlignDeltaDeg(worldLineDeg);
+  if (Math.abs(delta) < 0.05) return underlay;
+  return rotateSurveyUnderlay(underlay, delta);
+}
+
 /** Rotate about the image center so the sheet stays put. */
 export function rotateSurveyUnderlay(
   underlay: SurveyUnderlay,
