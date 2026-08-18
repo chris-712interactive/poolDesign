@@ -1083,8 +1083,8 @@ export function approximateIntersectionAreaMm2(
 /** Default residential-ish depths: 3' shallow / 8' deep */
 export const DEFAULT_POOL_SHALLOW_MM = 914.4;
 export const DEFAULT_POOL_DEEP_MM = 2438.4;
-/** Typical gunite pool wall ~8" */
-export const DEFAULT_POOL_WALL_THICKNESS_MM = 200;
+/** Typical gunite pool wall — 8″ residential standard. */
+export const DEFAULT_POOL_WALL_THICKNESS_MM = 8 * 25.4;
 /** Typical spa sitting depth ~3'6" */
 export const DEFAULT_SPA_DEPTH_MM = 1066.8;
 /** Typical gunite/shell wall thickness ~6" */

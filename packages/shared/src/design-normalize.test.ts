@@ -6,6 +6,7 @@ import {
   parseDesignDocument,
 } from "./design-normalize";
 import type { DesignDocument } from "./design-model";
+import { DEFAULT_POOL_WALL_THICKNESS_MM } from "./design-model";
 
 describe("normalizeDesignDocument", () => {
   it("fills missing arrays and layers", () => {
@@ -140,7 +141,7 @@ describe("normalizeDesignDocument", () => {
 
     const next = normalizeDesignDocument(raw);
     const pool = next.poolBodies[0];
-    assert.equal(pool.wallThicknessMm, 200);
+    assert.equal(pool.wallThicknessMm, DEFAULT_POOL_WALL_THICKNESS_MM);
   });
 
   it("clamps spa spillover fields", () => {

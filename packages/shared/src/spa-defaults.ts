@@ -247,6 +247,33 @@ export function resizeRectangleOutline(
   ];
 }
 
+/** Inside (waterline) width/length along the same axes as the outside frame. */
+export function insideRectangleSize(
+  outline: PointMm[],
+  wallThicknessMm: number,
+): { widthMm: number; lengthMm: number } | null {
+  const frame = rectangleFrame(outline);
+  if (!frame) return null;
+  const t = Math.max(0, wallThicknessMm);
+  return {
+    widthMm: Math.max(0, frame.widthMm - 2 * t),
+    lengthMm: Math.max(0, frame.lengthMm - 2 * t),
+  };
+}
+
+/** Outside shell size that yields the given waterline with this wall thickness. */
+export function outsideFromInsideRectangle(
+  insideWidthMm: number,
+  insideLengthMm: number,
+  wallThicknessMm: number,
+): { widthMm: number; lengthMm: number } {
+  const t = Math.max(0, wallThicknessMm);
+  return {
+    widthMm: Math.max(50, insideWidthMm + 2 * t),
+    lengthMm: Math.max(50, insideLengthMm + 2 * t),
+  };
+}
+
 export function spaWallThicknessMm(body: PoolBody): number {
   return body.wallThicknessMm ?? DEFAULT_SPA_WALL_THICKNESS_MM;
 }

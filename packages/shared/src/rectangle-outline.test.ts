@@ -4,6 +4,8 @@ import {
   isRectangularOutline,
   rectangleFrame,
   resizeRectangleOutline,
+  insideRectangleSize,
+  outsideFromInsideRectangle,
 } from "./spa-defaults";
 import { offsetClosedOutlineEdge } from "./design-model";
 
@@ -40,6 +42,24 @@ describe("rectangle outline sizing", () => {
     const nf = rectangleFrame(next)!;
     assert.ok(Math.abs(nf.widthMm - 8000) < 1);
     assert.ok(Math.abs(nf.lengthMm - 4000) < 1);
+  });
+
+  it("resizes from inside waterline by adding wall on each side", () => {
+    const outline = [
+      { x: 0, y: 0 },
+      { x: 8000, y: 0 },
+      { x: 8000, y: 4000 },
+      { x: 0, y: 4000 },
+    ];
+    const wall = 203.2;
+    const inside = insideRectangleSize(outline, wall)!;
+    assert.ok(Math.abs(inside.widthMm - (8000 - 2 * wall)) < 0.01);
+    assert.ok(Math.abs(inside.lengthMm - (4000 - 2 * wall)) < 0.01);
+    const outside = outsideFromInsideRectangle(16 * 304.8, 32 * 304.8, wall);
+    const next = resizeRectangleOutline(outline, outside.widthMm, outside.lengthMm);
+    const got = insideRectangleSize(next, wall)!;
+    assert.ok(Math.abs(got.widthMm - 16 * 304.8) < 0.5);
+    assert.ok(Math.abs(got.lengthMm - 32 * 304.8) < 0.5);
   });
 
   it("accepts slightly skewed patio outlines via AABB fallback", () => {

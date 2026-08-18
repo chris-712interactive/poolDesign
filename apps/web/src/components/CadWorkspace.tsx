@@ -49,7 +49,6 @@ import {
   formatLength,
   gateEndpoints,
   gateKindLabel,
-  insideBoundsFromOutside,
   isPadEquipmentId,
   placeEquipmentPadWithStandardKit,
   applyPadTransform,
@@ -94,6 +93,8 @@ import {
   poolCount,
   applyStepsStandardFootprint,
   rectangleFrame,
+  insideRectangleSize,
+  outsideFromInsideRectangle,
   relayoutSpaPackage,
   resetSpaPackage,
   resizeRectangleOutline,
@@ -120,6 +121,7 @@ import {
   spaShellHeightMm,
   spaWallThicknessMm,
   poolWallThicknessMm,
+  bodyWallThicknessMm,
   stripBodyChildren,
   COVER_FOOTING_SIZE_MM,
   COVER_MAX_POST_SPACING_MM,
@@ -4123,12 +4125,22 @@ export function CadWorkspace({
                         </button>
                       ))}
                     </div>
-                    <RectDimensionFields
-                      key={`pool-rect-${selectedPool.id}-${selectedPool.outline.map((p) => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join("|")}`}
+                    <WaterBodyRectSizeFields
+                      key={`pool-size-${selectedPool.id}-${selectedPool.outline.map((p) => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join("|")}-${bodyWallThicknessMm(selectedPool)}`}
                       outline={selectedPool.outline}
+                      wallMm={bodyWallThicknessMm(selectedPool)}
+                      typicalWallMm={
+                        waterBodyKind(selectedPool) === "spa"
+                          ? DEFAULT_SPA_WALL_THICKNESS_MM
+                          : DEFAULT_POOL_WALL_THICKNESS_MM
+                      }
+                      typicalWallLabel={
+                        waterBodyKind(selectedPool) === "spa"
+                          ? "Typical 6″ spa wall"
+                          : "Typical 8″ gunite"
+                      }
                       unitSystem={unitSystem}
-                      widthLabel="Outside width"
-                      lengthLabel="Outside length"
+                      idPrefix="pool"
                       onResize={(widthMm, lengthMm) => {
                         const outline = resizeRectangleOutline(
                           selectedPool.outline,
@@ -4136,6 +4148,29 @@ export function CadWorkspace({
                           lengthMm,
                         );
                         const updated = { ...selectedPool, outline };
+                        if (waterBodyKind(selectedPool) === "spa") {
+                          commitDesign(
+                            relayoutSpaPackage(
+                              {
+                                ...design,
+                                poolBodies: design.poolBodies.map((p) =>
+                                  p.id === selectedPool.id ? updated : p,
+                                ),
+                              },
+                              updated,
+                            ),
+                          );
+                        } else {
+                          commitDesign({
+                            ...design,
+                            poolBodies: design.poolBodies.map((p) =>
+                              p.id === selectedPool.id ? updated : p,
+                            ),
+                          });
+                        }
+                      }}
+                      onWallThickness={(wallThicknessMm) => {
+                        const updated = { ...selectedPool, wallThicknessMm };
                         if (waterBodyKind(selectedPool) === "spa") {
                           commitDesign(
                             relayoutSpaPackage(
@@ -4172,23 +4207,6 @@ export function CadWorkspace({
                         })
                       }
                     />
-                    {waterBodyKind(selectedPool) === "pool" && (
-                      <PoolWallFields
-                        key={`pool-wall-${selectedPool.id}-${poolWallThicknessMm(selectedPool)}`}
-                        body={selectedPool}
-                        unitSystem={unitSystem}
-                        onWallThickness={(wallThicknessMm) =>
-                          commitDesign({
-                            ...design,
-                            poolBodies: design.poolBodies.map((p) =>
-                              p.id === selectedPool.id
-                                ? { ...p, wallThicknessMm }
-                                : p,
-                            ),
-                          })
-                        }
-                      />
-                    )}
                     {waterBodyKind(selectedPool) === "pool" && (
                       <InfinityEdgeFields
                         key={`infinity-${selectedPool.id}-${JSON.stringify(selectedPool.infinityEdge ?? null)}`}
@@ -4232,29 +4250,12 @@ export function CadWorkspace({
                     </div>
                     {waterBodyKind(selectedPool) === "spa" && (
                       <SpaShellFields
-                        key={`spa-shell-${selectedPool.id}-${spaWallThicknessMm(selectedPool)}-${spaShellHeightMm(selectedPool)}-${JSON.stringify(selectedPool.spillover ?? null)}`}
+                        key={`spa-shell-${selectedPool.id}-${spaShellHeightMm(selectedPool)}-${JSON.stringify(selectedPool.spillover ?? null)}`}
                         body={selectedPool}
                         pools={design.poolBodies.filter(
                           (p) => waterBodyKind(p) === "pool",
                         )}
                         unitSystem={unitSystem}
-                        onWallThickness={(wallThicknessMm) => {
-                          const updated = {
-                            ...selectedPool,
-                            wallThicknessMm,
-                          };
-                          commitDesign(
-                            relayoutSpaPackage(
-                              {
-                                ...design,
-                                poolBodies: design.poolBodies.map((p) =>
-                                  p.id === selectedPool.id ? updated : p,
-                                ),
-                              },
-                              updated,
-                            ),
-                          );
-                        }}
                         onShellHeight={(shellHeightMm) =>
                           commitDesign({
                             ...design,
@@ -6437,37 +6438,210 @@ function RectDimensionFields({
   );
 }
 
-function PoolWallFields({
-  body,
+function commitParsedLength(
+  raw: string,
+  unitSystem: UnitSystem,
+  apply: (mm: number) => void,
+  minMm = 50,
+) {
+  const mm = parseLengthToMm(raw, unitSystem);
+  if (mm != null && Number.isFinite(mm) && mm >= minMm) apply(mm);
+}
+
+/** Outside / inside / wall editors for a rectangular pool or spa. */
+function WaterBodyRectSizeFields({
+  outline,
+  wallMm,
+  typicalWallMm,
+  typicalWallLabel,
   unitSystem,
+  idPrefix,
+  onResize,
   onWallThickness,
 }: {
-  body: PoolBody;
+  outline: PointMm[];
+  wallMm: number;
+  typicalWallMm: number;
+  typicalWallLabel: string;
   unitSystem: UnitSystem;
+  idPrefix: string;
+  onResize: (widthMm: number, lengthMm: number) => void;
   onWallThickness: (wallThicknessMm: number) => void;
 }) {
-  const wall = poolWallThicknessMm(body);
-  const inside = insideBoundsFromOutside(body.outline, wall);
+  const frame = rectangleFrame(outline);
+  const inside = insideRectangleSize(outline, wallMm);
+  const typical =
+    Math.abs(wallMm - typicalWallMm) < 0.6;
+
   return (
     <div className="stack" style={{ gap: "0.55rem" }}>
-      <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
-        Outer line = shell outside. Inner line = waterline (outside − wall
-        thickness on each side).
-      </p>
+      {frame && inside ? (
+        <>
+          <strong style={{ fontSize: "0.85rem" }}>Outside (shell)</strong>
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor={`${idPrefix}-out-w`}>Width</label>
+              <input
+                id={`${idPrefix}-out-w`}
+                defaultValue={formatLength(frame.widthMm, unitSystem)}
+                onBlur={(e) =>
+                  commitParsedLength(e.target.value, unitSystem, (mm) =>
+                    onResize(mm, frame.lengthMm),
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  commitParsedLength(
+                    (e.target as HTMLInputElement).value,
+                    unitSystem,
+                    (mm) => onResize(mm, frame.lengthMm),
+                  );
+                  (e.target as HTMLInputElement).blur();
+                }}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor={`${idPrefix}-out-l`}>Length</label>
+              <input
+                id={`${idPrefix}-out-l`}
+                defaultValue={formatLength(frame.lengthMm, unitSystem)}
+                onBlur={(e) =>
+                  commitParsedLength(e.target.value, unitSystem, (mm) =>
+                    onResize(frame.widthMm, mm),
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  commitParsedLength(
+                    (e.target as HTMLInputElement).value,
+                    unitSystem,
+                    (mm) => onResize(frame.widthMm, mm),
+                  );
+                  (e.target as HTMLInputElement).blur();
+                }}
+              />
+            </div>
+          </div>
+          <strong style={{ fontSize: "0.85rem" }}>Inside (waterline)</strong>
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor={`${idPrefix}-in-w`}>Width</label>
+              <input
+                id={`${idPrefix}-in-w`}
+                defaultValue={formatLength(inside.widthMm, unitSystem)}
+                onBlur={(e) =>
+                  commitParsedLength(e.target.value, unitSystem, (mm) => {
+                    const next = outsideFromInsideRectangle(
+                      mm,
+                      inside.lengthMm,
+                      wallMm,
+                    );
+                    onResize(next.widthMm, next.lengthMm);
+                  })
+                }
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  commitParsedLength(
+                    (e.target as HTMLInputElement).value,
+                    unitSystem,
+                    (mm) => {
+                      const next = outsideFromInsideRectangle(
+                        mm,
+                        inside.lengthMm,
+                        wallMm,
+                      );
+                      onResize(next.widthMm, next.lengthMm);
+                    },
+                  );
+                  (e.target as HTMLInputElement).blur();
+                }}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor={`${idPrefix}-in-l`}>Length</label>
+              <input
+                id={`${idPrefix}-in-l`}
+                defaultValue={formatLength(inside.lengthMm, unitSystem)}
+                onBlur={(e) =>
+                  commitParsedLength(e.target.value, unitSystem, (mm) => {
+                    const next = outsideFromInsideRectangle(
+                      inside.widthMm,
+                      mm,
+                      wallMm,
+                    );
+                    onResize(next.widthMm, next.lengthMm);
+                  })
+                }
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  commitParsedLength(
+                    (e.target as HTMLInputElement).value,
+                    unitSystem,
+                    (mm) => {
+                      const next = outsideFromInsideRectangle(
+                        inside.widthMm,
+                        mm,
+                        wallMm,
+                      );
+                      onResize(next.widthMm, next.lengthMm);
+                    },
+                  );
+                  (e.target as HTMLInputElement).blur();
+                }}
+              />
+            </div>
+          </div>
+        </>
+      ) : (
+        <p className="muted" style={{ margin: 0, fontSize: "0.8rem" }}>
+          Drag vertices to resize — typed length/width is available for
+          rectangular pools.
+        </p>
+      )}
       <div className="field">
-        <label htmlFor="pool-wall">Wall thickness</label>
+        <label htmlFor={`${idPrefix}-wall`}>Wall thickness</label>
         <input
-          id="pool-wall"
-          defaultValue={formatLength(wall, unitSystem)}
-          onBlur={(e) => {
-            const mm = parseLengthToMm(e.target.value, unitSystem);
-            if (mm != null && mm >= 0) onWallThickness(mm);
+          id={`${idPrefix}-wall`}
+          defaultValue={formatLength(wallMm, unitSystem)}
+          onBlur={(e) =>
+            commitParsedLength(
+              e.target.value,
+              unitSystem,
+              onWallThickness,
+              0,
+            )
+          }
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return;
+            e.preventDefault();
+            commitParsedLength(
+              (e.target as HTMLInputElement).value,
+              unitSystem,
+              onWallThickness,
+              0,
+            );
+            (e.target as HTMLInputElement).blur();
           }}
         />
-      </div>
-      <div className="muted" style={{ fontSize: "0.8rem" }}>
-        Inside waterline: {formatLength(inside.width, unitSystem)} ×{" "}
-        {formatLength(inside.height, unitSystem)}
+        <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.75rem" }}>
+          {typicalWallLabel} is the default. Changing thickness keeps the
+          outside shell; the waterline updates. Set inside size to lock the
+          water.
+        </p>
+        {!typical ? (
+          <button
+            type="button"
+            className="btn secondary"
+            style={{ marginTop: "0.35rem", width: "100%" }}
+            onClick={() => onWallThickness(typicalWallMm)}
+          >
+            Use {typicalWallLabel.toLowerCase()}
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -6989,20 +7163,16 @@ function SpaShellFields({
   body,
   pools,
   unitSystem,
-  onWallThickness,
   onShellHeight,
   onSpillover,
 }: {
   body: PoolBody;
   pools: PoolBody[];
   unitSystem: UnitSystem;
-  onWallThickness: (wallThicknessMm: number) => void;
   onShellHeight: (shellHeightMm: number) => void;
   onSpillover: (spillover: SpaSpillover) => void;
 }) {
-  const wall = spaWallThicknessMm(body);
   const shellHeight = spaShellHeightMm(body);
-  const inside = insideBoundsFromOutside(body.outline, wall);
   const edges = listSpaSpilloverEdges(body, pools);
   const canSpill = edges.length > 0;
   const spillCfg: SpaSpillover = body.spillover ?? { enabled: true };
@@ -7028,20 +7198,6 @@ function SpaShellFields({
 
   return (
     <div className="stack" style={{ gap: "0.55rem" }}>
-      <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
-        Inside waterline = outside − wall thickness on each side.
-      </p>
-      <div className="field">
-        <label htmlFor="spa-wall">Wall thickness</label>
-        <input
-          id="spa-wall"
-          defaultValue={formatLength(wall, unitSystem)}
-          onBlur={(e) => {
-            const mm = parseLengthToMm(e.target.value, unitSystem);
-            if (mm != null && mm >= 0) onWallThickness(mm);
-          }}
-        />
-      </div>
       <div className="field">
         <label htmlFor="spa-shell-h">Shell height (above patio)</label>
         <input
@@ -7063,10 +7219,6 @@ function SpaShellFields({
         Height of the spa rim above the patio surface. 0″ = flush with the
         patio (not below it).
       </p>
-      <div className="muted" style={{ fontSize: "0.8rem" }}>
-        Inside waterline: {formatLength(inside.width, unitSystem)} ×{" "}
-        {formatLength(inside.height, unitSystem)}
-      </div>
 
       <strong style={{ fontSize: "0.9rem", marginTop: "0.25rem" }}>
         Spillover
