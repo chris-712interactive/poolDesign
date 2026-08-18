@@ -337,28 +337,46 @@ textarea {
 }
 
 .first-job {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
-  gap: 2rem;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  width: 100%;
+  max-width: 34rem;
+  margin: 1.25rem auto 0;
+  padding: 1.45rem 1.55rem 1.55rem;
 }
 
 .first-job-kicker {
-  margin: 0 0 0.35rem;
-  text-transform: none;
+  margin: 0 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .first-job-copy h1 {
-  margin: 0 0 0.65rem;
+  margin: 0 0 0.4rem;
+  font-size: 1.7rem;
 }
 
 .first-job-copy p {
-  margin: 0 0 0.85rem;
-  max-width: 38rem;
+  margin: 0 0 0.55rem;
+  max-width: none;
+  font-size: 0.95rem;
+  line-height: 1.45;
 }
 
 .first-job-copy p:last-child {
   margin-bottom: 0;
+}
+
+.first-job form.stack {
+  gap: 0.7rem;
+}
+
+.first-job .field input,
+.first-job .field select {
+  padding: 0.5rem 0.7rem;
 }
 
 .grid-3 {
@@ -376,9 +394,12 @@ textarea {
 @media (max-width: 900px) {
   .grid-2,
   .grid-3,
-  .first-job,
   .address-grid {
     grid-template-columns: 1fr;
+  }
+
+  .first-job {
+    margin-top: 0.35rem;
   }
 }
 

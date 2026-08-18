@@ -13,10 +13,12 @@ export function CreateProjectForm({
   enabledLevels,
   heading = "New project",
   submitLabel = "Create project",
+  compact = false,
 }: {
   enabledLevels: DesignLevel[];
   heading?: string;
   submitLabel?: string;
+  compact?: boolean;
 }) {
   const [site, setSite] = useState<AddressParts>({
     street: "",
@@ -28,7 +30,7 @@ export function CreateProjectForm({
 
   return (
     <form action={createProjectAction} className="stack">
-      <h2>{heading}</h2>
+      {compact ? null : <h2>{heading}</h2>}
       <div className="field">
         <label htmlFor="name">Project name</label>
         <input
@@ -60,9 +62,11 @@ export function CreateProjectForm({
         </div>
       </div>
       <div>
-        <p className="muted" style={{ margin: "0 0 0.5rem" }}>
-          Job site — city and state are used to see where work is coming from.
-        </p>
+        {compact ? null : (
+          <p className="muted" style={{ margin: "0 0 0.5rem" }}>
+            Job site — city and state are used to see where work is coming from.
+          </p>
+        )}
         <AddressFields
           idPrefix="job"
           value={site}

@@ -44,9 +44,8 @@ export default async function ProjectsPage() {
               <p className="muted first-job-kicker">{company.name}</p>
               <h1>Open the first job</h1>
               <p>
-                Name the backyard, pick a design level, and set the job-site
-                city and state. Next you will drop the survey on the sheet — the
-                same drawing drives 3D and takeoff.
+                Name the backyard, add the job-site city and state, then create
+                the project. Next you&apos;ll drop the survey on the sheet.
               </p>
               {isAdmin ? (
                 <p className="muted">
@@ -60,7 +59,7 @@ export default async function ProjectsPage() {
             </div>
             <CreateProjectForm
               enabledLevels={enabled}
-              heading="Job details"
+              compact
               submitLabel="Create and open"
             />
           </div>
