@@ -3721,7 +3721,11 @@ export function CadWorkspace({
           entitlements={planEntitlements}
         />
       ) : view === "measurements" ? (
-        <MeasurementsPanel design={design} unitSystem={unitSystem} />
+        <MeasurementsPanel
+          projectId={projectId}
+          design={design}
+          unitSystem={unitSystem}
+        />
       ) : (
         <>
           {surveyPromptOpen ? (

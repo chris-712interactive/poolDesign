@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { emptyDesignDocument } from "./design-model";
-import { DEFAULT_POOL_WALL_THICKNESS_MM } from "./design-model";
 import {
+  DEFAULT_POOL_WALL_THICKNESS_MM,
+  emptyDesignDocument,
+} from "./design-model";
+import {
+  buildMeasurementsHtml,
   buildPlanMeasurements,
   formatPlanMeasurement,
 } from "./plan-measurements";
@@ -94,5 +97,33 @@ describe("plan measurements", () => {
   it("returns nothing useful on an empty design", () => {
     const groups = buildPlanMeasurements(emptyDesignDocument("residential"));
     assert.equal(groups.length, 0);
+  });
+
+  it("renders a printable measurements sheet", () => {
+    const design = emptyDesignDocument("residential");
+    design.poolBodies = [
+      {
+        id: "p1",
+        name: "Pool 1",
+        kind: "pool",
+        outline: rect(16 * FT, 32 * FT),
+        depthShallowMm: 914,
+        depthDeepMm: 2438,
+        wallThicknessMm: DEFAULT_POOL_WALL_THICKNESS_MM,
+      },
+    ];
+    const html = buildMeasurementsHtml(
+      {
+        companyName: "Acme Pools",
+        projectName: "Smith Residence",
+        address: "12 Palm Ave",
+      },
+      buildPlanMeasurements(design, "imperial"),
+      "imperial",
+    );
+    assert.ok(html.includes("Smith Residence"));
+    assert.ok(html.includes("Pool · Pool 1"));
+    assert.ok(html.includes("Outside perimeter"));
+    assert.ok(html.includes("Save as PDF"));
   });
 });

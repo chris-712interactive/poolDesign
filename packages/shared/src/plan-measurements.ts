@@ -29,6 +29,7 @@ import {
   totalRetainingLf,
 } from "./site-grade";
 import { waterVolumeGal } from "./depth-profile";
+import { formatProjectMetaLine } from "./address";
 import { formatArea, formatLength, type UnitSystem } from "./units";
 
 export type PlanMeasurementUnit =
@@ -510,4 +511,134 @@ export function planMeasurementsPlainText(
     lines.push("");
   }
   return lines.join("\n").trim();
+}
+
+export type MeasurementsDocMeta = {
+  companyName: string;
+  companyLogoUrl?: string | null;
+  companyRegion?: string | null;
+  projectName: string;
+  clientName?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  generatedAt?: string;
+};
+
+function esc(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Printable HTML measurements sheet (browser Print → Save as PDF). */
+export function buildMeasurementsHtml(
+  meta: MeasurementsDocMeta,
+  groups: PlanMeasurementGroup[],
+  unitSystem: UnitSystem,
+): string {
+  const when = meta.generatedAt
+    ? new Date(meta.generatedAt).toLocaleString()
+    : new Date().toLocaleString();
+  const metaLine = formatProjectMetaLine({
+    clientName: meta.clientName,
+    phone: meta.phone,
+    address: meta.address,
+  });
+  const sections = groups
+    .map((group) => {
+      const rows = group.rows
+        .map(
+          (row) => `<tr>
+  <td>${esc(row.label)}</td>
+  <td class="qty">${esc(formatPlanMeasurement(row, unitSystem))}</td>
+  <td class="muted">${esc(row.note ?? "")}</td>
+</tr>`,
+        )
+        .join("\n");
+      return `<section>
+  <h2>${esc(group.title)}</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Quantity</th>
+        <th>Note</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+  </table>
+</section>`;
+    })
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Measurements — ${esc(meta.projectName)}</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: "Source Serif 4", Georgia, serif; margin: 0; color: #1a2420; background: #f7f4ef; }
+    .sheet { max-width: 880px; margin: 0 auto; padding: 2rem 1.5rem 3rem; background: #fff; }
+    header { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 2px solid #1a2420; padding-bottom: 1rem; margin-bottom: 1.25rem; }
+    .brand { display: flex; gap: 0.85rem; align-items: center; }
+    .logo { max-height: 48px; max-width: 140px; object-fit: contain; }
+    h1 { font-size: 1.55rem; margin: 0 0 0.25rem; font-family: "Fraunces", Georgia, serif; }
+    h2 { font-size: 1.05rem; margin: 1.35rem 0 0.35rem; font-family: "Fraunces", Georgia, serif; }
+    .muted { color: #5c6b64; font-size: 0.9rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.45rem 0.35rem; border-bottom: 1px solid #d9e0db; vertical-align: top; font-size: 0.9rem; }
+    th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #5c6b64; }
+    .qty { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 650; }
+    .disclaimer { margin-top: 1.75rem; font-size: 0.8rem; color: #5c6b64; border-top: 1px solid #d9e0db; padding-top: 0.85rem; }
+    .no-print-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+    button.print { appearance: none; border: 1px solid #1a2420; background: #1a2420; color: #fff; padding: 0.4rem 0.85rem; border-radius: 8px; font-weight: 650; cursor: pointer; }
+    @media print {
+      body { background: #fff; }
+      .sheet { max-width: none; padding: 0; }
+      .no-print { display: none !important; }
+      section { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="no-print no-print-actions">
+      <button type="button" class="print" onclick="window.print()">Print / Save as PDF</button>
+      <span class="muted">In the print dialog, choose “Save as PDF”.</span>
+    </div>
+    <header>
+      <div class="brand">
+        ${
+          meta.companyLogoUrl
+            ? `<img class="logo" src="${esc(meta.companyLogoUrl)}" alt="" />`
+            : ""
+        }
+        <div>
+          <div><strong>${esc(meta.companyName)}</strong></div>
+          ${meta.companyRegion ? `<div class="muted">${esc(meta.companyRegion)}</div>` : ""}
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div class="muted">Plan measurements</div>
+        <div class="muted">${esc(when)}</div>
+      </div>
+    </header>
+    <h1>${esc(meta.projectName)}</h1>
+    <p class="muted">${esc(metaLine || "—")}</p>
+    ${
+      sections ||
+      `<p class="muted">No quantities yet. Draw a pool, patio, plumbing run, or fence.</p>`
+    }
+    <p class="disclaimer">
+      Quantity schedule from the PoolShape design model. Patio paving area is the
+      deck minus pool and spa holes. Not a priced estimate or a survey.
+    </p>
+  </div>
+</body>
+</html>`;
 }

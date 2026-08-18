@@ -10,16 +10,23 @@ import {
 } from "@pool-design/shared";
 
 type Props = {
+  projectId: string;
   design: DesignDocument;
   unitSystem: UnitSystem;
 };
 
-export function MeasurementsPanel({ design, unitSystem }: Props) {
+export function MeasurementsPanel({
+  projectId,
+  design,
+  unitSystem,
+}: Props) {
   const groups = useMemo(
     () => buildPlanMeasurements(design, unitSystem),
     [design, unitSystem],
   );
   const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   async function copyList() {
     const text = planMeasurementsPlainText(groups, unitSystem);
@@ -29,6 +36,25 @@ export function MeasurementsPanel({ design, unitSystem }: Props) {
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
       setCopied(false);
+    }
+  }
+
+  async function openPdf() {
+    setExportError(null);
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/measurements`);
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
+        setExportError(json.error || "Could not open measurements PDF");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -44,11 +70,28 @@ export function MeasurementsPanel({ design, unitSystem }: Props) {
           </p>
         </div>
         {groups.length > 0 ? (
-          <button type="button" className="btn secondary" onClick={() => void copyList()}>
-            {copied ? "Copied" : "Copy list"}
-          </button>
+          <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => void copyList()}
+            >
+              {copied ? "Copied" : "Copy list"}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void openPdf()}
+              disabled={exporting}
+              title="Open a printable sheet — Save as PDF from the browser"
+            >
+              {exporting ? "Opening…" : "Export PDF"}
+            </button>
+          </div>
         ) : null}
       </div>
+
+      {exportError ? <p className="error">{exportError}</p> : null}
 
       {groups.length === 0 ? (
         <p className="muted" style={{ margin: 0 }}>
