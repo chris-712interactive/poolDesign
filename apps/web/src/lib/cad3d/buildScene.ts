@@ -569,8 +569,6 @@ function pushInfinityEdgeMeshes(
     });
   };
 
-  const wallT = Math.max(80, opts.wallThicknessMm);
-
   for (const edge of opts.edges) {
     const weirA = edge.edgeA ?? edge.a;
     const weirB = edge.edgeB ?? edge.b;
@@ -581,9 +579,11 @@ function pushInfinityEdgeMeshes(
     const troughDepthM = mmToMeters(edge.troughDepthMm);
     const troughWaterM = mmToMeters(edge.troughWaterDepthMm);
     const troughBottom = -troughDepthM;
-    const troughTop = Math.max(opts.crestY + 0.04, -0.02);
-    const wallMm = 140;
-    const floorT = 0.1;
+    // Outer wall is the catch-basin face: floor → just under the spill, the
+    // full trough height. Fill is punched away so it does not wrap this wall.
+    const troughTop = opts.crestY;
+    const wallMm = 160;
+    const floorT = 0.12;
 
     meshes.push({
       kind: "extrude",
@@ -603,6 +603,7 @@ function pushInfinityEdgeMeshes(
       wallMm,
       troughBottom,
       troughTop,
+      "retaining",
     );
     pushWall(
       `pool_${opts.poolId}_troughendA_${edge.edgeIndex}`,
@@ -621,20 +622,6 @@ function pushInfinityEdgeMeshes(
       wallMm,
       troughBottom,
       troughTop,
-    );
-
-    // Coping cap on the vanishing weir so adjacent coping meets the edge.
-    const capH = 0.022;
-    const capTop = opts.crestY + capH;
-    pushWall(
-      `pool_${opts.poolId}_weircap_${edge.edgeIndex}`,
-      weirA,
-      weirB,
-      { x: -edge.nx, y: -edge.ny },
-      wallT,
-      opts.crestY,
-      capTop,
-      "coping",
     );
 
     const waterPoly = [
@@ -687,13 +674,13 @@ function pushInfinityEdgeMeshes(
           ny: edge.ny,
         });
       }
-      const drop = Math.max(0.12, capTop - waterTop);
+      const drop = Math.max(0.12, opts.crestY - waterTop);
       meshes.push({
         kind: "spilloverRibbon",
         id: `pool_${opts.poolId}_inffall_${edge.edgeIndex}_${oi}`,
         material: "spilloverWater",
         crest,
-        crestY: capTop + 0.003,
+        crestY: opts.crestY + 0.003,
         poolWaterY: waterTop + 0.01,
         flareM: Math.max(0.12, Math.min(0.38, drop * 0.85)),
         lipTuckM: 0.04,
@@ -723,7 +710,7 @@ function pushInfinityEdgeMeshes(
         id: `pool_${opts.poolId}_weirfilm_${edge.edgeIndex}_${oi}`,
         material: "poolWater",
         outlineMm: closeOutline(film),
-        bottomY: capTop - 0.002,
+        bottomY: opts.crestY - 0.002,
         height: 0.012,
         opacity: 0.35,
         waterShallow: true,
@@ -2375,12 +2362,15 @@ export function buildSceneModel(
     if (p.outline.length >= 3) poolPitHoles.push(pitHoleOutline(p.outline));
   }
   const infinityDeckCuts: PointMm[][] = [];
+  const infinityTroughCuts: PointMm[][] = [];
   const infinityEdgesAll: ResolvedInfinityEdge[] = [];
   for (const p of pools) {
     if (p.outline.length < 3) continue;
+    const wallMm = poolWallThicknessMm(p);
     for (const edge of resolveInfinityEdges(p)) {
       infinityEdgesAll.push(edge);
-      infinityDeckCuts.push(closeOutline(infinityDeckCutPolygon(edge, 40)));
+      infinityDeckCuts.push(closeOutline(infinityDeckCutPolygon(edge, wallMm)));
+      infinityTroughCuts.push(closeOutline(infinityTroughPolygon(edge)));
     }
   }
   for (const s of spas) {
@@ -2400,7 +2390,8 @@ export function buildSceneModel(
   // Prefer solid AABB slabs with pits subtracted (reliable). Fall back to
   // Extrude holes only when the outline isn't a rectangle.
   // Always punch pool/spa pits out of grade so basins stay clear.
-  const groundRegions = subtractAabbHoles(groundOutline, poolPitHoles);
+  const groundHoles = deckPunchHoles(poolPitHoles, infinityTroughCuts);
+  const groundRegions = subtractAabbHoles(groundOutline, groundHoles);
   if (!hasGradeSamples && groundRegions.length > 0) {
     let gi = 0;
     for (const region of groundRegions) {
@@ -2463,7 +2454,7 @@ export function buildSceneModel(
     material: "ground",
     outlineMm: groundOutline,
     // When subtracted slabs / terrain were emitted, skip the solid ground mesh.
-    holeOutlinesMm: groundRegions.length > 0 ? [] : poolPitHoles,
+    holeOutlinesMm: groundRegions.length > 0 ? [] : groundHoles,
     bottomY: -0.04,
     height:
       hasGradeSamples || groundRegions.length > 0 ? 0 : 0.04,
@@ -3281,31 +3272,63 @@ export function buildSceneModel(
         // Edge indexes come from the authorable pool outline, not spa-clipped walls.
         const pts = ringPoints(outer);
         const infinityOmits = infinityEdges.length
-          ? infinityEdges.map((edge) => {
-              const edgeA = pts[edge.edgeIndex];
-              const edgeB = pts[(edge.edgeIndex + 1) % pts.length];
-              if (!edgeA || !edgeB) {
-                return { edgeIndex: edge.edgeIndex, intervals: [] as [number, number][] };
+          ? (() => {
+              const rows: {
+                edgeIndex: number;
+                intervals: [number, number][];
+              }[] = [];
+              const pushOmit = (
+                edgeIndex: number,
+                intervals: [number, number][],
+              ) => {
+                const existing = rows.find((r) => r.edgeIndex === edgeIndex);
+                if (existing) existing.intervals.push(...intervals);
+                else rows.push({ edgeIndex, intervals });
+              };
+              const n = pts.length;
+              const cornerClipMm = 420;
+              for (const edge of infinityEdges) {
+                const edgeA = pts[edge.edgeIndex];
+                const edgeB = pts[(edge.edgeIndex + 1) % n];
+                if (!edgeA || !edgeB) continue;
+                const edgeLen = Math.hypot(
+                  edgeB.x - edgeA.x,
+                  edgeB.y - edgeA.y,
+                );
+                let intervals = infinityOmitIntervals(edge, edgeA, edgeB);
+                const prevWeir = infinityEdges.find(
+                  (s) => (s.edgeIndex + 1) % n === edge.edgeIndex,
+                );
+                const nextWeir = infinityEdges.find(
+                  (s) => s.edgeIndex === (edge.edgeIndex + 1) % n,
+                );
+                if (prevWeir || nextWeir) {
+                  intervals = intervals.map(([t0, t1]) => {
+                    let lo = t0;
+                    let hi = t1;
+                    if (prevWeir) lo = Math.min(lo, 0);
+                    if (nextWeir) hi = Math.max(hi, edgeLen);
+                    return [lo, hi] as [number, number];
+                  });
+                }
+                pushOmit(edge.edgeIndex, intervals);
+                const prev = (edge.edgeIndex - 1 + n) % n;
+                const next = (edge.edgeIndex + 1) % n;
+                const prevLen = Math.hypot(
+                  pts[edge.edgeIndex].x - pts[prev].x,
+                  pts[edge.edgeIndex].y - pts[prev].y,
+                );
+                const nextLen = Math.hypot(
+                  pts[(next + 1) % n].x - pts[next].x,
+                  pts[(next + 1) % n].y - pts[next].y,
+                );
+                pushOmit(prev, [
+                  [Math.max(0, prevLen - cornerClipMm), prevLen],
+                ]);
+                pushOmit(next, [[0, Math.min(nextLen, cornerClipMm)]]);
               }
-              const edgeLen = Math.hypot(edgeB.x - edgeA.x, edgeB.y - edgeA.y);
-              let intervals = infinityOmitIntervals(edge, edgeA, edgeB);
-              const prev = infinityEdges.find(
-                (s) => (s.edgeIndex + 1) % pts.length === edge.edgeIndex,
-              );
-              const next = infinityEdges.find(
-                (s) => s.edgeIndex === (edge.edgeIndex + 1) % pts.length,
-              );
-              if (prev || next) {
-                intervals = intervals.map(([t0, t1]) => {
-                  let lo = t0;
-                  let hi = t1;
-                  if (prev) lo = Math.min(lo, 0);
-                  if (next) hi = Math.max(hi, edgeLen);
-                  return [lo, hi] as [number, number];
-                });
-              }
-              return { edgeIndex: edge.edgeIndex, intervals };
-            })
+              return rows;
+            })()
           : undefined;
         const crestY = infinityEdges.length ? waterTopY : lip;
         const weirOpenings = infinityEdges.flatMap((e) => [

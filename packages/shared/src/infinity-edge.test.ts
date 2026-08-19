@@ -166,8 +166,8 @@ describe("infinity edge", () => {
       edge.edgeB.y - edge.edgeA.y,
     );
     assert.ok(
-      Math.abs(cutSpan - edgeSpan) < 1,
-      "deck cut stays on the pool edge",
+      cutSpan > edgeSpan + 3 * FT,
+      "deck cut clears the weir returns",
     );
     const trough = infinityTroughPolygon(edge);
     const troughSpan = Math.hypot(

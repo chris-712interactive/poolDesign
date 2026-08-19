@@ -522,17 +522,24 @@ export function infinityTroughPolygon(
 }
 
 /**
- * Punch pavers / fill from the weir through the catch trough only.
- * Stay on the pool edge — along-padding extruded leftover walls into the yard.
+ * Punch pavers / fill from the weir through the trough and the weir-side
+ * deck. A short along-pad clears the side-deck returns without shooting
+ * leftover walls into the yard.
  */
 export function infinityDeckCutPolygon(
   resolved: ResolvedInfinityEdge,
-  insetMm = 40,
+  insetMm = 200,
 ): PointMm[] {
-  const inset = Math.max(20, Math.min(80, insetMm));
-  const outPad = 80;
-  const a = resolved.edgeA ?? resolved.a;
-  const b = resolved.edgeB ?? resolved.b;
+  const inset = Math.max(160, insetMm);
+  const outPad = 20000;
+  const alongPad = 1800;
+  const a0 = resolved.edgeA ?? resolved.a;
+  const b0 = resolved.edgeB ?? resolved.b;
+  const len = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1;
+  const ux = (b0.x - a0.x) / len;
+  const uy = (b0.y - a0.y) / len;
+  const a = { x: a0.x - ux * alongPad, y: a0.y - uy * alongPad };
+  const b = { x: b0.x + ux * alongPad, y: b0.y + uy * alongPad };
   return [
     {
       x: a.x - resolved.nx * inset,
