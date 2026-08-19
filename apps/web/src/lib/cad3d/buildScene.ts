@@ -72,6 +72,7 @@ import {
   infinityTroughPolygon,
   infinityTroughOuterSpan,
   infinityDeckCutPolygon,
+  infinityFillRevealPolygon,
   siteLineLayerIds,
   siteLineSegments,
   type BuildingOpeningKind,
@@ -2005,7 +2006,8 @@ function retainingSegmentFacesInfinity(
       x: (e.edgeA.x + e.edgeB.x) / 2,
       y: (e.edgeA.y + e.edgeB.y) / 2,
     };
-    const along = (mid.x - e.edgeA.x) * (wdx / wlen) + (mid.y - e.edgeA.y) * (wdy / wlen);
+    const along =
+      (mid.x - e.edgeA.x) * (wdx / wlen) + (mid.y - e.edgeA.y) * (wdy / wlen);
     if (along < -400 || along > wlen + 400) continue;
     const outward =
       (mid.x - weirMid.x) * e.nx + (mid.y - weirMid.y) * e.ny;
@@ -2014,17 +2016,78 @@ function retainingSegmentFacesInfinity(
   return false;
 }
 
-function patioOwnsInfinityEdge(
-  outline: PointMm[],
-  edge: ResolvedInfinityEdge,
-): boolean {
-  const outer = infinityTroughOuterSpan(edge);
-  const mid = {
-    x: (outer.a.x + outer.b.x) / 2,
-    y: (outer.a.y + outer.b.y) / 2,
-  };
-  if (pointInPolygon(mid, outline)) return true;
-  return distToPolygonBoundaryMm(mid, outline) < 2500;
+const WEIR_RETAIN_REVEAL_MM = 900;
+
+function weirOutwardMm(p: PointMm, edge: ResolvedInfinityEdge): number {
+  const a = edge.edgeA ?? edge.a;
+  return (p.x - a.x) * edge.nx + (p.y - a.y) * edge.ny;
+}
+
+/** Clip retaining that would stand in the vanishing view; split the weir returns. */
+function splitRetainingForInfinity(
+  a: PointMm,
+  b: PointMm,
+  edges: ResolvedInfinityEdge[],
+): { a: PointMm; b: PointMm; belowSpill: boolean }[] {
+  if (!edges.length) return [{ a, b, belowSpill: false }];
+  let a0 = a;
+  let b0 = b;
+  for (const e of edges) {
+    const da = weirOutwardMm(a0, e);
+    const db = weirOutwardMm(b0, e);
+    if (da > 30 && db > 30) return [];
+    if (da > 30 !== db > 30) {
+      const t = da / (da - db);
+      const hit = {
+        x: a0.x + (b0.x - a0.x) * t,
+        y: a0.y + (b0.y - a0.y) * t,
+      };
+      if (da > 30) a0 = hit;
+      else b0 = hit;
+    }
+  }
+  if (Math.hypot(b0.x - a0.x, b0.y - a0.y) < 80) return [];
+
+  let pieces: { a: PointMm; b: PointMm }[] = [{ a: a0, b: b0 }];
+  for (const e of edges) {
+    const next: { a: PointMm; b: PointMm }[] = [];
+    for (const p of pieces) {
+      const da = weirOutwardMm(p.a, e);
+      const db = weirOutwardMm(p.b, e);
+      if (Math.abs(db - da) < 1) {
+        next.push(p);
+        continue;
+      }
+      const t = (-WEIR_RETAIN_REVEAL_MM - da) / (db - da);
+      if (t <= 0.02 || t >= 0.98) {
+        next.push(p);
+        continue;
+      }
+      const hit = {
+        x: p.a.x + (p.b.x - p.a.x) * t,
+        y: p.a.y + (p.b.y - p.a.y) * t,
+      };
+      next.push({ a: p.a, b: hit });
+      next.push({ a: hit, b: p.b });
+    }
+    pieces = next;
+  }
+
+  return pieces.map((p) => {
+    const mid = { x: (p.a.x + p.b.x) / 2, y: (p.a.y + p.b.y) / 2 };
+    const belowSpill = edges.some((e) => {
+      const d = weirOutwardMm(mid, e);
+      if (d <= -WEIR_RETAIN_REVEAL_MM - 20) return false;
+      const wdx = e.edgeB.x - e.edgeA.x;
+      const wdy = e.edgeB.y - e.edgeA.y;
+      const wlen = Math.hypot(wdx, wdy) || 1;
+      const along =
+        (mid.x - e.edgeA.x) * (wdx / wlen) +
+        (mid.y - e.edgeA.y) * (wdy / wlen);
+      return along > -2500 && along < wlen + 2500;
+    });
+    return { ...p, belowSpill };
+  });
 }
 
 function pipeMaterialForCircuit(
@@ -2354,12 +2417,14 @@ export function buildSceneModel(
     if (p.outline.length >= 3) poolPitHoles.push(pitHoleOutline(p.outline));
   }
   const infinityDeckCuts: PointMm[][] = [];
+  const infinityFillReveals: PointMm[][] = [];
   const infinityEdgesAll: ResolvedInfinityEdge[] = [];
   for (const p of pools) {
     if (p.outline.length < 3) continue;
     for (const edge of resolveInfinityEdges(p)) {
       infinityEdgesAll.push(edge);
       infinityDeckCuts.push(closeOutline(infinityDeckCutPolygon(edge, 40)));
+      infinityFillReveals.push(closeOutline(infinityFillRevealPolygon(edge)));
     }
   }
   for (const s of spas) {
@@ -2832,13 +2897,17 @@ export function buildSceneModel(
           maxDropMm > PATIO_SLAB_THICKNESS_MM + 40
         ) {
           const dropM = mmToMeters(maxDropMm);
+          const fillHoles = deckPunchHoles(poolPitHoles, [
+            ...infinityDeckCuts,
+            ...infinityFillReveals,
+          ]);
           // Continuous fill pad: existing grade → slab underside (y = 0).
           // Punch pool/spa pits the same way as the deck (AABB subtract is
           // reliable; ExtrudeGeometry holes often leave wedges in the basin).
-          if (isAxisAlignedRect(open, 80) && canAabbPunch(open, punchHoles)) {
+          if (isAxisAlignedRect(open, 80) && canAabbPunch(open, fillHoles)) {
             const fillRegions =
-              punchHoles.length > 0
-                ? subtractAabbHoles(open, punchHoles)
+              fillHoles.length > 0
+                ? subtractAabbHoles(open, fillHoles)
                 : [open];
             let fi = 0;
             for (const region of fillRegions) {
@@ -2859,8 +2928,7 @@ export function buildSceneModel(
               id: `fill_${p.id}`,
               material: "fill",
               outlineMm: closeOutline(p.outline),
-              holeOutlinesMm:
-                punchHoles.length > 0 ? punchHoles : undefined,
+              holeOutlinesMm: fillHoles.length > 0 ? fillHoles : undefined,
               bottomY: -dropM,
               height: dropM,
               select,
@@ -2878,6 +2946,7 @@ export function buildSceneModel(
             ny: number,
             offsetMm: number,
             dropMm: number,
+            topY: number,
           ) => {
             const dx = b.x - a.x;
             const dy = b.y - a.y;
@@ -2889,7 +2958,8 @@ export function buildSceneModel(
               y: mid.y + ny * offsetMm,
             };
             const lenM = mmToMeters(len);
-            const hM = Math.max(0.2, mmToMeters(dropMm));
+            const bottom = -Math.max(0.2, mmToMeters(dropMm));
+            const height = Math.max(0.08, topY - bottom);
             const thickM = 0.25;
             const along = planDirToWorldXZ(dx, dy);
             const xz = planToWorldXZ(wallMid);
@@ -2899,10 +2969,10 @@ export function buildSceneModel(
               material: "retaining",
               position: {
                 x: xz.x,
-                y: -hM / 2 + t,
+                y: bottom + height / 2,
                 z: xz.z,
               },
-              size: { x: Math.max(0.35, lenM), y: hM + t, z: thickM },
+              size: { x: Math.max(0.35, lenM), y: height, z: thickM },
               rotationY: Math.atan2(-along.z, along.x),
               select,
             });
@@ -2911,35 +2981,39 @@ export function buildSceneModel(
             if (retainingSegmentFacesInfinity(seg.a, seg.b, infinityEdgesAll)) {
               continue;
             }
-            const mid = {
-              x: (seg.a.x + seg.b.x) / 2,
-              y: (seg.a.y + seg.b.y) / 2,
-            };
             const dx = seg.b.x - seg.a.x;
             const dy = seg.b.y - seg.a.y;
             const len = Math.hypot(dx, dy) || 1;
+            const mid0 = {
+              x: (seg.a.x + seg.b.x) / 2,
+              y: (seg.a.y + seg.b.y) / 2,
+            };
             let nx = -dy / len;
             let ny = dx / len;
-            if (nx * (patioBb.cx - mid.x) + ny * (patioBb.cy - mid.y) > 0) {
+            if (nx * (patioBb.cx - mid0.x) + ny * (patioBb.cy - mid0.y) > 0) {
               nx = -nx;
               ny = -ny;
             }
-            pushRetainBox(seg.a, seg.b, nx, ny, 120, seg.dropMm);
-          }
-          for (const edge of infinityEdgesAll) {
-            if (!patioOwnsInfinityEdge(p.outline, edge)) continue;
-            const outer = infinityTroughOuterSpan(edge);
-            const mid = {
-              x: (outer.a.x + outer.b.x) / 2,
-              y: (outer.a.y + outer.b.y) / 2,
-            };
-            const dropMm = Math.max(
-              edge.troughDepthMm,
-              existingGradeDropMm(mid, gradeSamples),
-              analysis.maxFillHeightMm,
+            const pieces = splitRetainingForInfinity(
+              seg.a,
+              seg.b,
+              infinityEdgesAll,
             );
-            // Sit on the outer trough face (thickness grows outward).
-            pushRetainBox(outer.a, outer.b, edge.nx, edge.ny, 125, dropMm);
+            for (const piece of pieces) {
+              const topY = piece.belowSpill ? waterTopY : t;
+              if (topY <= -Math.max(0.2, mmToMeters(seg.dropMm)) + 0.05) {
+                continue;
+              }
+              pushRetainBox(
+                piece.a,
+                piece.b,
+                nx,
+                ny,
+                120,
+                seg.dropMm,
+                topY,
+              );
+            }
           }
         }
       }

@@ -560,3 +560,39 @@ export function infinityDeckCutPolygon(
     },
   ];
 }
+
+const WEIR_REVEAL_MM = 900;
+
+/** Band along the weir, into the side decks, so fill does not tower at the returns. */
+export function infinityFillRevealPolygon(
+  resolved: ResolvedInfinityEdge,
+  inwardMm = WEIR_REVEAL_MM,
+): PointMm[] {
+  const inset = Math.max(40, inwardMm);
+  const alongPad = 25000;
+  const a0 = resolved.edgeA ?? resolved.a;
+  const b0 = resolved.edgeB ?? resolved.b;
+  const len = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1;
+  const ux = (b0.x - a0.x) / len;
+  const uy = (b0.y - a0.y) / len;
+  const a = { x: a0.x - ux * alongPad, y: a0.y - uy * alongPad };
+  const b = { x: b0.x + ux * alongPad, y: b0.y + uy * alongPad };
+  return [
+    {
+      x: a.x + resolved.nx * 40,
+      y: a.y + resolved.ny * 40,
+    },
+    {
+      x: b.x + resolved.nx * 40,
+      y: b.y + resolved.ny * 40,
+    },
+    {
+      x: b.x - resolved.nx * inset,
+      y: b.y - resolved.ny * inset,
+    },
+    {
+      x: a.x - resolved.nx * inset,
+      y: a.y - resolved.ny * inset,
+    },
+  ];
+}

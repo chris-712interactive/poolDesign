@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { PoolBody } from "./design-model";
 import {
   infinityDeckCutPolygon,
+  infinityFillRevealPolygon,
   infinityTroughPolygon,
   infinityWeirFromDrag,
   listInfinityEdgeCandidates,
@@ -178,5 +179,10 @@ describe("infinity edge", () => {
       Math.abs(troughSpan - edgeSpan) < 1,
       "trough spans the full vanishing edge",
     );
+    const reveal = infinityFillRevealPolygon(edge);
+    const revealInward = reveal.map((p) =>
+      (p.x - edge.a.x) * -edge.nx + (p.y - edge.a.y) * -edge.ny,
+    );
+    assert.ok(Math.max(...revealInward) > 400, "reveal cuts into the side decks");
   });
 });
