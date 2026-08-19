@@ -179,4 +179,22 @@ describe("infinity edge", () => {
       "trough spans the full vanishing edge",
     );
   });
+
+  it("deck cut outPad can reach past the trough without widening along the weir", () => {
+    const pool = rectPool(20, 40, {
+      enabled: true,
+      weirs: [{ edgeIndex: 0, enabled: true }],
+      trough: { widthMm: 24 * IN },
+    });
+    const edge = resolveInfinityEdges(pool)[0];
+    const cut = infinityDeckCutPolygon(edge, 40, 2000);
+    const ys = cut.map((p) => p.y);
+    assert.ok(Math.min(...ys) < edge.troughOuterA.y - 1500);
+    const cutSpan = Math.hypot(cut[1].x - cut[0].x, cut[1].y - cut[0].y);
+    const edgeSpan = Math.hypot(
+      edge.edgeB.x - edge.edgeA.x,
+      edge.edgeB.y - edge.edgeA.y,
+    );
+    assert.ok(Math.abs(cutSpan - edgeSpan) < 1, "no along-edge pad");
+  });
 });

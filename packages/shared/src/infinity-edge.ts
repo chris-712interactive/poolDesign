@@ -523,15 +523,17 @@ export function infinityTroughPolygon(
 
 /**
  * Hole to punch deck/fill where the catch trough sits.
- * Width is the trough only (not the whole vanishing-side yard). A modest
- * along-pad clears side-deck returns; huge pads left leftover walls.
+ * Width is the trough only (not the whole vanishing-side yard). `outPadMm`
+ * can reach a patio outer edge so fill does not wrap a box around the trough;
+ * do not use huge along-edge pads — those left leftover walls.
  */
 export function infinityDeckCutPolygon(
   resolved: ResolvedInfinityEdge,
   insetMm = 40,
+  outPadMm = 40,
 ): PointMm[] {
   const inset = Math.max(40, Math.min(100, insetMm));
-  const outPad = 40;
+  const outPad = Math.max(40, outPadMm);
   const a = resolved.edgeA ?? resolved.a;
   const b = resolved.edgeB ?? resolved.b;
   return [
