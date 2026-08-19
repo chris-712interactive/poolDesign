@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { PoolBody } from "./design-model";
 import {
+  infinityDeckCutPolygon,
   infinityTroughPolygon,
   infinityWeirFromDrag,
   listInfinityEdgeCandidates,
@@ -145,5 +146,19 @@ describe("infinity edge", () => {
     };
     assert.equal(listInfinityEdgeCandidates(spa).length, 0);
     assert.equal(resolveInfinityEdges(spa).length, 0);
+  });
+
+  it("deck cut extends inward through the wall and out past the trough", () => {
+    const pool = rectPool(20, 40, {
+      enabled: true,
+      weirs: [{ edgeIndex: 0, enabled: true }],
+      trough: { widthMm: 24 * IN },
+    });
+    const edge = resolveInfinityEdges(pool)[0];
+    const cut = infinityDeckCutPolygon(edge, 8 * IN);
+    assert.equal(cut.length, 4);
+    const ys = cut.map((p) => p.y);
+    assert.ok(Math.max(...ys) > edge.a.y, "inset into the pool");
+    assert.ok(Math.min(...ys) < edge.troughOuterA.y, "pad past trough");
   });
 });

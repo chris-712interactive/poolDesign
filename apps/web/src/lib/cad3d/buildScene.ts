@@ -69,6 +69,7 @@ import {
   resolveInfinityEdges,
   infinityOmitIntervals,
   infinityTroughPolygon,
+  infinityDeckCutPolygon,
   siteLineLayerIds,
   siteLineSegments,
   type BuildingOpeningKind,
@@ -531,7 +532,7 @@ function pushInfinityEdgeMeshes(
     const troughDepthM = mmToMeters(edge.troughDepthMm);
     const troughWaterM = mmToMeters(edge.troughWaterDepthMm);
     const troughBottom = -troughDepthM;
-    const troughTop = Math.max(opts.crestY * 0.15, 0.02);
+    const troughTop = 0;
 
     meshes.push({
       kind: "extrude",
@@ -1806,6 +1807,49 @@ function pitHoleOutline(outline: PointMm[]): PointMm[] {
   return outlineBoundsRect(outline);
 }
 
+function deckPunchHoles(poolPits: PointMm[][], infinityCuts: PointMm[][]): PointMm[][] {
+  return [...poolPits, ...infinityCuts].filter((h) => h.length >= 3);
+}
+
+function canAabbPunch(subject: PointMm[], holes: PointMm[][]): boolean {
+  if (!isAxisAlignedRect(subject, 80)) return false;
+  return holes.every((h) => {
+    const open = ringPoints(h);
+    return open.length >= 3 && isAxisAlignedRect(open, 80);
+  });
+}
+
+/** Retain-wall omit ranges where a vanishing-edge trough occupies the face. */
+function retainingOmitIntervals(
+  a: PointMm,
+  b: PointMm,
+  cuts: PointMm[][],
+): [number, number][] {
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const ux = (b.x - a.x) / len;
+  const uy = (b.y - a.y) / len;
+  const out: [number, number][] = [];
+  for (const cut of cuts) {
+    if (cut.length < 3) continue;
+    let minT = Infinity;
+    let maxT = -Infinity;
+    let near = 0;
+    for (const p of cut) {
+      const dist = Math.abs(ux * (p.y - a.y) - uy * (p.x - a.x));
+      if (dist > 520) continue;
+      near += 1;
+      const t = (p.x - a.x) * ux + (p.y - a.y) * uy;
+      minT = Math.min(minT, t);
+      maxT = Math.max(maxT, t);
+    }
+    if (near < 2) continue;
+    const lo = Math.max(0, minT);
+    const hi = Math.min(len, maxT);
+    if (hi - lo > 80) out.push([lo, hi]);
+  }
+  return out;
+}
+
 function pipeMaterialForCircuit(
   circuit: "suction" | "return" | "gas" | "other",
 ): SceneMaterialKey {
@@ -2131,6 +2175,16 @@ export function buildSceneModel(
   const poolPitHoles: PointMm[][] = [];
   for (const p of pools) {
     if (p.outline.length >= 3) poolPitHoles.push(pitHoleOutline(p.outline));
+  }
+  const infinityDeckCuts: PointMm[][] = [];
+  for (const p of pools) {
+    if (p.outline.length < 3) continue;
+    const inset = poolWallThicknessMm(p);
+    for (const edge of resolveInfinityEdges(p)) {
+      infinityDeckCuts.push(
+        closeOutline(infinityDeckCutPolygon(edge, inset)),
+      );
+    }
   }
   for (const s of spas) {
     if (s.outline.length < 3) continue;
@@ -2540,11 +2594,12 @@ export function buildSceneModel(
       const t = mmToMeters(PATIO_SLAB_THICKNESS_MM);
       const select: SceneSelection = { kind: "patio", id: p.id };
       const open = ringPoints(p.outline);
-      if (isAxisAlignedRect(open, 80)) {
+      const punchHoles = deckPunchHoles(poolPitHoles, infinityDeckCuts);
+      if (canAabbPunch(open, punchHoles)) {
         // Clean AABB decks: remainder slabs (robust, no earcut hole issues).
         const regions =
-          poolPitHoles.length > 0
-            ? subtractAabbHoles(open, poolPitHoles)
+          punchHoles.length > 0
+            ? subtractAabbHoles(open, punchHoles)
             : [open];
         let pi = 0;
         for (const region of regions) {
@@ -2567,7 +2622,7 @@ export function buildSceneModel(
           material: "patio",
           patioFinishId: p.materialId,
           outlineMm: closeOutline(p.outline),
-          holeOutlinesMm: poolPitHoles.length > 0 ? poolPitHoles : undefined,
+          holeOutlinesMm: punchHoles.length > 0 ? punchHoles : undefined,
           bottomY: 0,
           height: t,
           select,
@@ -2603,10 +2658,10 @@ export function buildSceneModel(
           // Continuous fill pad: existing grade → slab underside (y = 0).
           // Punch pool/spa pits the same way as the deck (AABB subtract is
           // reliable; ExtrudeGeometry holes often leave wedges in the basin).
-          if (isAxisAlignedRect(open, 80)) {
+          if (isAxisAlignedRect(open, 80) && canAabbPunch(open, punchHoles)) {
             const fillRegions =
-              poolPitHoles.length > 0
-                ? subtractAabbHoles(open, poolPitHoles)
+              punchHoles.length > 0
+                ? subtractAabbHoles(open, punchHoles)
                 : [open];
             let fi = 0;
             for (const region of fillRegions) {
@@ -2628,7 +2683,7 @@ export function buildSceneModel(
               material: "fill",
               outlineMm: closeOutline(p.outline),
               holeOutlinesMm:
-                poolPitHoles.length > 0 ? poolPitHoles : undefined,
+                punchHoles.length > 0 ? punchHoles : undefined,
               bottomY: -dropM,
               height: dropM,
               select,
@@ -2640,47 +2695,58 @@ export function buildSceneModel(
           let ri = 0;
           const patioBb = outlineBounds(p.outline);
           for (const seg of analysis.retainingSegments) {
-            const mid = {
-              x: (seg.a.x + seg.b.x) / 2,
-              y: (seg.a.y + seg.b.y) / 2,
-            };
-            const dx = seg.b.x - seg.a.x;
-            const dy = seg.b.y - seg.a.y;
-            const len = Math.hypot(dx, dy) || 1;
-            // Outward normal (away from patio center)
-            let nx = -dy / len;
-            let ny = dx / len;
-            if (
-              nx * (patioBb.cx - mid.x) + ny * (patioBb.cy - mid.y) >
-              0
-            ) {
-              nx = -nx;
-              ny = -ny;
+            const omit = retainingOmitIntervals(
+              seg.a,
+              seg.b,
+              infinityDeckCuts,
+            );
+            const pieces = omit.length
+              ? wallSegmentsMinusIntervals(seg.a, seg.b, omit)
+              : [{ a: seg.a, b: seg.b }];
+            for (const piece of pieces) {
+              const mid = {
+                x: (piece.a.x + piece.b.x) / 2,
+                y: (piece.a.y + piece.b.y) / 2,
+              };
+              const dx = piece.b.x - piece.a.x;
+              const dy = piece.b.y - piece.a.y;
+              const len = Math.hypot(dx, dy) || 1;
+              if (len < 80) continue;
+              // Outward normal (away from patio center)
+              let nx = -dy / len;
+              let ny = dx / len;
+              if (
+                nx * (patioBb.cx - mid.x) + ny * (patioBb.cy - mid.y) >
+                0
+              ) {
+                nx = -nx;
+                ny = -ny;
+              }
+              const offsetMm = 120;
+              const wallMid = {
+                x: mid.x + nx * offsetMm,
+                y: mid.y + ny * offsetMm,
+              };
+              const lenM = mmToMeters(len);
+              const hM = Math.max(0.2, mmToMeters(seg.dropMm));
+              const thickM = 0.25;
+              const along = planDirToWorldXZ(dx, dy);
+              const xz = planToWorldXZ(wallMid);
+              // Wall sits from existing grade up to patio top.
+              meshes.push({
+                kind: "box",
+                id: `retain_${p.id}_${ri++}`,
+                material: "retaining",
+                position: {
+                  x: xz.x,
+                  y: -hM / 2 + t,
+                  z: xz.z,
+                },
+                size: { x: Math.max(0.35, lenM), y: hM + t, z: thickM },
+                rotationY: Math.atan2(-along.z, along.x),
+                select,
+              });
             }
-            const offsetMm = 120;
-            const wallMid = {
-              x: mid.x + nx * offsetMm,
-              y: mid.y + ny * offsetMm,
-            };
-            const lenM = mmToMeters(seg.lengthMm);
-            const hM = Math.max(0.2, mmToMeters(seg.dropMm));
-            const thickM = 0.25;
-            const along = planDirToWorldXZ(dx, dy);
-            const xz = planToWorldXZ(wallMid);
-            // Wall sits from existing grade up to patio top.
-            meshes.push({
-              kind: "box",
-              id: `retain_${p.id}_${ri++}`,
-              material: "retaining",
-              position: {
-                x: xz.x,
-                y: -hM / 2 + t,
-                z: xz.z,
-              },
-              size: { x: Math.max(0.35, lenM), y: hM + t, z: thickM },
-              rotationY: Math.atan2(-along.z, along.x),
-              select,
-            });
           }
         }
       }
@@ -3025,15 +3091,8 @@ export function buildSceneModel(
               return { edgeIndex: edge.edgeIndex, intervals };
             })
           : undefined;
-        const notchDepthMm = infinityEdges[0]?.notchDepthMm ?? 0;
         const crestY = infinityEdges.length
-          ? Math.min(
-              lip - 0.005,
-              Math.max(
-                waterTopY - 0.01,
-                lip - mmToMeters(Math.max(notchDepthMm, 20)),
-              ),
-            )
+          ? waterTopY - 0.012
           : lip;
 
         if (infinityEdges.length && infinityOmits && crestY < lip - 0.005) {

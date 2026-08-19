@@ -498,3 +498,30 @@ export function infinityTroughPolygon(
     resolved.troughOuterA,
   ];
 }
+
+/** Plan polygon to punch deck / fill / retaining along a vanishing weir. */
+export function infinityDeckCutPolygon(
+  resolved: ResolvedInfinityEdge,
+  insetMm = 120,
+): PointMm[] {
+  const inset = Math.max(40, insetMm);
+  const outPad = 160;
+  return [
+    {
+      x: resolved.a.x - resolved.nx * inset,
+      y: resolved.a.y - resolved.ny * inset,
+    },
+    {
+      x: resolved.b.x - resolved.nx * inset,
+      y: resolved.b.y - resolved.ny * inset,
+    },
+    {
+      x: resolved.troughOuterB.x + resolved.nx * outPad,
+      y: resolved.troughOuterB.y + resolved.ny * outPad,
+    },
+    {
+      x: resolved.troughOuterA.x + resolved.nx * outPad,
+      y: resolved.troughOuterA.y + resolved.ny * outPad,
+    },
+  ];
+}
