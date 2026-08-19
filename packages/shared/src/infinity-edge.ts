@@ -52,6 +52,9 @@ export type ResolvedInfinityEdge = {
   poolId: string;
   edgeIndex: number;
   style: InfinityEdgeStyle;
+  /** Full pool-outline edge this weir sits on. */
+  edgeA: PointMm;
+  edgeB: PointMm;
   a: PointMm;
   b: PointMm;
   widthMm: number;
@@ -255,6 +258,8 @@ function resolveOneWeir(
     poolId: pool.id,
     edgeIndex: edge.edgeIndex,
     style,
+    edgeA: edge.edgeA,
+    edgeB: edge.edgeB,
     a,
     b,
     widthMm: span.t1 - span.t0,
@@ -505,23 +510,25 @@ export function infinityDeckCutPolygon(
   insetMm = 120,
 ): PointMm[] {
   const inset = Math.max(40, insetMm);
-  const outPad = 160;
+  const outPad = 280;
+  const a = resolved.edgeA ?? resolved.a;
+  const b = resolved.edgeB ?? resolved.b;
   return [
     {
-      x: resolved.a.x - resolved.nx * inset,
-      y: resolved.a.y - resolved.ny * inset,
+      x: a.x - resolved.nx * inset,
+      y: a.y - resolved.ny * inset,
     },
     {
-      x: resolved.b.x - resolved.nx * inset,
-      y: resolved.b.y - resolved.ny * inset,
+      x: b.x - resolved.nx * inset,
+      y: b.y - resolved.ny * inset,
     },
     {
-      x: resolved.troughOuterB.x + resolved.nx * outPad,
-      y: resolved.troughOuterB.y + resolved.ny * outPad,
+      x: b.x + resolved.nx * (resolved.troughWidthMm + outPad),
+      y: b.y + resolved.ny * (resolved.troughWidthMm + outPad),
     },
     {
-      x: resolved.troughOuterA.x + resolved.nx * outPad,
-      y: resolved.troughOuterA.y + resolved.ny * outPad,
+      x: a.x + resolved.nx * (resolved.troughWidthMm + outPad),
+      y: a.y + resolved.ny * (resolved.troughWidthMm + outPad),
     },
   ];
 }

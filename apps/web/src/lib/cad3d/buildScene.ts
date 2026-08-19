@@ -7,6 +7,7 @@ import {
   approximateIntersectionAreaMm2,
   buildingHeightMm,
   storyFloorElevationMm,
+  colinearOverlapInterval,
   clipOutlineByAabbs,
   coverHeightMm,
   depthMmAtT,
@@ -512,7 +513,7 @@ function ringPoints(outline: PointMm[]): PointMm[] {
 }
 
 /**
- * Catch trough shells + short fall sheets for pool infinity edges.
+ * Catch trough as an open channel (floor + outer wall + ends), not a solid block.
  */
 function pushInfinityEdgeMeshes(
   meshes: MeshDescriptor[],
@@ -525,6 +526,46 @@ function pushInfinityEdgeMeshes(
 ) {
   if (!opts.edges.length) return;
 
+  const pushWall = (
+    id: string,
+    a: PointMm,
+    b: PointMm,
+    toward: { x: number; y: number },
+    thicknessMm: number,
+    bottomY: number,
+    topY: number,
+  ) => {
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 40) return;
+    const tx = (b.x - a.x) / len;
+    const ty = (b.y - a.y) / len;
+    const nLen = Math.hypot(toward.x, toward.y) || 1;
+    const nx = toward.x / nLen;
+    const ny = toward.y / nLen;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const center = {
+      x: mid.x + nx * (thicknessMm / 2),
+      y: mid.y + ny * (thicknessMm / 2),
+    };
+    const xz = planToWorldXZ(center);
+    const h = Math.max(0.08, topY - bottomY);
+    meshes.push({
+      kind: "box",
+      id,
+      material: "poolShell",
+      position: { x: xz.x, y: bottomY + h / 2, z: xz.z },
+      size: {
+        x: mmToMeters(len),
+        y: h,
+        z: mmToMeters(thicknessMm),
+      },
+      rotationY: 0,
+      axisX: planDirToWorldXZ(tx, ty),
+      axisZ: planDirToWorldXZ(nx, ny),
+      select: opts.select,
+    });
+  };
+
   for (const edge of opts.edges) {
     const troughPoly = closeOutline(infinityTroughPolygon(edge));
     if (troughPoly.length < 4) continue;
@@ -532,35 +573,83 @@ function pushInfinityEdgeMeshes(
     const troughDepthM = mmToMeters(edge.troughDepthMm);
     const troughWaterM = mmToMeters(edge.troughWaterDepthMm);
     const troughBottom = -troughDepthM;
-    const troughTop = 0;
+    const troughTop = Math.max(opts.crestY + 0.04, -0.02);
+    const wallMm = 140;
+    const floorT = 0.1;
 
     meshes.push({
       kind: "extrude",
-      id: `pool_${opts.poolId}_trough_${edge.edgeIndex}`,
+      id: `pool_${opts.poolId}_troughfloor_${edge.edgeIndex}`,
       material: "poolShell",
       outlineMm: troughPoly,
       bottomY: troughBottom,
-      height: Math.max(0.15, troughTop - troughBottom),
+      height: floorT,
       select: opts.select,
     });
 
-    const waterTop = Math.min(
-      troughTop - 0.02,
-      -troughDepthM + troughWaterM,
+    pushWall(
+      `pool_${opts.poolId}_troughouter_${edge.edgeIndex}`,
+      edge.troughOuterA,
+      edge.troughOuterB,
+      { x: -edge.nx, y: -edge.ny },
+      wallMm,
+      troughBottom,
+      troughTop,
     );
-    const waterH = Math.max(0.05, waterTop - (troughBottom + 0.04));
+    pushWall(
+      `pool_${opts.poolId}_troughendA_${edge.edgeIndex}`,
+      edge.a,
+      edge.troughOuterA,
+      { x: edge.b.x - edge.a.x, y: edge.b.y - edge.a.y },
+      wallMm,
+      troughBottom,
+      troughTop,
+    );
+    pushWall(
+      `pool_${opts.poolId}_troughendB_${edge.edgeIndex}`,
+      edge.b,
+      edge.troughOuterB,
+      { x: edge.a.x - edge.b.x, y: edge.a.y - edge.b.y },
+      wallMm,
+      troughBottom,
+      troughTop,
+    );
+
+    const waterPoly = [
+      {
+        x: edge.a.x + edge.nx * 50,
+        y: edge.a.y + edge.ny * 50,
+      },
+      {
+        x: edge.b.x + edge.nx * 50,
+        y: edge.b.y + edge.ny * 50,
+      },
+      {
+        x: edge.troughOuterB.x - edge.nx * wallMm,
+        y: edge.troughOuterB.y - edge.ny * wallMm,
+      },
+      {
+        x: edge.troughOuterA.x - edge.nx * wallMm,
+        y: edge.troughOuterA.y - edge.ny * wallMm,
+      },
+    ];
+    const waterTop = Math.min(
+      troughTop - 0.04,
+      troughBottom + floorT + troughWaterM,
+    );
+    const waterBottom = troughBottom + floorT + 0.01;
+    const waterH = Math.max(0.05, waterTop - waterBottom);
     meshes.push({
       kind: "extrude",
       id: `pool_${opts.poolId}_troughwater_${edge.edgeIndex}`,
       material: "poolWater",
-      outlineMm: troughPoly,
-      bottomY: waterTop - waterH,
+      outlineMm: closeOutline(waterPoly),
+      bottomY: waterBottom,
       height: waterH,
       opacity: 0.55,
       select: opts.select,
     });
 
-    // Thin fall sheets from weir crest into the trough.
     for (let oi = 0; oi < edge.openings.length; oi++) {
       const opening = edge.openings[oi];
       const len = Math.hypot(
@@ -568,19 +657,20 @@ function pushInfinityEdgeMeshes(
         opening.b.y - opening.a.y,
       );
       if (len < 40) continue;
+      const sheetW = Math.min(edge.troughWidthMm * 0.45, 280);
       const sheet: PointMm[] = [
         opening.a,
         opening.b,
         {
-          x: opening.b.x + edge.nx * edge.troughWidthMm * 0.55,
-          y: opening.b.y + edge.ny * edge.troughWidthMm * 0.55,
+          x: opening.b.x + edge.nx * sheetW,
+          y: opening.b.y + edge.ny * sheetW,
         },
         {
-          x: opening.a.x + edge.nx * edge.troughWidthMm * 0.55,
-          y: opening.a.y + edge.ny * edge.troughWidthMm * 0.55,
+          x: opening.a.x + edge.nx * sheetW,
+          y: opening.a.y + edge.ny * sheetW,
         },
       ];
-      const fallBottom = waterTop - 0.01;
+      const fallBottom = waterTop - 0.02;
       const fallH = Math.max(0.08, opts.crestY - fallBottom);
       meshes.push({
         kind: "extrude",
@@ -616,6 +706,11 @@ function pushWallRing(
      * from edge start). Used for spa spillover weir notches.
      */
     edgeOmits?: { edgeIndex: number; intervals: [number, number][] }[];
+    /**
+     * Also omit any wall segment that is colinear with these weir openings
+     * (indexes don't have to match — used for infinity edges / inset rings).
+     */
+    omitAgainst?: { a: PointMm; b: PointMm }[];
     /** Waterline tile finish (material === "waterline"). */
     waterlineTileId?: string;
     /**
@@ -627,7 +722,7 @@ function pushWallRing(
   },
 ) {
   const pts = ringPoints(
-    opts.edgeOmits?.length
+    opts.edgeOmits?.length || opts.omitAgainst?.length
       ? opts.outlineMm
       : flattenClosedOutline(opts.outlineMm),
   );
@@ -645,10 +740,16 @@ function pushWallRing(
           ? [{ a, b }]
           : [];
     const omit = opts.edgeOmits?.find((o) => o.edgeIndex === i);
-    if (omit && omit.intervals.length > 0) {
+    const geoOmits: [number, number][] = [];
+    for (const weir of opts.omitAgainst ?? []) {
+      const iv = colinearOverlapInterval(a, b, weir.a, weir.b, 320);
+      if (iv) geoOmits.push(iv);
+    }
+    const intervals = [...(omit?.intervals ?? []), ...geoOmits];
+    if (intervals.length > 0) {
       // Notch against the full edge, then keep only pieces that remain in
       // the openAgainst result (usually the full edge for spa shells).
-      const notched = wallSegmentsMinusIntervals(a, b, omit.intervals);
+      const notched = wallSegmentsMinusIntervals(a, b, intervals);
       if (!opts.openAgainst?.length) {
         segments = notched;
       } else {
@@ -723,6 +824,7 @@ function pushWaterlineTileBand(
     idPrefix: string;
     openAgainst?: PointMm[][];
     edgeOmits?: { edgeIndex: number; intervals: [number, number][] }[];
+    omitAgainst?: { a: PointMm; b: PointMm }[];
   },
 ) {
   if (opts.waterlineOutlineMm.length < 3) return;
@@ -744,6 +846,7 @@ function pushWaterlineTileBand(
     inward: false,
     openAgainst: opts.openAgainst,
     edgeOmits: opts.edgeOmits,
+    omitAgainst: opts.omitAgainst,
     // Slightly proud of the plaster so the tile wins depth tests.
     normalBiasMm: -6,
   });
@@ -3094,6 +3197,10 @@ export function buildSceneModel(
         const crestY = infinityEdges.length
           ? waterTopY - 0.012
           : lip;
+        const weirOpenings = infinityEdges.flatMap((e) => [
+          ...e.openings,
+          { a: e.edgeA, b: e.edgeB },
+        ]);
 
         if (infinityEdges.length && infinityOmits && crestY < lip - 0.005) {
           // Solid shell up to weir crest.
@@ -3108,8 +3215,7 @@ export function buildSceneModel(
             inward: true,
             openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
           });
-          // Upper rim notched at vanishing openings (indexes match only when
-          // the wall outline is still the authorable pool ring).
+          // Upper rim notched at vanishing openings.
           pushWallRing(meshes, {
             outlineMm: wallOutline,
             bottomY: crestY,
@@ -3121,6 +3227,7 @@ export function buildSceneModel(
             inward: true,
             openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
             edgeOmits: spaOutlines.length === 0 ? infinityOmits : undefined,
+            omitAgainst: weirOpenings,
           });
         } else {
           pushWallRing(meshes, {
@@ -3178,6 +3285,7 @@ export function buildSceneModel(
           inward: true,
           openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
           edgeOmits: spaOutlines.length === 0 ? infinityOmits : undefined,
+          omitAgainst: weirOpenings,
         });
 
         // Waterline tile band on the wet face (inside waterline), not the
@@ -3191,9 +3299,8 @@ export function buildSceneModel(
           select,
           idPrefix: `pool_tile_${body.id}`,
           openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
-          // Infinity notches are indexed on the outer ring; only apply when
-          // the waterline ring still matches that topology (no spa clip).
           edgeOmits: spaOutlines.length === 0 ? infinityOmits : undefined,
+          omitAgainst: weirOpenings,
         });
 
         // Catch trough + fall sheets for infinity edges.

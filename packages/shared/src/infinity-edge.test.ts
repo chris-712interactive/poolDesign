@@ -160,5 +160,14 @@ describe("infinity edge", () => {
     const ys = cut.map((p) => p.y);
     assert.ok(Math.max(...ys) > edge.a.y, "inset into the pool");
     assert.ok(Math.min(...ys) < edge.troughOuterA.y, "pad past trough");
+    const cutSpan = Math.hypot(cut[1].x - cut[0].x, cut[1].y - cut[0].y);
+    const edgeSpan = Math.hypot(
+      edge.edgeB.x - edge.edgeA.x,
+      edge.edgeB.y - edge.edgeA.y,
+    );
+    assert.ok(
+      Math.abs(cutSpan - edgeSpan) < 10,
+      "deck cut follows the full pool edge",
+    );
   });
 });
