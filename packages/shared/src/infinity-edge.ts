@@ -509,10 +509,16 @@ export function infinityDeckCutPolygon(
   resolved: ResolvedInfinityEdge,
   insetMm = 120,
 ): PointMm[] {
-  const inset = Math.max(40, insetMm);
-  const outPad = 280;
-  const a = resolved.edgeA ?? resolved.a;
-  const b = resolved.edgeB ?? resolved.b;
+  const inset = Math.max(80, insetMm);
+  const outPad = 400;
+  const alongPad = 250;
+  const a0 = resolved.edgeA ?? resolved.a;
+  const b0 = resolved.edgeB ?? resolved.b;
+  const len = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1;
+  const ux = (b0.x - a0.x) / len;
+  const uy = (b0.y - a0.y) / len;
+  const a = { x: a0.x - ux * alongPad, y: a0.y - uy * alongPad };
+  const b = { x: b0.x + ux * alongPad, y: b0.y + uy * alongPad };
   return [
     {
       x: a.x - resolved.nx * inset,

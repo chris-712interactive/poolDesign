@@ -633,10 +633,7 @@ function pushInfinityEdgeMeshes(
         y: edge.troughOuterA.y - edge.ny * wallMm,
       },
     ];
-    const waterTop = Math.min(
-      troughTop - 0.04,
-      troughBottom + floorT + troughWaterM,
-    );
+    const waterTop = troughBottom + Math.max(0.12, troughWaterM * 0.35);
     const waterBottom = troughBottom + floorT + 0.01;
     const waterH = Math.max(0.05, waterTop - waterBottom);
     meshes.push({
@@ -657,29 +654,57 @@ function pushInfinityEdgeMeshes(
         opening.b.y - opening.a.y,
       );
       if (len < 40) continue;
-      const sheetW = Math.min(edge.troughWidthMm * 0.45, 280);
-      const sheet: PointMm[] = [
-        opening.a,
-        opening.b,
-        {
-          x: opening.b.x + edge.nx * sheetW,
-          y: opening.b.y + edge.ny * sheetW,
-        },
-        {
-          x: opening.a.x + edge.nx * sheetW,
-          y: opening.a.y + edge.ny * sheetW,
-        },
-      ];
-      const fallBottom = waterTop - 0.02;
-      const fallH = Math.max(0.08, opts.crestY - fallBottom);
+      const n = Math.max(3, Math.ceil(len / 80));
+      const crest: Array<{ x: number; y: number; nx: number; ny: number }> = [];
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        crest.push({
+          x: opening.a.x + (opening.b.x - opening.a.x) * t,
+          y: opening.a.y + (opening.b.y - opening.a.y) * t,
+          nx: edge.nx,
+          ny: edge.ny,
+        });
+      }
+      const drop = Math.max(0.12, opts.crestY - waterTop);
       meshes.push({
-        kind: "extrude",
+        kind: "spilloverRibbon",
         id: `pool_${opts.poolId}_inffall_${edge.edgeIndex}_${oi}`,
         material: "spilloverWater",
-        outlineMm: closeOutline(sheet),
-        bottomY: fallBottom,
-        height: fallH,
-        opacity: edge.style === "sheer" ? 0.5 : 0.72,
+        crest,
+        crestY: opts.crestY + 0.004,
+        poolWaterY: waterTop + 0.01,
+        flareM: Math.max(0.12, Math.min(0.38, drop * 0.85)),
+        lipTuckM: 0.04,
+        opacity: edge.style === "sheer" ? 0.5 : 0.78,
+        select: opts.select,
+      });
+      const film: PointMm[] = [
+        {
+          x: opening.a.x - edge.nx * 80,
+          y: opening.a.y - edge.ny * 80,
+        },
+        {
+          x: opening.b.x - edge.nx * 80,
+          y: opening.b.y - edge.ny * 80,
+        },
+        {
+          x: opening.b.x + edge.nx * 40,
+          y: opening.b.y + edge.ny * 40,
+        },
+        {
+          x: opening.a.x + edge.nx * 40,
+          y: opening.a.y + edge.ny * 40,
+        },
+      ];
+      meshes.push({
+        kind: "extrude",
+        id: `pool_${opts.poolId}_weirfilm_${edge.edgeIndex}_${oi}`,
+        material: "poolWater",
+        outlineMm: closeOutline(film),
+        bottomY: opts.crestY - 0.004,
+        height: 0.012,
+        opacity: 0.35,
+        waterShallow: true,
         select: opts.select,
       });
     }
@@ -739,6 +764,16 @@ function pushWallRing(
         : Math.hypot(b.x - a.x, b.y - a.y) >= 40
           ? [{ a, b }]
           : [];
+    const edgeLenMm = Math.hypot(b.x - a.x, b.y - a.y);
+    let skipWeirEdge = false;
+    for (const weir of opts.omitAgainst ?? []) {
+      const iv = colinearOverlapInterval(a, b, weir.a, weir.b, 320);
+      if (iv && iv[1] - iv[0] > edgeLenMm * 0.4) {
+        skipWeirEdge = true;
+        break;
+      }
+    }
+    if (skipWeirEdge) continue;
     const omit = opts.edgeOmits?.find((o) => o.edgeIndex === i);
     const geoOmits: [number, number][] = [];
     for (const weir of opts.omitAgainst ?? []) {
@@ -1910,6 +1945,12 @@ function pitHoleOutline(outline: PointMm[]): PointMm[] {
   return outlineBoundsRect(outline);
 }
 
+function isSliverOutline(outline: PointMm[], minSpanMm = 180): boolean {
+  if (outline.length < 3) return true;
+  const bb = outlineBounds(outline);
+  return Math.min(bb.width, bb.height) < minSpanMm;
+}
+
 function deckPunchHoles(poolPits: PointMm[][], infinityCuts: PointMm[][]): PointMm[][] {
   return [...poolPits, ...infinityCuts].filter((h) => h.length >= 3);
 }
@@ -2706,6 +2747,7 @@ export function buildSceneModel(
             : [open];
         let pi = 0;
         for (const region of regions) {
+          if (isSliverOutline(region)) continue;
           meshes.push({
             kind: "extrude",
             id: `patio_${p.id}_${pi++}`,
@@ -2768,7 +2810,7 @@ export function buildSceneModel(
                 : [open];
             let fi = 0;
             for (const region of fillRegions) {
-              if (region.length < 3) continue;
+              if (region.length < 3 || isSliverOutline(region)) continue;
               meshes.push({
                 kind: "extrude",
                 id: `fill_${p.id}_${fi++}`,
@@ -3194,9 +3236,7 @@ export function buildSceneModel(
               return { edgeIndex: edge.edgeIndex, intervals };
             })
           : undefined;
-        const crestY = infinityEdges.length
-          ? waterTopY - 0.012
-          : lip;
+        const crestY = infinityEdges.length ? waterTopY : lip;
         const weirOpenings = infinityEdges.flatMap((e) => [
           ...e.openings,
           { a: e.edgeA, b: e.edgeB },

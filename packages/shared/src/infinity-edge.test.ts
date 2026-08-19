@@ -166,8 +166,8 @@ describe("infinity edge", () => {
       edge.edgeB.y - edge.edgeA.y,
     );
     assert.ok(
-      Math.abs(cutSpan - edgeSpan) < 10,
-      "deck cut follows the full pool edge",
+      cutSpan > edgeSpan,
+      "deck cut extends past the pool corners",
     );
   });
 });
