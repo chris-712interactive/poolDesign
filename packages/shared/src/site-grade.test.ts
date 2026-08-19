@@ -85,6 +85,48 @@ describe("site-grade", () => {
     );
   });
 
+  it("does not extrude a downhill walk across the rest of the lot", () => {
+    const samples: GradeSample[] = [
+      { id: "house", position: { x: 0, y: 0 }, dropMm: 0 },
+      { id: "a", position: { x: 10 * FT, y: 0 }, dropMm: FT },
+      { id: "b", position: { x: 20 * FT, y: 0 }, dropMm: 2 * FT },
+      { id: "c", position: { x: 30 * FT, y: 0 }, dropMm: 3 * FT },
+    ];
+    const along = existingGradeDropMm({ x: 15 * FT, y: 0 }, samples);
+    assert.ok(
+      Math.abs(along - 1.5 * FT) < 20,
+      `along the walk should stay ~1.5', got ${along}`,
+    );
+    const beside = existingGradeDropMm({ x: 15 * FT, y: 8 * FT }, samples);
+    assert.ok(
+      Math.abs(beside - 1.5 * FT) < 40,
+      `a nearby side yard should follow the walk, got ${beside}`,
+    );
+    const farSide = existingGradeDropMm({ x: 15 * FT, y: -60 * FT }, samples);
+    assert.ok(
+      Math.abs(farSide) < 0.4 * FT,
+      `the far side of the house should stay near FFE, got ${farSide}`,
+    );
+  });
+
+  it("does not let one side's walk span a triangle through the house", () => {
+    const samples: GradeSample[] = [
+      { id: "left0", position: { x: -2 * FT, y: 0 }, dropMm: 0 },
+      { id: "left1", position: { x: -20 * FT, y: 0 }, dropMm: 3 * FT },
+      { id: "right", position: { x: 40 * FT, y: 5 * FT }, dropMm: 0.5 * FT },
+    ];
+    const rightYard = existingGradeDropMm({ x: 38 * FT, y: 5 * FT }, samples);
+    assert.ok(
+      Math.abs(rightYard - 0.5 * FT) < 80,
+      `right-side shot should keep its own grade, got ${rightYard}`,
+    );
+    const throughHouse = existingGradeDropMm({ x: 10 * FT, y: 2 * FT }, samples);
+    assert.ok(
+      Math.abs(throughHouse) < 1.2 * FT,
+      `empty yard through the house should not inherit the left drop, got ${throughHouse}`,
+    );
+  });
+
   it("fill height starts below slab thickness", () => {
     assert.equal(fillHeightUnderSlabMm(50), 0);
     assert.equal(fillHeightUnderSlabMm(100), 0);

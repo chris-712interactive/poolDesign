@@ -12,6 +12,12 @@ import {
 import { PATIO_SLAB_THICKNESS_MM } from "./scene3d";
 
 const MM3_PER_CY = 764_554_857.984; // cubic mm per cubic yard
+const FT = 304.8;
+/** Drop triangles that jump across the house / empty yard. */
+const MAX_TIN_EDGE_MM = 50 * FT;
+/** Full strength beside a walk; fade to FFE beyond this. */
+const GRADE_INFLUENCE_MM = 20 * FT;
+const GRADE_FADE_MM = 45 * FT;
 
 export type RetainingSegment = {
   a: PointMm;
@@ -134,7 +140,25 @@ function delaunayTris(shots: GradeShot[]): GradeTri[] {
       tris.push({ a: u, b: v, c: i });
     }
   }
-  return tris.filter((t) => t.a < n && t.b < n && t.c < n);
+  return tris.filter((t) => {
+    if (t.a >= n || t.b >= n || t.c >= n) return false;
+    const A = shots[t.a];
+    const B = shots[t.b];
+    const C = shots[t.c];
+    const e1 = Math.hypot(B.x - A.x, B.y - A.y);
+    const e2 = Math.hypot(C.x - B.x, C.y - B.y);
+    const e3 = Math.hypot(A.x - C.x, A.y - C.y);
+    return Math.max(e1, e2, e3) <= MAX_TIN_EDGE_MM;
+  });
+}
+
+/** Unsurveyed ground stays at FFE; a walk is a corridor, not a site-wide ridge. */
+function fadeTowardFfe(z: number, distMm: number): number {
+  if (!Number.isFinite(z) || distMm <= GRADE_INFLUENCE_MM) return z;
+  if (distMm >= GRADE_FADE_MM) return 0;
+  const t = (distMm - GRADE_INFLUENCE_MM) / (GRADE_FADE_MM - GRADE_INFLUENCE_MM);
+  const s = t * t * (3 - 2 * t);
+  return z * (1 - s);
 }
 
 function barycentric(
@@ -208,7 +232,8 @@ function interpolateTin(
     const hit = lerpOnSegment(point, shots[u], shots[v]);
     if (!best || hit.d2 < best.d2) best = hit;
   }
-  return best?.z ?? null;
+  if (!best) return null;
+  return fadeTowardFfe(best.z, Math.sqrt(best.d2));
 }
 
 function gradeSurface(samples: GradeSample[]): GradeSurface {
@@ -229,7 +254,12 @@ function interpolateAlongSampleAxis(
   shots: GradeShot[],
 ): number | null {
   if (!shots.length) return null;
-  if (shots.length === 1) return shots[0].z;
+  if (shots.length === 1) {
+    return fadeTowardFfe(
+      shots[0].z,
+      Math.hypot(point.x - shots[0].x, point.y - shots[0].y),
+    );
+  }
   let i0 = 0;
   let i1 = 1;
   let best = -1;
@@ -243,7 +273,12 @@ function interpolateAlongSampleAxis(
       }
     }
   }
-  if (best < 10) return shots[0].z;
+  if (best < 10) {
+    return fadeTowardFfe(
+      shots[0].z,
+      Math.hypot(point.x - shots[0].x, point.y - shots[0].y),
+    );
+  }
   const ox = shots[i0].x;
   const oy = shots[i0].y;
   const ux = (shots[i1].x - ox) / best;
@@ -252,28 +287,42 @@ function interpolateAlongSampleAxis(
     .map((s) => ({
       t: (s.x - ox) * ux + (s.y - oy) * uy,
       z: s.z,
+      shot: s,
     }))
     .sort((a, b) => a.t - b.t);
   const t = (point.x - ox) * ux + (point.y - oy) * uy;
-  if (t <= keyed[0].t) return keyed[0].z;
-  const last = keyed[keyed.length - 1];
-  if (t >= last.t) return last.z;
-  for (let i = 1; i < keyed.length; i++) {
-    if (t <= keyed[i].t) {
-      const a = keyed[i - 1];
-      const b = keyed[i];
-      const span = b.t - a.t;
-      if (span < 1e-6) return b.z;
-      return a.z + (b.z - a.z) * ((t - a.t) / span);
+  let z: number;
+  if (t <= keyed[0].t) z = keyed[0].z;
+  else {
+    const last = keyed[keyed.length - 1];
+    if (t >= last.t) z = last.z;
+    else {
+      z = last.z;
+      for (let i = 1; i < keyed.length; i++) {
+        if (t <= keyed[i].t) {
+          const a = keyed[i - 1];
+          const b = keyed[i];
+          const span = b.t - a.t;
+          z = span < 1e-6 ? b.z : a.z + (b.z - a.z) * ((t - a.t) / span);
+          break;
+        }
+      }
     }
   }
-  return last.z;
+  let distMm = Infinity;
+  for (let i = 1; i < keyed.length; i++) {
+    const hit = lerpOnSegment(point, keyed[i - 1].shot, keyed[i].shot);
+    distMm = Math.min(distMm, Math.sqrt(hit.d2));
+  }
+  return fadeTowardFfe(z, distMm);
 }
 
 /**
  * Existing-grade drop at a plan point (mm below FFE).
- * Piecewise-linear on a TIN of the shots so walks from the house keep their
+ * Piecewise-linear on a TIN of nearby shots so walks from the house keep their
  * slope; a fence along equal-drop hull edges stays level (no IDW bobbing).
+ * Influence falls back to FFE with distance so one downhill line is a corridor,
+ * not a ridge extruded across the lot.
  */
 export function existingGradeDropMm(
   point: PointMm,
