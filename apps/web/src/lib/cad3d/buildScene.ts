@@ -1912,8 +1912,113 @@ function isSliverOutline(outline: PointMm[], minSpanMm = 250): boolean {
   return Math.min(bb.width, bb.height) < minSpanMm;
 }
 
+function asAabbRing(outline: PointMm[]): PointMm[] {
+  const open = ringPoints(outline);
+  if (isAxisAlignedRect(open, 80)) return open;
+  return outlineBoundsRect(open);
+}
+
+function aabbRingFromOutlines(outlines: PointMm[][]): PointMm[] {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const outline of outlines) {
+    if (outline.length < 1) continue;
+    const b = outlineBounds(outline);
+    minX = Math.min(minX, b.minX);
+    minY = Math.min(minY, b.minY);
+    maxX = Math.max(maxX, b.maxX);
+    maxY = Math.max(maxY, b.maxY);
+  }
+  if (!Number.isFinite(minX)) return [];
+  return [
+    { x: minX, y: minY },
+    { x: maxX, y: minY },
+    { x: maxX, y: maxY },
+    { x: minX, y: maxY },
+  ];
+}
+
 function deckPunchHoles(poolPits: PointMm[][], infinityCuts: PointMm[][]): PointMm[][] {
   return [...poolPits, ...infinityCuts].filter((h) => h.length >= 3);
+}
+
+/**
+ * One hole per basin: pool pit unioned with the vanishing-side slot so fill
+ * cannot leave a wall in the gap between the weir and the trough.
+ */
+function patioPunchHoles(
+  poolPits: PointMm[][],
+  patioOutline: PointMm[],
+  edges: ResolvedInfinityEdge[],
+): PointMm[][] {
+  const pits = poolPits.filter((h) => h.length >= 3).map(asAabbRing);
+  if (!edges.length) return pits;
+
+  const bb = outlineBounds(patioOutline);
+  const corners = [
+    { x: bb.minX, y: bb.minY },
+    { x: bb.maxX, y: bb.minY },
+    { x: bb.maxX, y: bb.maxY },
+    { x: bb.minX, y: bb.maxY },
+  ];
+  const cuts = edges.map((edge) => {
+    let outPad = 80;
+    for (const c of corners) {
+      const d = weirOutwardMm(c, edge) - edge.troughWidthMm;
+      if (d > outPad) outPad = d + 80;
+    }
+    return asAabbRing(infinityDeckCutPolygon(edge, 250, outPad));
+  });
+
+  const used = new Set<number>();
+  const holes: PointMm[][] = [];
+  for (const cut of cuts) {
+    let idx = -1;
+    let best = 0;
+    for (let i = 0; i < pits.length; i++) {
+      const area = approximateIntersectionAreaMm2(pits[i], cut);
+      if (area > best) {
+        best = area;
+        idx = i;
+      }
+    }
+    if (idx >= 0 && best > 500) {
+      holes.push(aabbRingFromOutlines([pits[idx], cut]));
+      used.add(idx);
+    } else {
+      holes.push(cut);
+    }
+  }
+  for (let i = 0; i < pits.length; i++) {
+    if (!used.has(i)) holes.push(pits[i]);
+  }
+  return holes.filter((h) => h.length >= 3);
+}
+
+function regionOnVanishingSide(
+  region: PointMm[],
+  edges: ResolvedInfinityEdge[],
+): boolean {
+  if (!edges.length) return false;
+  const pts = ringPoints(region);
+  if (pts.length < 3) return true;
+  let cx = 0;
+  let cy = 0;
+  for (const p of pts) {
+    cx += p.x;
+    cy += p.y;
+  }
+  cx /= pts.length;
+  cy /= pts.length;
+  for (const e of edges) {
+    if (weirOutwardMm({ x: cx, y: cy }, e) > WEIR_RETAIN_STOP_MM) return true;
+    let minD = Infinity;
+    for (const p of pts) minD = Math.min(minD, weirOutwardMm(p, e));
+    if (minD > WEIR_RETAIN_STOP_MM) return true;
+  }
+  return false;
 }
 
 function canAabbPunch(subject: PointMm[], holes: PointMm[][]): boolean {
@@ -2010,33 +2115,6 @@ function snapOutlineToWeirFaces(
       }
     }
     return q;
-  });
-}
-
-/**
- * Deck/fill hole for a patio: trough width along the weir, then out through
- * that patio's outer edge so fill does not box the catch basin.
- */
-function infinityCutsForPatio(
-  patioOutline: PointMm[],
-  edges: ResolvedInfinityEdge[],
-  insetMm: number,
-): PointMm[][] {
-  if (!edges.length || patioOutline.length < 3) return [];
-  const bb = outlineBounds(patioOutline);
-  const corners = [
-    { x: bb.minX, y: bb.minY },
-    { x: bb.maxX, y: bb.minY },
-    { x: bb.maxX, y: bb.maxY },
-    { x: bb.minX, y: bb.maxY },
-  ];
-  return edges.map((edge) => {
-    let outPad = 40;
-    for (const c of corners) {
-      const d = weirOutwardMm(c, edge) - edge.troughWidthMm;
-      if (d > outPad) outPad = d + 40;
-    }
-    return closeOutline(infinityDeckCutPolygon(edge, insetMm, outPad));
   });
 }
 
@@ -2784,19 +2862,25 @@ export function buildSceneModel(
       const t = mmToMeters(PATIO_SLAB_THICKNESS_MM);
       const select: SceneSelection = { kind: "patio", id: p.id };
       const open = ringPoints(p.outline);
-      const punchHoles = deckPunchHoles(
+      const punchHoles = patioPunchHoles(
         poolPitHoles,
-        infinityCutsForPatio(p.outline, infinityEdgesAll, 80),
+        p.outline,
+        infinityEdgesAll,
       );
-      if (canAabbPunch(open, punchHoles)) {
-        // Clean AABB decks: remainder slabs (robust, no earcut hole issues).
+      const punchAabb = asAabbRing(open);
+      const holesAabb = punchHoles.map(asAabbRing);
+      const forceAabb =
+        infinityEdgesAll.length > 0 || canAabbPunch(open, punchHoles);
+      if (forceAabb) {
+        const subject = canAabbPunch(open, holesAabb) ? open : punchAabb;
         const regions =
-          punchHoles.length > 0
-            ? subtractAabbHoles(open, punchHoles)
-            : [open];
+          holesAabb.length > 0
+            ? subtractAabbHoles(subject, holesAabb)
+            : [subject];
         let pi = 0;
         for (const region of regions) {
           if (isSliverOutline(region)) continue;
+          if (regionOnVanishingSide(region, infinityEdgesAll)) continue;
           meshes.push({
             kind: "extrude",
             id: `patio_${p.id}_${pi++}`,
@@ -2850,9 +2934,28 @@ export function buildSceneModel(
         ) {
           const dropM = mmToMeters(maxDropMm);
           // Continuous fill pad: existing grade → slab underside (y = 0).
-          // Punch pool/spa pits the same way as the deck (AABB subtract is
-          // reliable; ExtrudeGeometry holes often leave wedges in the basin).
-          if (isAxisAlignedRect(open, 80) && canAabbPunch(open, punchHoles)) {
+          // Punch pool + vanishing slot as one AABB so fill cannot wall off
+          // the weir or wrap the trough (ExtrudeGeometry holes leave wedges).
+          if (infinityEdgesAll.length > 0) {
+            const fillRegions = subtractAabbHoles(asAabbRing(open), holesAabb);
+            let fi = 0;
+            for (const region of fillRegions) {
+              if (region.length < 3 || isSliverOutline(region)) continue;
+              if (regionOnVanishingSide(region, infinityEdgesAll)) continue;
+              meshes.push({
+                kind: "extrude",
+                id: `fill_${p.id}_${fi++}`,
+                material: "fill",
+                outlineMm: closeOutline(region),
+                bottomY: -dropM,
+                height: dropM,
+                select,
+              });
+            }
+          } else if (
+            isAxisAlignedRect(open, 80) &&
+            canAabbPunch(open, punchHoles)
+          ) {
             const fillRegions =
               punchHoles.length > 0
                 ? subtractAabbHoles(open, punchHoles)
