@@ -31,11 +31,35 @@ describe("normalizeDesignDocument", () => {
     assert.ok(next.layers.some((l) => l.id === "covers"));
     assert.ok(next.layers.some((l) => l.id === "fence"));
     assert.ok(next.layers.some((l) => l.id === "survey"));
-    assert.ok(next.layers.some((l) => l.id === "site"));
+    assert.ok(next.layers.some((l) => l.id === "property"));
+    assert.ok(next.layers.some((l) => l.id === "easement"));
+    assert.equal(
+      next.layers.some((l) => l.id === "site"),
+      false,
+    );
     assert.equal(next.surveyUnderlay, undefined);
     assert.deepEqual(next.fences, []);
     assert.deepEqual(next.siteLines, []);
     assert.equal(next.northDeg, 0);
+  });
+
+  it("splits a legacy site layer into property and easement", () => {
+    const next = normalizeDesignDocument({
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [{ id: "site", name: "site", visible: false }],
+      poolBodies: [],
+      plumbingRuns: [],
+    } as unknown as DesignDocument);
+    const property = next.layers.find((l) => l.id === "property");
+    const easement = next.layers.find((l) => l.id === "easement");
+    assert.equal(property?.visible, false);
+    assert.equal(easement?.visible, false);
+    assert.equal(
+      next.layers.some((l) => l.id === "site"),
+      false,
+    );
   });
 
   it("wraps true-north bearing into 0..360", () => {
@@ -108,6 +132,45 @@ describe("normalizeDesignDocument", () => {
     assert.ok(opening.heightMm > 0);
     assert.equal(next.buildings[0].stories, 1);
     assert.equal(next.buildings[0].ceilingHeightMm, 2438.4);
+    assert.equal(next.buildings[0].exteriorSidingId, "stucco");
+  });
+
+  it("normalizes house siding and trims per-story exteriors", () => {
+    const raw = {
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [],
+      poolBodies: [],
+      buildings: [
+        {
+          id: "b2",
+          name: "House",
+          outline: [
+            { x: 0, y: 0 },
+            { x: 5000, y: 0 },
+            { x: 5000, y: 5000 },
+            { x: 0, y: 5000 },
+          ],
+          stories: 2,
+          exteriorSidingId: "brick",
+          storyExteriors: [
+            { exteriorSidingId: "stucco" },
+            { exteriorSidingId: "lap", exteriorFinishId: "house_navy" },
+            { exteriorSidingId: "shake" },
+          ],
+        },
+      ],
+      plumbingRuns: [],
+    } as unknown as DesignDocument;
+
+    const next = normalizeDesignDocument(raw);
+    const house = next.buildings[0];
+    assert.equal(house.stories, 2);
+    assert.equal(house.exteriorSidingId, "brick");
+    assert.equal(house.storyExteriors?.length, 2);
+    assert.equal(house.storyExteriors?.[0].exteriorSidingId, "stucco");
+    assert.equal(house.storyExteriors?.[1].exteriorSidingId, "lap");
   });
 
   it("defaults pool wall thickness", () => {

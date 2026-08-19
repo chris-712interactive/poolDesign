@@ -17,6 +17,7 @@ import {
   DEFAULT_WATERLINE_NOSING_BAND_MM,
   waterlineNosingBandMm,
   DESIGN_LEVEL_LABELS,
+  layerDisplayName,
   FENCE_KINDS,
   GATE_KINDS,
   applySpaPackage,
@@ -43,6 +44,7 @@ import {
   defaultFenceFinishId,
   defaultFenceHeightMm,
   DEFAULT_HOUSE_EXTERIOR_FINISH_ID,
+  DEFAULT_HOUSE_SIDING_ID,
   defaultGateSize,
   fenceBillableLengthMm,
   fenceKindLabel,
@@ -113,6 +115,7 @@ import {
   pointInSurveyUnderlay,
   createSiteLine,
   pointNearSiteLine,
+  siteLineLayerIds,
   siteLineLengthMm,
   surveyUnderlayWorldCorners,
   stepsRunMm,
@@ -130,6 +133,7 @@ import {
   COVER_POST_SIZE_MM,
   buildingHeightMm,
   clampOpeningStory,
+  trimStoryExteriors,
   openingStoryFromPlanFilter,
   clampOpeningT,
   coverSupportFootingSizeMm,
@@ -459,8 +463,11 @@ function selectionOnVisibleLayer(
     case "fence":
     case "gate":
       return layerVisible(design, "fence");
-    case "siteLine":
-      return layerVisible(design, "site");
+    case "siteLine": {
+      const line = (design.siteLines ?? []).find((l) => l.id === sel.id);
+      if (!line) return true;
+      return anyLayerVisible(design, ...siteLineLayerIds(line.kind));
+    }
     case "object": {
       const obj = design.objects.find((o) => o.id === sel.id);
       return obj ? objectLayerVisible(design, obj) : false;
@@ -1122,17 +1129,16 @@ export function CadWorkspace({
       }
     }
 
-    if (layerVisible(design, "site")) {
-      for (const line of design.siteLines ?? []) {
-        drawSiteLine(
-          ctx,
-          vp,
-          line,
-          selection?.kind === "siteLine" && selection.id === line.id,
-          unitSystem,
-          selection?.kind === "siteLine" && selection.id === line.id,
-        );
-      }
+    for (const line of design.siteLines ?? []) {
+      if (!anyLayerVisible(design, ...siteLineLayerIds(line.kind))) continue;
+      drawSiteLine(
+        ctx,
+        vp,
+        line,
+        selection?.kind === "siteLine" && selection.id === line.id,
+        unitSystem,
+        selection?.kind === "siteLine" && selection.id === line.id,
+      );
     }
 
     for (const obj of design.objects ?? []) {
@@ -1607,6 +1613,7 @@ export function CadWorkspace({
       stories,
       kind: "house",
       exteriorFinishId: DEFAULT_HOUSE_EXTERIOR_FINISH_ID,
+      exteriorSidingId: DEFAULT_HOUSE_SIDING_ID,
     };
     const base = withLayersVisible(design, "house", "building");
     commitDesign({
@@ -1771,11 +1778,9 @@ export function CadWorkspace({
       setDraftPoints([]);
       return;
     }
-    let layers = design.layers;
-    if (!layers.some((l) => l.id === "site")) {
-      layers = [...layers, { id: "site", name: "site", visible: true }];
-    }
-    const existing = (design.siteLines ?? []).filter((l) => l.kind === kind)
+    const layerId = kind === "easement" ? "easement" : "property";
+    const base = withLayersVisible(design, layerId);
+    const existing = (base.siteLines ?? []).filter((l) => l.kind === kind)
       .length;
     const line = createSiteLine({
       id: newId(kind === "easement" ? "esmt" : "pl"),
@@ -1785,9 +1790,8 @@ export function CadWorkspace({
       closed,
     });
     commitDesign({
-      ...design,
-      layers,
-      siteLines: [...(design.siteLines ?? []), line],
+      ...base,
+      siteLines: [...(base.siteLines ?? []), line],
     });
     setSelection({ kind: "siteLine", id: line.id });
     clearDraft(closed ? 450 : 0);
@@ -2293,12 +2297,11 @@ export function CadWorkspace({
         }
       }
     }
-    if (layerVisible(design, "site")) {
-      for (let i = (design.siteLines ?? []).length - 1; i >= 0; i--) {
-        const line = design.siteLines![i];
-        if (pointNearSiteLine(line, point, 160)) {
-          return { kind: "siteLine", id: line.id };
-        }
+    for (let i = (design.siteLines ?? []).length - 1; i >= 0; i--) {
+      const line = design.siteLines![i];
+      if (!anyLayerVisible(design, ...siteLineLayerIds(line.kind))) continue;
+      if (pointNearSiteLine(line, point, 160)) {
+        return { kind: "siteLine", id: line.id };
       }
     }
     if (layerVisible(design, "fence")) {
@@ -4999,6 +5002,10 @@ export function CadWorkspace({
                                       ...o,
                                       story: clampOpeningStory(o.story, stories),
                                     })),
+                                    storyExteriors: trimStoryExteriors(
+                                      b.storyExteriors,
+                                      stories,
+                                    ),
                                   }
                                 : b,
                             ),
@@ -5038,17 +5045,19 @@ export function CadWorkspace({
                       />
                     </div>
                     <HouseFinishPicker
+                      stories={Math.max(1, selectedBuilding.stories || 1)}
                       finishId={selectedBuilding.exteriorFinishId}
                       customColor={selectedBuilding.exteriorColor}
-                      onChange={({ exteriorFinishId, exteriorColor }) =>
+                      sidingId={selectedBuilding.exteriorSidingId}
+                      storyExteriors={selectedBuilding.storyExteriors}
+                      onChange={(next) =>
                         commitDesign({
                           ...design,
                           buildings: (design.buildings ?? []).map((b) =>
                             b.id === selectedBuilding.id
                               ? {
                                   ...b,
-                                  exteriorFinishId,
-                                  exteriorColor,
+                                  ...next,
                                 }
                               : b,
                           ),
@@ -5060,8 +5069,9 @@ export function CadWorkspace({
                       style={{ margin: 0, fontSize: "0.78rem" }}
                     >
                       Use 2+ for multi-story homes — floors and ceilings are
-                      added between stories. Default ceiling height is 8′
-                      (adjust for taller rooms).
+                      added between stories. Siding and paint can differ per
+                      story. Default ceiling height is 8′ (adjust for taller
+                      rooms).
                       {(selectedBuilding.openings ?? []).length > 0
                         ? ` ${(selectedBuilding.openings ?? []).length} opening(s) on walls — select an opening to edit size.`
                         : " Use the Door / window tool to click openings onto walls."}
@@ -6108,14 +6118,16 @@ export function CadWorkspace({
             {sideTab === "layers" && (
               <div className="cad-tools-scroll cad-tab-panel" role="tabpanel">
                 <p className="muted" style={{ margin: 0, fontSize: "0.9rem" }}>
-                  Show or hide drawing layers on the plan.
+                  Show or hide drawing layers on the plan and in 3D.
                 </p>
-                <div className="stack">
-                  {design.layers.map((layer) => (
+                <div className="cad-layers-grid">
+                  {design.layers
+                    .filter((layer) => layer.id !== "site")
+                    .map((layer) => (
                     <label
                       key={layer.id}
                       className="row"
-                      style={{ gap: "0.5rem" }}
+                      title={layerDisplayName(layer)}
                     >
                       <input
                         type="checkbox"
@@ -6131,9 +6143,7 @@ export function CadWorkspace({
                           })
                         }
                       />
-                      <span style={{ textTransform: "capitalize" }}>
-                        {layer.name}
-                      </span>
+                      <span>{layerDisplayName(layer)}</span>
                     </label>
                   ))}
                 </div>

@@ -18,9 +18,11 @@ import {
   depthMmAtT,
   depthTAtPlanPoint,
   flattenClosedOutline,
+  houseExteriorColorFromHex,
   mmToMeters,
   planToWorldXZ,
   pointInPolygon,
+  resolveHouseSidingId,
 } from "@pool-design/shared";
 import {
   basinCutPlaneConstant,
@@ -69,6 +71,7 @@ import {
 } from "@/lib/cad3d/proceduralTextures";
 import { getPatioFinishTexture } from "@/lib/cad3d/patioFinishTextures";
 import { getWaterlineTileTexture } from "@/lib/cad3d/waterlineTileTextures";
+import { getHouseSidingTexture } from "@/lib/cad3d/houseSidingTextures";
 import { OpeningMesh } from "@/lib/cad3d/OpeningMesh";
 import {
   BasinCausticOverlay,
@@ -386,6 +389,7 @@ function SelectableMaterial({
   patioFinishId,
   waterlineTileId,
   colorHex,
+  houseSidingId,
   waterShallow,
 }: {
   material: SceneMaterialKey;
@@ -395,6 +399,7 @@ function SelectableMaterial({
   patioFinishId?: string;
   waterlineTileId?: string;
   colorHex?: string;
+  houseSidingId?: string;
   waterShallow?: boolean;
 }) {
   const clippingPlanes = useContext(ClipPlanesContext);
@@ -412,10 +417,20 @@ function SelectableMaterial({
         : null,
     [material, waterlineTileId],
   );
-  const pair =
-    patioPair ??
-    waterlinePair ??
+  const housePair = useMemo(() => {
+    if (material !== "building") return null;
+    const paint =
+      houseExteriorColorFromHex(colorHex ?? "") ?? {
+        r: 245,
+        g: 244,
+        b: 240,
+      };
+    return getHouseSidingTexture(resolveHouseSidingId(houseSidingId), paint);
+  }, [material, houseSidingId, colorHex]);
+  const pair = patioPair ?? waterlinePair ?? housePair ??
     (mat.map && textures ? textures[mat.map] : null);
+  const normalMap =
+    patioPair?.normal ?? waterlinePair?.normal ?? housePair?.normal;
   const isWater =
     material === "poolWater" ||
     material === "spaWater" ||
@@ -425,7 +440,8 @@ function SelectableMaterial({
     material === "cover"
       ? false
       : (opacity ?? 1) < 0.99 || material === "window" || isWater;
-  const color = colorHex ?? mat.color;
+  // Siding albedo already bakes the paint color — don't multiply it again.
+  const color = housePair ? "#ffffff" : (colorHex ?? mat.color);
   if (material === "spilloverWater") {
     return (
       <SpilloverWaterMaterial selected={selected} opacity={opacity ?? 0.7} />
@@ -459,6 +475,7 @@ function SelectableMaterial({
         color={color}
         map={pair?.color}
         roughnessMap={glassLike ? undefined : pair?.roughness}
+        normalMap={glassLike ? undefined : normalMap}
         roughness={glassLike ? 0.05 : mat.roughness}
         metalness={glassLike ? 0 : mat.metalness}
         clearcoat={mat.clearcoat ?? (glassLike ? 1 : 0)}
@@ -490,6 +507,7 @@ function SelectableMaterial({
       color={color}
       map={pair?.color}
       roughnessMap={pair?.roughness}
+      normalMap={normalMap}
       roughness={mat.roughness}
       metalness={mat.metalness}
       transparent={transparent}
@@ -642,6 +660,7 @@ function ExtrudeMesh({
           patioFinishId={desc.patioFinishId}
           waterShallow={desc.waterShallow}
           colorHex={desc.colorHex}
+          houseSidingId={desc.sidingId}
         />
       </mesh>
       {desc.material === "poolFloor" ? (
@@ -2233,6 +2252,7 @@ function WallPanelMesh({
         material={desc.material}
         selected={selected}
         colorHex={desc.colorHex}
+        houseSidingId={desc.sidingId}
       />
     </mesh>
   );
@@ -2748,7 +2768,7 @@ export function CadScene3DCanvas({
             disabled={!(design.siteLines ?? []).some((l) => l.points.length >= 2)}
             title={
               (design.siteLines ?? []).some((l) => l.points.length >= 2)
-                ? "Show property lines and easements on the ground"
+                ? "Show property lines and easements on the ground (also in Layers)"
                 : "Trace a property line or easement in 2D first"
             }
           >

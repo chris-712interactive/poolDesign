@@ -6,6 +6,7 @@ import {
   analyzePatioGrade,
   approximateIntersectionAreaMm2,
   buildingHeightMm,
+  storyFloorElevationMm,
   clipOutlineByAabbs,
   coverHeightMm,
   depthMmAtT,
@@ -30,6 +31,7 @@ import {
   FENCE_THICKNESS_MM,
   gateEndpoints,
   houseExteriorHex,
+  resolveBuildingStoryExterior,
   mmToMeters,
   openingSillMm,
   offsetClosedOutline,
@@ -39,7 +41,6 @@ import {
   poolWallThicknessMm,
   resolveCeilingHeightMm,
   resolveFenceFinish,
-  resolveHouseExteriorColor,
   FLOOR_STRUCTURE_THICKNESS_MM,
   STANDARD_STEP_RISER_MM,
   stepsRiserCount,
@@ -68,6 +69,7 @@ import {
   resolveInfinityEdges,
   infinityOmitIntervals,
   infinityTroughPolygon,
+  siteLineLayerIds,
   siteLineSegments,
   type BuildingOpeningKind,
   type DepthTransition,
@@ -169,6 +171,7 @@ export type ExtrudeDescriptor = {
   waterShallow?: boolean;
   /** Exterior wall tint (corner fillers matching wall panels). */
   colorHex?: string;
+  sidingId?: string;
 } & Selectable;
 
 export type BoxDescriptor = {
@@ -293,8 +296,10 @@ export type WallPanelDescriptor = {
   thicknessM: number;
   /** Holes in local coords: x along length from panel center, y up from floor. */
   holes: { x: number; y: number; w: number; h: number }[];
-  /** Exterior wall tint (multiplies stucco albedo). */
+  /** Exterior wall tint (multiplies siding albedo). */
   colorHex?: string;
+  /** House siding id (stucco, lap, brick, …). */
+  sidingId?: string;
 } & Selectable;
 
 /** Shared depth-profile fields for floor / water meshes. */
@@ -2221,9 +2226,13 @@ export function buildSceneModel(
       const hMm = buildingHeightMm(stories, ceilingMm);
       const h = mmToMeters(hMm);
       const select: SceneSelection = { kind: "building", id: b.id };
-      const colorHex = houseExteriorHex(
-        resolveHouseExteriorColor(b.exteriorFinishId, b.exteriorColor),
-      );
+      const storyLooks = Array.from({ length: stories }, (_, i) => {
+        const look = resolveBuildingStoryExterior(b, i + 1);
+        return {
+          colorHex: houseExteriorHex(look.color),
+          sidingId: look.sidingId,
+        };
+      });
       const wallTmm = 180;
       // Exact same ring as resolveOpeningEdge / openingEndpoints.
       const pts = openOutlineRing(b.outline);
@@ -2358,20 +2367,37 @@ export function buildSceneModel(
         };
         const xz = planToWorldXZ(centerPlan);
         const outward = planDirToWorldXZ(nx, ny);
-        meshes.push({
-          kind: "wallPanel",
-          id: `building_wall_${b.id}_${i}`,
-          material: "building",
-          position: { x: xz.x, y: 0, z: xz.z },
-          axisX: planDirToWorldXZ(tx, ty),
-          axisZ: outward,
-          lengthM: panelLenM,
-          heightM: h,
-          thicknessM: mmToMeters(wallTmm),
-          holes: holesLocal,
-          colorHex,
-          select,
-        });
+        for (let s = 1; s <= stories; s++) {
+          const floorMm = storyFloorElevationMm(s, stories, ceilingMm);
+          const topMm =
+            s < stories
+              ? storyFloorElevationMm(s + 1, stories, ceilingMm)
+              : hMm;
+          const bottomM = mmToMeters(floorMm);
+          const heightM = Math.max(0.05, mmToMeters(topMm - floorMm));
+          const look = storyLooks[s - 1];
+          const holesStory = holesLocal
+            .map((hole) => ({
+              ...hole,
+              y: hole.y - bottomM,
+            }))
+            .filter((hole) => hole.y + hole.h > 0.02 && hole.y < heightM - 0.02);
+          meshes.push({
+            kind: "wallPanel",
+            id: `building_wall_${b.id}_${i}_s${s}`,
+            material: "building",
+            position: { x: xz.x, y: bottomM, z: xz.z },
+            axisX: planDirToWorldXZ(tx, ty),
+            axisZ: outward,
+            lengthM: panelLenM,
+            heightM,
+            thicknessM: mmToMeters(wallTmm),
+            holes: holesStory,
+            colorHex: look.colorHex,
+            sidingId: look.sidingId,
+            select,
+          });
+        }
       }
 
       // Concave (inner) corners leave a T×T parallelogram hole because
@@ -2394,21 +2420,31 @@ export function buildSceneModel(
         const n1 = edgeOutwardNormal(outDx, outDy, wallArea);
         const in0 = { x: -n0.x * wallTmm, y: -n0.y * wallTmm };
         const in1 = { x: -n1.x * wallTmm, y: -n1.y * wallTmm };
-        meshes.push({
-          kind: "extrude",
-          id: `building_wall_corner_${b.id}_${i}`,
-          material: "building",
-          outlineMm: closeOutline([
-            cur,
-            { x: cur.x + in0.x, y: cur.y + in0.y },
-            { x: cur.x + in0.x + in1.x, y: cur.y + in0.y + in1.y },
-            { x: cur.x + in1.x, y: cur.y + in1.y },
-          ]),
-          bottomY: 0,
-          height: h,
-          colorHex,
-          select,
-        });
+        const cornerOutline = closeOutline([
+          cur,
+          { x: cur.x + in0.x, y: cur.y + in0.y },
+          { x: cur.x + in0.x + in1.x, y: cur.y + in0.y + in1.y },
+          { x: cur.x + in1.x, y: cur.y + in1.y },
+        ]);
+        for (let s = 1; s <= stories; s++) {
+          const floorMm = storyFloorElevationMm(s, stories, ceilingMm);
+          const topMm =
+            s < stories
+              ? storyFloorElevationMm(s + 1, stories, ceilingMm)
+              : hMm;
+          const look = storyLooks[s - 1];
+          meshes.push({
+            kind: "extrude",
+            id: `building_wall_corner_${b.id}_${i}_s${s}`,
+            material: "building",
+            outlineMm: cornerOutline,
+            bottomY: mmToMeters(floorMm),
+            height: Math.max(0.05, mmToMeters(topMm - floorMm)),
+            colorHex: look.colorHex,
+            sidingId: look.sidingId,
+            select,
+          });
+        }
       }
 
       // Flat roof deck + eaves overhang so the volume reads as a house, not a foam block.
@@ -3315,6 +3351,7 @@ export function buildSceneModel(
     let markI = 0;
     for (const line of design.siteLines ?? []) {
       if (line.points.length < 2) continue;
+      if (!anyLayerVisible(design, ...siteLineLayerIds(line.kind))) continue;
       const samples = densifyWorldPolyline(
         line.points,
         line.closed === true,

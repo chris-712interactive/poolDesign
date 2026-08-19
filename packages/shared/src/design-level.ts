@@ -27,6 +27,41 @@ export type DesignLevelConfig = {
   defaultLayers: string[];
 };
 
+/** Short labels for the Layers panel (fallback: title-case the id). */
+export const LAYER_LABELS: Record<string, string> = {
+  house: "House",
+  building: "Building",
+  pool: "Pool",
+  pools: "Pools",
+  features: "Features",
+  patio: "Patio",
+  deck: "Deck",
+  covers: "Covers",
+  furniture: "Furniture",
+  amenities: "Amenities",
+  plumbing: "Plumbing",
+  equipment: "Equipment",
+  notes: "Notes",
+  fence: "Fence",
+  survey: "Survey",
+  property: "Property",
+  easement: "Easements",
+  site: "Lot lines",
+  accessibility: "Access",
+  attractions: "Attractions",
+  guest_flow: "Guest flow",
+  mechanical: "Mechanical",
+  theming: "Theming",
+};
+
+export function layerDisplayName(layer: { id: string; name: string }): string {
+  return (
+    LAYER_LABELS[layer.id] ??
+    LAYER_LABELS[layer.name] ??
+    layer.name.replace(/_/g, " ")
+  );
+}
+
 export const DESIGN_LEVEL_CONFIG: Record<DesignLevel, DesignLevelConfig> = {
   residential: {
     level: "residential",
@@ -40,6 +75,9 @@ export const DESIGN_LEVEL_CONFIG: Record<DesignLevel, DesignLevelConfig> = {
       "furniture",
       "plumbing",
       "equipment",
+      "fence",
+      "property",
+      "easement",
       "notes",
     ],
   },
@@ -55,6 +93,9 @@ export const DESIGN_LEVEL_CONFIG: Record<DesignLevel, DesignLevelConfig> = {
       "amenities",
       "plumbing",
       "equipment",
+      "fence",
+      "property",
+      "easement",
       "accessibility",
       "notes",
     ],
@@ -70,6 +111,9 @@ export const DESIGN_LEVEL_CONFIG: Record<DesignLevel, DesignLevelConfig> = {
       "guest_flow",
       "mechanical",
       "plumbing",
+      "fence",
+      "property",
+      "easement",
       "theming",
       "notes",
     ],

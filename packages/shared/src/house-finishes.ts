@@ -19,6 +19,36 @@ export const HOUSE_EXTERIOR_CUSTOM_ID = "custom";
 
 export const DEFAULT_HOUSE_EXTERIOR_FINISH_ID = "house_white";
 
+export const HOUSE_SIDING_IDS = [
+  "stucco",
+  "lap",
+  "board_batten",
+  "brick",
+  "stone",
+  "shake",
+] as const;
+
+export type HouseSidingId = (typeof HOUSE_SIDING_IDS)[number];
+
+export const DEFAULT_HOUSE_SIDING_ID: HouseSidingId = "stucco";
+
+export const HOUSE_SIDING_LABELS: Record<HouseSidingId, string> = {
+  stucco: "Stucco",
+  lap: "Lap siding",
+  board_batten: "Board & batten",
+  brick: "Brick",
+  stone: "Stone",
+  shake: "Shakes",
+};
+
+export function isHouseSidingId(id: string | undefined | null): id is HouseSidingId {
+  return typeof id === "string" && (HOUSE_SIDING_IDS as readonly string[]).includes(id);
+}
+
+export function resolveHouseSidingId(id?: string | null): HouseSidingId {
+  return isHouseSidingId(id) ? id : DEFAULT_HOUSE_SIDING_ID;
+}
+
 const rgb = (r: number, g: number, b: number): HouseExteriorColor => ({
   r,
   g,
@@ -257,4 +287,80 @@ export function houseExteriorPlanStroke(
     g: Math.max(0, color.g - 28),
     b: Math.max(0, color.b - 28),
   });
+}
+
+export type ResolvedStoryExterior = {
+  finishId: string;
+  color: HouseExteriorColor;
+  sidingId: HouseSidingId;
+};
+
+/** Paint + siding for a 1-based story. */
+export function resolveBuildingStoryExterior(
+  building: {
+    stories?: number;
+    exteriorFinishId?: string | null;
+    exteriorColor?: Partial<HouseExteriorColor> | null;
+    exteriorSidingId?: string | null;
+    storyExteriors?: Array<{
+      exteriorFinishId?: string | null;
+      exteriorColor?: Partial<HouseExteriorColor> | null;
+      exteriorSidingId?: string | null;
+    } | null>;
+  },
+  story: number,
+): ResolvedStoryExterior {
+  const max = Math.max(1, building.stories || 1);
+  const s = Math.min(max, Math.max(1, Math.round(story || 1)));
+  const slot = building.storyExteriors?.[s - 1];
+  const finishId = resolveHouseExteriorFinishId(
+    slot?.exteriorFinishId ?? building.exteriorFinishId,
+  );
+  const color = resolveHouseExteriorColor(
+    slot?.exteriorFinishId ?? building.exteriorFinishId,
+    slot?.exteriorColor ?? building.exteriorColor,
+  );
+  const sidingId = resolveHouseSidingId(
+    slot?.exteriorSidingId ?? building.exteriorSidingId,
+  );
+  return { finishId, color, sidingId };
+}
+
+/** Drop per-story overrides that no longer fit the story count. */
+export function trimStoryExteriors(
+  slots:
+    | Array<{
+        exteriorFinishId?: string | null;
+        exteriorColor?: Partial<HouseExteriorColor> | null;
+        exteriorSidingId?: string | null;
+      } | null | undefined>
+    | undefined,
+  stories: number,
+): Array<{
+  exteriorFinishId?: string;
+  exteriorColor?: HouseExteriorColor;
+  exteriorSidingId?: string;
+}> | undefined {
+  if (!slots?.length || stories < 1) return undefined;
+  const out = slots.slice(0, stories).map((s) => {
+    const item: {
+      exteriorFinishId?: string;
+      exteriorColor?: HouseExteriorColor;
+      exteriorSidingId?: string;
+    } = {};
+    if (typeof s?.exteriorFinishId === "string") {
+      item.exteriorFinishId = resolveHouseExteriorFinishId(s.exteriorFinishId);
+    }
+    if (typeof s?.exteriorSidingId === "string") {
+      item.exteriorSidingId = resolveHouseSidingId(s.exteriorSidingId);
+    }
+    if (s?.exteriorColor) {
+      item.exteriorColor = clampHouseExteriorColor(s.exteriorColor);
+    }
+    return item;
+  });
+  const any = out.some(
+    (s) => s.exteriorFinishId || s.exteriorSidingId || s.exteriorColor,
+  );
+  return any ? out : undefined;
 }

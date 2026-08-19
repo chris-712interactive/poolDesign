@@ -24,6 +24,7 @@ import {
   type GradeSample,
   type PatioGradeStrategy,
   type SpaSpillover,
+  type BuildingStoryExterior,
   isSpaSpilloverStyle,
   type SpaSpilloverWeir,
   type InfinityEdge,
@@ -95,6 +96,7 @@ import {
   HOUSE_EXTERIOR_CUSTOM_ID,
   clampHouseExteriorColor,
   resolveHouseExteriorFinishId,
+  resolveHouseSidingId,
 } from "./house-finishes";
 import {
   DINING_CHAIR_CLEARANCE_MM,
@@ -122,6 +124,40 @@ const FT = 304.8;
 
 /** Current document schema version written by the app. */
 export const DESIGN_DOCUMENT_VERSION = 1;
+
+function normalizeStoryExteriors(
+  raw: unknown,
+  stories: number,
+): BuildingStoryExterior[] | undefined {
+  if (!Array.isArray(raw) || stories < 1) return undefined;
+  const out: BuildingStoryExterior[] = [];
+  let any = false;
+  for (let i = 0; i < stories; i++) {
+    const s = raw[i];
+    if (!s || typeof s !== "object") {
+      out.push({});
+      continue;
+    }
+    const o = s as Record<string, unknown>;
+    const item: BuildingStoryExterior = {};
+    if (typeof o.exteriorFinishId === "string") {
+      item.exteriorFinishId = resolveHouseExteriorFinishId(o.exteriorFinishId);
+    }
+    if (typeof o.exteriorSidingId === "string") {
+      item.exteriorSidingId = resolveHouseSidingId(o.exteriorSidingId);
+    }
+    if (o.exteriorColor && typeof o.exteriorColor === "object") {
+      item.exteriorColor = clampHouseExteriorColor(
+        o.exteriorColor as { r?: number; g?: number; b?: number },
+      );
+    }
+    if (item.exteriorFinishId || item.exteriorSidingId || item.exteriorColor) {
+      any = true;
+    }
+    out.push(item);
+  }
+  return any ? out : undefined;
+}
 
 /**
  * Coerce a partially-shaped / older design into a valid DesignDocument.
@@ -157,8 +193,22 @@ export function normalizeDesignDocument(
   if (!layers.some((l) => l.id === "survey")) {
     layers = [...layers, { id: "survey", name: "survey", visible: true }];
   }
-  if (!layers.some((l) => l.id === "site")) {
-    layers = [...layers, { id: "site", name: "site", visible: true }];
+  const siteLayer = layers.find((l) => l.id === "site");
+  const siteVisible = siteLayer ? siteLayer.visible !== false : true;
+  if (!layers.some((l) => l.id === "property")) {
+    layers = [
+      ...layers,
+      { id: "property", name: "property", visible: siteVisible },
+    ];
+  }
+  if (!layers.some((l) => l.id === "easement")) {
+    layers = [
+      ...layers,
+      { id: "easement", name: "easement", visible: siteVisible },
+    ];
+  }
+  if (siteLayer) {
+    layers = layers.filter((l) => l.id !== "site");
   }
 
   const normalized: DesignDocument = {
@@ -326,13 +376,17 @@ export function normalizeDesignDocument(
         exteriorFinishId === HOUSE_EXTERIOR_CUSTOM_ID
           ? clampHouseExteriorColor(b.exteriorColor)
           : undefined;
+      const exteriorSidingId = resolveHouseSidingId(b.exteriorSidingId);
+      const storyExteriors = normalizeStoryExteriors(b.storyExteriors, stories);
       return {
         ...b,
         stories,
         ceilingHeightMm,
         kind: b.kind ?? "house",
         exteriorFinishId,
+        exteriorSidingId,
         ...(exteriorColor ? { exteriorColor } : { exteriorColor: undefined }),
+        ...(storyExteriors ? { storyExteriors } : { storyExteriors: undefined }),
         openings: (b.openings ?? []).map((o) => {
           const kind =
             o.kind === "sliding_door" || o.kind === "window"

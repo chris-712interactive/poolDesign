@@ -4,6 +4,7 @@ import {
   type WaterlineTile,
   type WaterlineTilePattern,
 } from "@pool-design/shared";
+import { normalFromHeightGray } from "./normalFromHeight";
 
 function hash2(ix: number, iy: number, seed: number): number {
   let n = Math.imul(ix, 374761393) + Math.imul(iy, 668265263) + seed;
@@ -40,6 +41,7 @@ function paletteColor(
 export type WaterlineTexPair = {
   color: THREE.CanvasTexture;
   roughness: THREE.CanvasTexture;
+  normal: THREE.CanvasTexture;
 };
 
 function makePair(
@@ -62,7 +64,8 @@ function makePair(
   draw(cctx, rctx, size);
   const color = new THREE.CanvasTexture(cc);
   const roughness = new THREE.CanvasTexture(rc);
-  for (const t of [color, roughness]) {
+  const normal = normalFromHeightGray(rctx, size, true, 2.4);
+  for (const t of [color, roughness, normal]) {
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat[0], repeat[1]);
     t.anisotropy = 8;
@@ -70,7 +73,7 @@ function makePair(
   }
   color.colorSpace = THREE.SRGBColorSpace;
   roughness.colorSpace = THREE.NoColorSpace;
-  return { color, roughness };
+  return { color, roughness, normal };
 }
 
 function paletteFor(tile: WaterlineTile): { r: number; g: number; b: number }[] {
@@ -104,18 +107,24 @@ function drawChip(
   const safe = color ?? { r: 100, g: 160, b: 190 };
   c.fillStyle = tint(safe, (n - 0.5) * 28);
   c.fillRect(x, y, w, h);
+  const b = Math.max(1, Math.min(w, h) * 0.12);
+  c.fillStyle = iridescent
+    ? "rgba(255,255,255,0.32)"
+    : "rgba(255,255,255,0.18)";
+  c.fillRect(x, y, w, b);
+  c.fillRect(x, y, b, h);
+  c.fillStyle = "rgba(0,0,0,0.22)";
+  c.fillRect(x, y + h - b, w, b);
+  c.fillRect(x + w - b, y, b, h);
   if (iridescent) {
-    c.fillStyle = "rgba(255,255,255,0.22)";
-    c.fillRect(x + w * 0.08, y + h * 0.1, w * 0.4, h * 0.22);
-    c.fillStyle = "rgba(180,220,255,0.12)";
+    c.fillStyle = "rgba(180,220,255,0.16)";
     c.fillRect(x + w * 0.45, y + h * 0.45, w * 0.4, h * 0.3);
-  } else {
-    c.fillStyle = "rgba(255,255,255,0.12)";
-    c.fillRect(x + w * 0.1, y + h * 0.12, w * 0.35, h * 0.18);
   }
-  const rv = iridescent ? 25 + n * 40 : 55 + n * 50;
+  const rv = iridescent ? 22 + n * 36 : 48 + n * 44;
   r.fillStyle = `rgb(${rv},${rv},${rv})`;
   r.fillRect(x, y, w, h);
+  r.fillStyle = "rgba(200,200,200,0.45)";
+  r.fillRect(x, y, w, b * 0.7);
 }
 
 function drawGrid(tile: WaterlineTile, size: number): WaterlineTexPair {
@@ -284,7 +293,7 @@ export function getWaterlineTileTexture(
   tileId: string | undefined,
 ): WaterlineTexPair {
   const tile = getWaterlineTile(tileId);
-  const key = `${tile.id}@v2`;
+  const key = `${tile.id}@v4-relief`;
   const cached = cache.get(key);
   if (cached) return cached;
   if (typeof document === "undefined") {
@@ -297,6 +306,7 @@ export function getWaterlineTileTexture(
     return {
       color: stub as unknown as THREE.CanvasTexture,
       roughness: stub.clone() as unknown as THREE.CanvasTexture,
+      normal: stub.clone() as unknown as THREE.CanvasTexture,
     };
   }
   const pair = (generators[tile.pattern] ?? drawGrid)(tile, 512);

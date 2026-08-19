@@ -276,6 +276,13 @@ export const DEFAULT_PATIO_ROOF_HEIGHT_MM = 2743.2;
 
 export type BuildingKind = "house" | "garage" | "accessory" | "commercial";
 
+/** Per-story override of house paint / siding. */
+export type BuildingStoryExterior = {
+  exteriorFinishId?: string;
+  exteriorColor?: { r: number; g: number; b: number };
+  exteriorSidingId?: string;
+};
+
 export type BuildingOpeningKind = "door" | "sliding_door" | "window";
 
 /** Door / sliding door / window on a building wall edge */
@@ -371,6 +378,16 @@ export type Building = {
    * Custom exterior RGB (0–255). Used when `exteriorFinishId` is `"custom"`.
    */
   exteriorColor?: { r: number; g: number; b: number };
+  /**
+   * Wall siding for all stories unless a story entry overrides it.
+   * `stucco` | `lap` | `board_batten` | `brick` | `stone` | `shake`
+   */
+  exteriorSidingId?: string;
+  /**
+   * Per-story overrides (index 0 = ground floor). Missing slots fall back
+   * to the building-level finish / siding.
+   */
+  storyExteriors?: BuildingStoryExterior[];
   /** Doors and windows on wall edges */
   openings?: BuildingOpening[];
 };
@@ -504,6 +521,11 @@ export type FenceRun = {
 export type SiteLineKind = "property" | "easement";
 
 export const SITE_LINE_KINDS: SiteLineKind[] = ["property", "easement"];
+
+/** Layers that control a traced lot line (legacy jobs used a combined "site"). */
+export function siteLineLayerIds(kind: SiteLineKind): string[] {
+  return kind === "easement" ? ["easement", "site"] : ["property", "site"];
+}
 
 /**
  * User-traced lot line or easement from a survey sheet.
@@ -742,7 +764,8 @@ export function emptyDesignDocument(
     "patio",
     "covers",
     "fence",
-    "site",
+    "property",
+    "easement",
     "plumbing",
     "furniture",
     "features",

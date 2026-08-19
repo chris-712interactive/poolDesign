@@ -4,6 +4,7 @@ import {
   type PatioFinish,
   type PatioFinishPattern,
 } from "@pool-design/shared";
+import { normalFromHeightGray } from "./normalFromHeight";
 
 /** Inches → meters (plan UVs on patio extrudes are world meters). */
 const IN = 0.0254;
@@ -116,6 +117,7 @@ function repeatForMeters(coverageM: number): [number, number] {
 export type PatioTexPair = {
   color: THREE.CanvasTexture;
   roughness: THREE.CanvasTexture;
+  normal: THREE.CanvasTexture;
 };
 
 function makePair(
@@ -138,8 +140,9 @@ function makePair(
   draw(cctx, rctx, size);
   const color = new THREE.CanvasTexture(cc);
   const roughness = new THREE.CanvasTexture(rc);
+  const normal = normalFromHeightGray(rctx, size, true, 2.8);
   const repeat = repeatForMeters(coverageM);
-  for (const t of [color, roughness]) {
+  for (const t of [color, roughness, normal]) {
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat[0], repeat[1]);
     t.anisotropy = 8;
@@ -147,7 +150,40 @@ function makePair(
   }
   color.colorSpace = THREE.SRGBColorSpace;
   roughness.colorSpace = THREE.NoColorSpace;
-  return { color, roughness };
+  return { color, roughness, normal };
+}
+
+function fillGrout(
+  c: CanvasRenderingContext2D,
+  r: CanvasRenderingContext2D,
+  s: number,
+  accent: { r: number; g: number; b: number },
+) {
+  c.fillStyle = tint(accent, -18);
+  c.fillRect(0, 0, s, s);
+  r.fillStyle = "#e2e2e2";
+  r.fillRect(0, 0, s, s);
+}
+
+/** Chamfer + contact shadow so units read as 3D pavers, not printed paper. */
+function bevelUnit(
+  c: CanvasRenderingContext2D,
+  r: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+) {
+  const b = Math.max(1.2, Math.min(w, h) * 0.06);
+  c.fillStyle = "rgba(255,255,255,0.22)";
+  c.fillRect(x, y, w, b);
+  c.fillRect(x, y, b, h);
+  c.fillStyle = "rgba(0,0,0,0.28)";
+  c.fillRect(x, y + h - b, w, b);
+  c.fillRect(x + w - b, y, b, h);
+  r.fillStyle = "rgba(210,210,210,0.55)";
+  r.fillRect(x, y, w, b * 0.7);
+  r.fillRect(x, y + h - b * 0.7, w, b * 0.7);
 }
 
 function pxPerInch(canvasSize: number, moduleIn: number): number {
@@ -185,6 +221,7 @@ function fillStone(
   const rv = 70 + n * 55;
   r.fillStyle = `rgb(${rv},${rv},${rv})`;
   r.fillRect(x, y, w, h);
+  bevelUnit(c, r, x, y, w, h);
 }
 
 function drawFrenchPattern(
@@ -199,10 +236,7 @@ function drawFrenchPattern(
     (c, r, s) => {
       const ppi = pxPerInch(s, moduleIn);
       const joint = Math.max(1.2, JOINT_IN * ppi);
-      c.fillStyle = tint(finish.accent, -8);
-      c.fillRect(0, 0, s, s);
-      r.fillStyle = "#d4d4d4";
-      r.fillRect(0, 0, s, s);
+      fillGrout(c, r, s, finish.accent);
       for (const [ix, iy, iw, ih] of FRENCH_48_IN) {
         const n = fbm(ix * 0.07, iy * 0.07, 41, 3);
         const x = ix * ppi + joint * 0.5;
@@ -318,29 +352,51 @@ function drawStampedAshlar(finish: PatioFinish, size: number): PatioTexPair {
 }
 
 function drawStampedCobble(finish: PatioFinish, size: number): PatioTexPair {
-  // Cobbles ~4–6″ across — module 24″.
+  // Packed cobbles ~4–6″ — 24″ module so joints tile cleanly.
   const coverageM = 24 * IN;
   return makePair(
     size,
     (c, r, s) => {
-      const rand = mulberry32(0xc0bb);
-      c.fillStyle = tint(finish.accent, 0);
-      c.fillRect(0, 0, s, s);
-      r.fillStyle = "#d8d8d8";
-      r.fillRect(0, 0, s, s);
-      const ppi = pxPerInch(s, 24);
-      for (let i = 0; i < 55; i++) {
-        const x = rand() * s;
-        const y = rand() * s;
-        const rx = (2 + rand() * 2) * ppi;
-        const ry = (1.8 + rand() * 2) * ppi;
-        c.beginPath();
-        c.fillStyle = tint(finish.color, (rand() - 0.5) * 35);
-        c.ellipse(x, y, rx, ry, rand() * Math.PI, 0, Math.PI * 2);
-        c.fill();
-        c.strokeStyle = `rgba(${finish.accent.r},${finish.accent.g},${finish.accent.b},0.5)`;
-        c.lineWidth = 1.5;
-        c.stroke();
+      fillGrout(c, r, s, finish.accent);
+      const cols = 5;
+      const rows = 5;
+      const cw = s / cols;
+      const ch = s / rows;
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const n = fbm(col * 1.1, row * 1.1, 0xc0bb, 3);
+          const jx = (hash2(col, row, 19) - 0.5) * cw * 0.18;
+          const jy = (hash2(col, row, 23) - 0.5) * ch * 0.18;
+          const w = cw * (0.72 + n * 0.12);
+          const h = ch * (0.68 + (1 - n) * 0.14);
+          const x = col * cw + (cw - w) / 2 + jx;
+          const y = row * ch + (ch - h) / 2 + jy;
+          c.beginPath();
+          c.ellipse(
+            x + w / 2,
+            y + h / 2,
+            w / 2,
+            h / 2,
+            0,
+            0,
+            Math.PI * 2,
+          );
+          c.fillStyle = tint(finish.color, (n - 0.5) * 38);
+          c.fill();
+          r.beginPath();
+          r.ellipse(
+            x + w / 2,
+            y + h / 2,
+            w / 2,
+            h / 2,
+            0,
+            0,
+            Math.PI * 2,
+          );
+          r.fillStyle = `rgb(${55 + n * 50},${55 + n * 50},${55 + n * 50})`;
+          r.fill();
+          bevelUnit(c, r, x, y, w, h);
+        }
       }
     },
     coverageM,
@@ -356,23 +412,30 @@ function drawStampedPlank(finish: PatioFinish, size: number): PatioTexPair {
     size,
     (c, r, s) => {
       const plankH = s / cols;
+      fillGrout(c, r, s, finish.accent);
       for (let row = 0; row < cols; row++) {
         const n = fbm(row, 0, 66, 2);
-        c.fillStyle = tint(finish.color, (n - 0.5) * 28);
-        c.fillRect(0, row * plankH, s, plankH - 2);
-        r.fillStyle = `rgb(${120 + n * 40},${120 + n * 40},${120 + n * 40})`;
-        r.fillRect(0, row * plankH, s, plankH - 2);
-        c.strokeStyle = `rgba(${finish.accent.r},${finish.accent.g},${finish.accent.b},0.25)`;
+        const y = row * plankH + 2;
+        const h = plankH - 4;
+        c.fillStyle = tint(finish.color, (n - 0.5) * 32);
+        c.fillRect(0, y, s, h);
+        r.fillStyle = `rgb(${90 + n * 50},${90 + n * 50},${90 + n * 50})`;
+        r.fillRect(0, y, s, h);
+        bevelUnit(c, r, 0, y, s, h);
+        c.strokeStyle = `rgba(${finish.accent.r},${finish.accent.g},${finish.accent.b},0.28)`;
         c.lineWidth = 1;
         for (let k = 0; k < 5; k++) {
-          const y = row * plankH + 3 + k * (plankH / 6);
+          const gy = y + 4 + k * (h / 6);
           c.beginPath();
-          c.moveTo(0, y);
+          c.moveTo(0, gy);
           for (let x = 0; x < s; x += 6) {
-            c.lineTo(x, y + Math.sin(x * 0.08 + row) * 1.2);
+            c.lineTo(x, gy + Math.sin(x * 0.08 + row) * 1.2);
           }
           c.stroke();
         }
+        const seam = (row * 0.37 + n) % 1;
+        c.fillStyle = "rgba(0,0,0,0.22)";
+        c.fillRect(s * seam - 1.5, y, 3, h);
       }
     },
     coverageM,
@@ -387,23 +450,23 @@ function drawRunningBond(finish: PatioFinish, size: number): PatioTexPair {
   return makePair(
     size,
     (c, r, s) => {
-      c.fillStyle = tint(finish.accent, 0);
-      c.fillRect(0, 0, s, s);
-      r.fillStyle = "#c8c8c8";
-      r.fillRect(0, 0, s, s);
+      fillGrout(c, r, s, finish.accent);
       const tw = s / cols;
       const th = s / rows;
-      const joint = Math.max(1, (JOINT_IN / BRICK_W_IN) * tw);
+      const joint = Math.max(1.6, (JOINT_IN / BRICK_W_IN) * tw);
       for (let row = 0; row < rows; row++) {
         const offset = (row % 2) * (tw * 0.5);
         for (let col = -1; col <= cols; col++) {
           const n = fbm(col * 0.4, row * 0.4, 71, 2);
           const x = col * tw + offset + joint * 0.5;
           const y = row * th + joint * 0.5;
-          c.fillStyle = tint(finish.color, (n - 0.5) * 22);
-          c.fillRect(x, y, tw - joint, th - joint);
-          r.fillStyle = `rgb(${55 + n * 40},${55 + n * 40},${55 + n * 40})`;
-          r.fillRect(x, y, tw - joint, th - joint);
+          const ww = tw - joint;
+          const hh = th - joint;
+          c.fillStyle = tint(finish.color, (n - 0.5) * 28);
+          c.fillRect(x, y, ww, hh);
+          r.fillStyle = `rgb(${48 + n * 36},${48 + n * 36},${48 + n * 36})`;
+          r.fillRect(x, y, ww, hh);
+          bevelUnit(c, r, x, y, ww, hh);
         }
       }
     },
@@ -417,25 +480,33 @@ function drawHerringbone(finish: PatioFinish, size: number): PatioTexPair {
   return makePair(
     size,
     (c, r, s) => {
-      c.fillStyle = tint(finish.accent, 0);
-      c.fillRect(0, 0, s, s);
-      r.fillStyle = "#c0c0c0";
-      r.fillRect(0, 0, s, s);
+      fillGrout(c, r, s, finish.accent);
       const ppi = pxPerInch(s, 36);
       const bw = BRICK_W_IN * ppi;
       const bh = BRICK_H_IN * ppi;
       const step = (BRICK_W_IN / Math.SQRT2) * ppi;
+      const joint = Math.max(1.4, JOINT_IN * ppi);
       for (let row = -2; row < 20; row++) {
         for (let col = -2; col < 20; col++) {
           const n = fbm(col, row, 88, 2);
           c.save();
+          r.save();
           c.translate(col * step * 2, row * step * 2);
-          c.rotate(((col + row) % 2 === 0 ? 1 : -1) * (Math.PI / 4));
-          c.fillStyle = tint(finish.color, (n - 0.5) * 24);
-          c.fillRect(-bw * 0.5, -bh * 0.5, bw, bh);
-          r.fillStyle = `rgb(${60 + n * 45},${60 + n * 45},${60 + n * 45})`;
-          r.fillRect(-bw * 0.5, -bh * 0.5, bw, bh);
+          r.translate(col * step * 2, row * step * 2);
+          const rot = ((col + row) % 2 === 0 ? 1 : -1) * (Math.PI / 4);
+          c.rotate(rot);
+          r.rotate(rot);
+          const x = -bw * 0.5 + joint * 0.5;
+          const y = -bh * 0.5 + joint * 0.5;
+          const ww = bw - joint;
+          const hh = bh - joint;
+          c.fillStyle = tint(finish.color, (n - 0.5) * 26);
+          c.fillRect(x, y, ww, hh);
+          r.fillStyle = `rgb(${52 + n * 40},${52 + n * 40},${52 + n * 40})`;
+          r.fillRect(x, y, ww, hh);
+          bevelUnit(c, r, x, y, ww, hh);
           c.restore();
+          r.restore();
         }
       }
     },
@@ -450,10 +521,9 @@ function drawBasketweave(finish: PatioFinish, size: number): PatioTexPair {
   return makePair(
     size,
     (c, r, s) => {
-      c.fillStyle = tint(finish.accent, 0);
-      c.fillRect(0, 0, s, s);
+      fillGrout(c, r, s, finish.accent);
       const cell = s / cells;
-      const joint = Math.max(1, (JOINT_IN / BRICK_W_IN) * (cell / 2));
+      const joint = Math.max(1.4, (JOINT_IN / BRICK_W_IN) * (cell / 2));
       for (let row = 0; row < cells; row++) {
         for (let col = 0; col < cells; col++) {
           const horiz = (row + col) % 2 === 0;
@@ -469,11 +539,41 @@ function drawBasketweave(finish: PatioFinish, size: number): PatioTexPair {
                 cell - joint * 2,
                 cell / 2 - joint,
               );
+              r.fillStyle = `rgb(${50 + n * 30},${50 + n * 30},${50 + n * 30})`;
+              r.fillRect(
+                x0 + joint,
+                y0 + joint + k * (cell / 2),
+                cell - joint * 2,
+                cell / 2 - joint,
+              );
+              bevelUnit(
+                c,
+                r,
+                x0 + joint,
+                y0 + joint + k * (cell / 2),
+                cell - joint * 2,
+                cell / 2 - joint,
+              );
             }
           } else {
             for (let k = 0; k < 2; k++) {
               c.fillStyle = tint(finish.color, (n - 0.5) * 20 + k * 4);
               c.fillRect(
+                x0 + joint + k * (cell / 2),
+                y0 + joint,
+                cell / 2 - joint,
+                cell - joint * 2,
+              );
+              r.fillStyle = `rgb(${50 + n * 30},${50 + n * 30},${50 + n * 30})`;
+              r.fillRect(
+                x0 + joint + k * (cell / 2),
+                y0 + joint,
+                cell / 2 - joint,
+                cell - joint * 2,
+              );
+              bevelUnit(
+                c,
+                r,
                 x0 + joint + k * (cell / 2),
                 y0 + joint,
                 cell / 2 - joint,
@@ -496,8 +596,7 @@ function drawStackBond(finish: PatioFinish, size: number): PatioTexPair {
   return makePair(
     size,
     (c, r, s) => {
-      c.fillStyle = tint(finish.accent, 0);
-      c.fillRect(0, 0, s, s);
+      fillGrout(c, r, s, finish.accent);
       const tw = s / count;
       const joint = Math.max(1.5, (JOINT_IN / tileIn) * tw);
       for (let row = 0; row < count; row++) {
@@ -567,8 +666,7 @@ function drawPorcelain(finish: PatioFinish, size: number): PatioTexPair {
   return makePair(
     size,
     (c, r, s) => {
-      c.fillStyle = tint(finish.accent, 0);
-      c.fillRect(0, 0, s, s);
+      fillGrout(c, r, s, finish.accent);
       const tw = s / count;
       const joint = Math.max(1.5, (JOINT_IN / tileIn) * tw);
       for (let row = 0; row < count; row++) {
@@ -644,7 +742,7 @@ const cache = new Map<string, PatioTexPair>();
 export function getPatioFinishTexture(finishId: string | undefined): PatioTexPair {
   const finish = getPatioFinish(finishId);
   // Bust stale tiny-pattern caches when generators change.
-  const cacheKey = `${finish.id}@v2-scale`;
+  const cacheKey = `${finish.id}@v3-relief`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
   if (typeof document === "undefined") {
@@ -657,6 +755,7 @@ export function getPatioFinishTexture(finishId: string | undefined): PatioTexPai
     return {
       color: stub as unknown as THREE.CanvasTexture,
       roughness: stub.clone() as unknown as THREE.CanvasTexture,
+      normal: stub.clone() as unknown as THREE.CanvasTexture,
     };
   }
   const pair = generators[finish.pattern](finish, 1024);
