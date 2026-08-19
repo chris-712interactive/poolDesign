@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import {
   HOUSE_EXTERIOR_CUSTOM_ID,
   HOUSE_EXTERIOR_FINISHES,
@@ -33,6 +33,23 @@ type Props = {
   storyExteriors?: BuildingStoryExterior[] | null;
   onChange: (next: HouseFinishChange) => void;
 };
+
+function scopeChipStyle(active: boolean): CSSProperties {
+  return {
+    appearance: "none",
+    cursor: "pointer",
+    padding: "0.35rem 0.6rem",
+    borderRadius: 8,
+    fontWeight: 700,
+    fontSize: "0.78rem",
+    background: active ? "white" : "transparent",
+    color: active ? "var(--panel-ink)" : "var(--muted)",
+    border: active
+      ? "2px solid var(--accent, #1f8a70)"
+      : "2px solid transparent",
+    boxShadow: active ? "0 1px 3px rgba(20,32,41,0.08)" : "none",
+  };
+}
 
 export function HouseFinishPicker({
   stories = 1,
@@ -110,26 +127,47 @@ export function HouseFinishPicker({
           <div className="muted" style={{ fontSize: "0.8rem" }}>
             Apply to
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+          <div
+            role="radiogroup"
+            aria-label="Apply exterior finish to"
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "0.25rem",
+              padding: "0.2rem",
+              background: "#e8eef2",
+              borderRadius: 10,
+            }}
+          >
             <button
               type="button"
-              className={`btn secondary ${editingAll ? "active" : ""}`}
-              style={{ padding: "0.3rem 0.5rem" }}
+              role="radio"
+              aria-checked={editingAll}
+              style={scopeChipStyle(editingAll)}
               onClick={() => setScope("all")}
             >
               All stories
             </button>
-            {Array.from({ length: storyCount }, (_, i) => i + 1).map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={`btn secondary ${scope === s ? "active" : ""}`}
-                style={{ padding: "0.3rem 0.5rem" }}
-                onClick={() => setScope(s)}
-              >
-                Story {s}
-              </button>
-            ))}
+            {Array.from({ length: storyCount }, (_, i) => i + 1).map((s) => {
+              const active = scope === s;
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  style={scopeChipStyle(active)}
+                  onClick={() => setScope(s)}
+                >
+                  Story {s}
+                </button>
+              );
+            })}
+          </div>
+          <div className="muted" style={{ fontSize: "0.75rem" }}>
+            {editingAll
+              ? "Editing every story"
+              : `Editing story ${scope} only`}
           </div>
         </div>
       )}
