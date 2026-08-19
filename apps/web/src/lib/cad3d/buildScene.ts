@@ -749,7 +749,7 @@ function pushWallRing(
     let skipWeirEdge = false;
     for (const weir of opts.omitAgainst ?? []) {
       const iv = colinearOverlapInterval(a, b, weir.a, weir.b, 320);
-      if (iv && iv[1] - iv[0] > edgeLenMm * 0.55) {
+      if (iv && iv[1] - iv[0] > edgeLenMm * 0.35) {
         skipWeirEdge = true;
         break;
       }
@@ -3251,6 +3251,10 @@ export function buildSceneModel(
             })
           : undefined;
         const crestY = infinityEdges.length ? waterTopY : lip;
+        const weirFaces = infinityEdges.map((e) => ({
+          a: e.edgeA,
+          b: e.edgeB,
+        }));
 
         if (infinityEdges.length && infinityOmits && crestY < lip - 0.005) {
           // Solid shell up to weir crest.
@@ -3265,7 +3269,7 @@ export function buildSceneModel(
             inward: true,
             openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
           });
-          // Upper rim notched at vanishing openings.
+          // Upper rim notched at vanishing openings (spa-style edge omit).
           pushWallRing(meshes, {
             outlineMm: wallOutline,
             bottomY: crestY,
@@ -3276,7 +3280,8 @@ export function buildSceneModel(
             idPrefix: `pool_wall_${body.id}_rim`,
             inward: true,
             openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
-            edgeOmits: spaOutlines.length === 0 ? infinityOmits : undefined,
+            edgeOmits: infinityOmits,
+            omitAgainst: weirFaces,
           });
         } else {
           pushWallRing(meshes, {
@@ -3333,7 +3338,8 @@ export function buildSceneModel(
           idPrefix: `pool_coping_${body.id}`,
           inward: true,
           openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
-          edgeOmits: spaOutlines.length === 0 ? infinityOmits : undefined,
+          edgeOmits: infinityOmits,
+          omitAgainst: weirFaces,
         });
 
         // Waterline tile band on the wet face (inside waterline), not the
@@ -3347,7 +3353,8 @@ export function buildSceneModel(
           select,
           idPrefix: `pool_tile_${body.id}`,
           openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
-          edgeOmits: spaOutlines.length === 0 ? infinityOmits : undefined,
+          edgeOmits: infinityOmits,
+          omitAgainst: weirFaces,
         });
 
         // Catch trough + fall sheets for infinity edges.
