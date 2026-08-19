@@ -522,17 +522,17 @@ export function infinityTroughPolygon(
 }
 
 /**
- * Punch pavers / fill from the weir through the trough and the weir-side
- * deck. A short along-pad clears the side-deck returns without shooting
- * leftover walls into the yard.
+ * Hole to punch deck/fill where the catch trough sits.
+ * Width is the trough only (not the whole vanishing-side yard). A modest
+ * along-pad clears side-deck returns; huge pads left leftover walls.
  */
 export function infinityDeckCutPolygon(
   resolved: ResolvedInfinityEdge,
-  insetMm = 200,
+  insetMm = 40,
 ): PointMm[] {
-  const inset = Math.max(160, insetMm);
-  const outPad = 20000;
-  const alongPad = 1800;
+  const inset = Math.max(40, Math.min(100, insetMm));
+  const outPad = 40;
+  const alongPad = 3000;
   const a0 = resolved.edgeA ?? resolved.a;
   const b0 = resolved.edgeB ?? resolved.b;
   const len = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1;
