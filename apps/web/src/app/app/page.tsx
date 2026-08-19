@@ -102,6 +102,7 @@ export default async function ProjectsPage() {
                   city: project.city,
                   state: project.state,
                   designLevel: project.designLevel as DesignLevel,
+                  designStatus: project.designStatus,
                 }))}
               />
             </div>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { DESIGN_LEVEL_LABELS, type DesignLevel } from "@pool-design/shared";
+import { DESIGN_LEVEL_LABELS, DESIGN_STATUS_LABELS, type DesignLevel, type DesignStatus } from "@pool-design/shared";
 
 type ProjectRow = {
   id: string;
@@ -14,6 +14,7 @@ type ProjectRow = {
   city: string | null;
   state: string | null;
   designLevel: DesignLevel;
+  designStatus?: DesignStatus;
 };
 
 export function ProjectList({ projects }: { projects: ProjectRow[] }) {
@@ -48,8 +49,23 @@ export function ProjectList({ projects }: { projects: ProjectRow[] }) {
           <Link href={`/app/projects/${project.id}`} className="project-row-main">
             <div className="row" style={{ justifyContent: "space-between" }}>
               <strong>{project.name}</strong>
-              <span className="badge">
-                {DESIGN_LEVEL_LABELS[project.designLevel]}
+              <span className="row" style={{ gap: "0.35rem" }}>
+                {project.designStatus && project.designStatus !== "in_design" ? (
+                  <span
+                    className={`badge ${
+                      project.designStatus === "approved"
+                        ? "ok"
+                        : project.designStatus === "changes_requested"
+                          ? "warn"
+                          : ""
+                    }`}
+                  >
+                    {DESIGN_STATUS_LABELS[project.designStatus]}
+                  </span>
+                ) : null}
+                <span className="badge">
+                  {DESIGN_LEVEL_LABELS[project.designLevel]}
+                </span>
               </span>
             </div>
             <div className="muted">

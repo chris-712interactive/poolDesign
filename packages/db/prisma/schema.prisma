@@ -24,6 +24,14 @@ enum DesignLevel {
   water_park
 }
 
+/** Client-facing design workflow on a job. */
+enum DesignStatus {
+  in_design
+  awaiting_approval
+  changes_requested
+  approved
+}
+
 enum UnitSystem {
   imperial
   metric
@@ -124,18 +132,23 @@ model Project {
   designJson  String      @default("{}")
   /** Monotonic revision for optimistic save / collab conflict detection */
   designRevision Int      @default(0)
+  /** Homeowner review workflow (not live-session finish swaps). */
+  designStatus          DesignStatus @default(in_design)
+  /** Designer opted in: the share may show Approve for this revision. */
+  requestClientApproval Boolean      @default(false)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
   company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   shares      ProjectShare[]
   liveSession ProjectLiveSession?
+  reviews     ProjectReview[]
 
   @@index([companyId])
   @@index([companyId, state])
 }
 
-/** Host-driven kitchen-table live session (finish swaps + approvals). */
+/** Host-driven kitchen-table live session (finish swaps). */
 model ProjectLiveSession {
   id         String   @id @default(cuid())
   projectId  String   @unique
@@ -170,9 +183,29 @@ model ProjectShare {
   updatedAt          DateTime  @updatedAt
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  reviews ProjectReview[]
 
   @@index([projectId])
   @@index([token])
+}
+
+/** Timestamped client approve / request-changes on a shared design. */
+model ProjectReview {
+  id        String   @id @default(cuid())
+  projectId String
+  shareId   String?
+  /** "approved" | "changes_requested" */
+  kind      String
+  noteText  String?
+  /** Public http(s) blob URL, or local data:audio for Docker. */
+  voiceUrl  String?
+  createdAt DateTime @default(now())
+
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  share   ProjectShare? @relation(fields: [shareId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@index([shareId])
 }
 
 /** Staff roles on a company user. A person may hold more than one. */

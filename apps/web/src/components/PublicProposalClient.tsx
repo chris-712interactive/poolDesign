@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LiveSessionState, TakeoffResult } from "@pool-design/shared";
 import { ClientLiveSessionPanel } from "@/components/ClientLiveSessionPanel";
+import { ClientReviewPanel } from "@/components/ClientReviewPanel";
 import { ProposalDesignPreview } from "@/components/ProposalDesignPreview";
 import { ProposalEstimateSection } from "@/components/ProposalEstimateSection";
 
@@ -143,6 +144,7 @@ export function PublicProposalClient({
             {shareIncludesEstimate ? (
               <ProposalEstimateSection estimate={estimate} />
             ) : null}
+            <ClientReviewPanel token={token} />
           </>
         )}
 

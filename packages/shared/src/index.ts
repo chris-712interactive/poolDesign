@@ -36,6 +36,7 @@ export * from "./entitlements";
 export * from "./billing";
 export * from "./grade-walk";
 export * from "./live-session";
+export * from "./design-review";
 export * from "./quote-docs";
 export * from "./permit-packet";
 export * from "./plan-measurements";

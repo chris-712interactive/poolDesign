@@ -1,5 +1,5 @@
 /**
- * Host-driven live client session state (finish swaps + approvals).
+ * Host-driven live client session state (finish swaps).
  * Synced via DB polling — not full CRDT CAD multiplayer.
  */
 

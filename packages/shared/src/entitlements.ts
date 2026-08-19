@@ -9,7 +9,7 @@ export type PlanKey = "starter" | "pro";
 export type PlanTier = "sales" | "builder";
 
 export type PlanEntitlements = {
-  /** Kitchen-table live client session (finish swaps / approvals) */
+  /** Kitchen-table live client session (finish swaps) */
   liveClientSession: boolean;
   /** Branded PDF / print quote from takeoff */
   pdfQuote: boolean;

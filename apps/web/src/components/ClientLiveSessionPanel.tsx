@@ -246,55 +246,12 @@ export function ClientLiveSessionPanel({
                       ? "Sent to designer"
                       : "Send to designer"}
                 </button>
-                <button
-                  type="button"
-                  className="btn secondary"
-                  disabled={busy}
-                  onClick={() =>
-                    void patch({
-                      approval: {
-                        label: "Finish direction",
-                        status: "approved",
-                      },
-                    })
-                  }
-                >
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  className="btn secondary"
-                  disabled={busy}
-                  onClick={() =>
-                    void patch({
-                      approval: {
-                        label: "Finish direction",
-                        status: "rejected",
-                      },
-                    })
-                  }
-                >
-                  Request changes
-                </button>
               </div>
 
               {dirty && !sentOk ? (
                 <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
                   Unsent picks — tap Send to designer when ready.
                 </p>
-              ) : null}
-
-              {state?.approvals?.length ? (
-                <ul
-                  className="muted"
-                  style={{ margin: 0, paddingLeft: "1.1rem" }}
-                >
-                  {state.approvals.slice(-5).map((a) => (
-                    <li key={a.id}>
-                      {a.label}: {a.status} ({a.by})
-                    </li>
-                  ))}
-                </ul>
               ) : null}
               {error ? <p style={{ color: "var(--danger)" }}>{error}</p> : null}
             </div>

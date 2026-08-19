@@ -5,9 +5,17 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   DesignDocument,
   DesignLevel,
+  DesignStatus,
   PlanEntitlements,
 } from "@pool-design/shared";
-import { DESIGN_LEVEL_LABELS, liveFinishesKey } from "@pool-design/shared";
+import {
+  DESIGN_LEVEL_LABELS,
+  DESIGN_STATUS_LABELS,
+  liveFinishesKey,
+  parseDesignStatus,
+  parseReviewKind,
+  REVIEW_KIND_LABELS,
+} from "@pool-design/shared";
 import {
   LiveSessionHostControls,
   type LiveSessionStatus,
@@ -97,6 +105,13 @@ export function ProjectToolbar({
   const [estimateBusy, setEstimateBusy] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
   const [activeShare, setActiveShare] = useState<ActiveShare | null>(null);
+  const [designStatus, setDesignStatus] = useState<DesignStatus>("in_design");
+  const [requestApproval, setRequestApproval] = useState(false);
+  const [approvalBusy, setApprovalBusy] = useState(false);
+  const [latestReview, setLatestReview] = useState<{
+    kind: string;
+    createdAt: string;
+  } | null>(null);
 
   const onLiveStatus = useCallback((status: LiveSessionStatus) => {
     setLive(status);
@@ -120,6 +135,59 @@ export function ProjectToolbar({
       cancelled = true;
     };
   }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadReviews() {
+      const res = await fetch(`/api/projects/${projectId}/reviews`);
+      if (!res.ok || cancelled) return;
+      const json = (await res.json()) as {
+        designStatus?: unknown;
+        requestClientApproval?: boolean;
+        reviews?: Array<{ kind: string; createdAt: string }>;
+      };
+      if (cancelled) return;
+      setDesignStatus(parseDesignStatus(json.designStatus));
+      setRequestApproval(Boolean(json.requestClientApproval));
+      const latest = json.reviews?.[0];
+      setLatestReview(latest ?? null);
+    }
+    void loadReviews();
+    const t = setInterval(() => void loadReviews(), 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [projectId]);
+
+  async function setRequestClientApproval(next: boolean) {
+    setApprovalBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/reviews`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestClientApproval: next }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        designStatus?: unknown;
+        requestClientApproval?: boolean;
+      };
+      if (!res.ok) {
+        setStrip({
+          kind: "error",
+          message: json.error || "Could not update approval request",
+        });
+        return;
+      }
+      setRequestApproval(Boolean(json.requestClientApproval));
+      if (json.designStatus) {
+        setDesignStatus(parseDesignStatus(json.designStatus));
+      }
+    } finally {
+      setApprovalBusy(false);
+    }
+  }
 
   function onShared(result: ShareResult) {
     setActiveShare({ id: result.id, url: result.url });
@@ -246,6 +314,20 @@ export function ProjectToolbar({
           <div className="project-toolbar-title">
             <strong>{projectName}</strong>
             <span className="badge">{DESIGN_LEVEL_LABELS[designLevel]}</span>
+            <span
+              className={`badge ${
+                designStatus === "approved"
+                  ? "ok"
+                  : designStatus === "changes_requested"
+                    ? "warn"
+                    : designStatus === "awaiting_approval"
+                      ? ""
+                      : "muted"
+              }`}
+              title="Client design workflow"
+            >
+              {DESIGN_STATUS_LABELS[designStatus]}
+            </span>
             <Link
               className="project-toolbar-details"
               href={`/app/projects/${projectId}/details`}
@@ -267,6 +349,18 @@ export function ProjectToolbar({
               setStrip({ kind: "share", url: share.url, copied: false });
             }}
           />
+          <label
+            className="project-toolbar-check"
+            title="Show Approve on the client link for this revision"
+          >
+            <input
+              type="checkbox"
+              checked={requestApproval}
+              disabled={approvalBusy}
+              onChange={(e) => void setRequestClientApproval(e.target.checked)}
+            />
+            <span>Ask for approval</span>
+          </label>
           <label
             className="project-toolbar-check"
             title="Attach estimate to a new client link"
@@ -365,6 +459,27 @@ export function ProjectToolbar({
                   }
                   onError={onShareError}
                 />
+              ) : null}
+              {latestReview ? (
+                <span className="project-toolbar-strip-review">
+                  {(() => {
+                    const kind = parseReviewKind(latestReview.kind);
+                    const label = kind
+                      ? REVIEW_KIND_LABELS[kind]
+                      : latestReview.kind;
+                    const when = new Date(latestReview.createdAt);
+                    return `${label} ${
+                      Number.isNaN(when.getTime())
+                        ? ""
+                        : when.toLocaleString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                    }`;
+                  })()}
+                </span>
               ) : null}
               {strip?.kind === "share" ? (
                 <button

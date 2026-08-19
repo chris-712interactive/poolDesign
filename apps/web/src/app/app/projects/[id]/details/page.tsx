@@ -1,10 +1,15 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@pool-design/db";
-import { needsCompanySetup } from "@pool-design/shared";
+import {
+  needsCompanySetup,
+  parseDesignStatus,
+  storedVoiceUrl,
+} from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
 import { AppHeader } from "@/components/AppHeader";
 import { ProjectDetailsForm } from "@/components/ProjectDetailsForm";
+import { ProjectReviewTimeline } from "@/components/ProjectReviewTimeline";
 import { SubscriptionBlocked } from "@/components/SubscriptionBlocked";
 import { companyHasAppAccess } from "@/lib/subscription";
 import { userCanUseCad, userHasLicensedCadAccess } from "@/lib/companyAccess";
@@ -26,6 +31,9 @@ export default async function ProjectDetailsPage({
   const { id } = await params;
   const project = await prisma.project.findFirst({
     where: { id, companyId: user.companyId },
+    include: {
+      reviews: { orderBy: { createdAt: "desc" } },
+    },
   });
   if (!project) notFound();
 
@@ -48,7 +56,8 @@ export default async function ProjectDetailsPage({
           </p>
           <h1>Project details</h1>
           <p className="muted">
-            Contact and job-site address. City and state feed Markets.
+            Contact and job-site address. City and state feed Markets. Client
+            approvals and change requests from the share link are listed below.
           </p>
           <ProjectDetailsForm
             projectId={project.id}
@@ -62,6 +71,16 @@ export default async function ProjectDetailsPage({
               postalCode: project.postalCode,
               country: project.country,
             }}
+          />
+          <ProjectReviewTimeline
+            designStatus={parseDesignStatus(project.designStatus)}
+            reviews={project.reviews.map((r) => ({
+              id: r.id,
+              kind: r.kind,
+              noteText: r.noteText,
+              voiceUrl: storedVoiceUrl(r.voiceUrl),
+              createdAt: r.createdAt.toISOString(),
+            }))}
           />
         </div>
       </main>
