@@ -522,25 +522,17 @@ export function infinityTroughPolygon(
 }
 
 /**
- * Punch pavers / fill from the weir through the rest of the patio on that
- * side. Outward and along-edge extents are large so leftover deck/fill does
- * not sit past the trough or form towers at the weir returns. A small along
- * pad previously left AABB remainder blocks at each corner.
+ * Punch pavers / fill from the weir through the catch trough only.
+ * Stay on the pool edge — along-padding extruded leftover walls into the yard.
  */
 export function infinityDeckCutPolygon(
   resolved: ResolvedInfinityEdge,
   insetMm = 40,
 ): PointMm[] {
   const inset = Math.max(20, Math.min(80, insetMm));
-  const outPad = 25000;
-  const alongPad = 25000;
-  const a0 = resolved.edgeA ?? resolved.a;
-  const b0 = resolved.edgeB ?? resolved.b;
-  const len = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1;
-  const ux = (b0.x - a0.x) / len;
-  const uy = (b0.y - a0.y) / len;
-  const a = { x: a0.x - ux * alongPad, y: a0.y - uy * alongPad };
-  const b = { x: b0.x + ux * alongPad, y: b0.y + uy * alongPad };
+  const outPad = 80;
+  const a = resolved.edgeA ?? resolved.a;
+  const b = resolved.edgeB ?? resolved.b;
   return [
     {
       x: a.x - resolved.nx * inset,
@@ -557,42 +549,6 @@ export function infinityDeckCutPolygon(
     {
       x: a.x + resolved.nx * (resolved.troughWidthMm + outPad),
       y: a.y + resolved.ny * (resolved.troughWidthMm + outPad),
-    },
-  ];
-}
-
-const WEIR_REVEAL_MM = 900;
-
-/** Band along the weir, into the side decks, so fill does not tower at the returns. */
-export function infinityFillRevealPolygon(
-  resolved: ResolvedInfinityEdge,
-  inwardMm = WEIR_REVEAL_MM,
-): PointMm[] {
-  const inset = Math.max(40, inwardMm);
-  const alongPad = 25000;
-  const a0 = resolved.edgeA ?? resolved.a;
-  const b0 = resolved.edgeB ?? resolved.b;
-  const len = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1;
-  const ux = (b0.x - a0.x) / len;
-  const uy = (b0.y - a0.y) / len;
-  const a = { x: a0.x - ux * alongPad, y: a0.y - uy * alongPad };
-  const b = { x: b0.x + ux * alongPad, y: b0.y + uy * alongPad };
-  return [
-    {
-      x: a.x + resolved.nx * 40,
-      y: a.y + resolved.ny * 40,
-    },
-    {
-      x: b.x + resolved.nx * 40,
-      y: b.y + resolved.ny * 40,
-    },
-    {
-      x: b.x - resolved.nx * inset,
-      y: b.y - resolved.ny * inset,
-    },
-    {
-      x: a.x - resolved.nx * inset,
-      y: a.y - resolved.ny * inset,
     },
   ];
 }

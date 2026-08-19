@@ -72,7 +72,6 @@ import {
   infinityTroughPolygon,
   infinityTroughOuterSpan,
   infinityDeckCutPolygon,
-  infinityFillRevealPolygon,
   siteLineLayerIds,
   siteLineSegments,
   type BuildingOpeningKind,
@@ -1986,7 +1985,7 @@ function canAabbPunch(subject: PointMm[], holes: PointMm[][]): boolean {
   });
 }
 
-/** True when a patio retaining run is the vanishing-edge face (not the trough). */
+/** True when a patio retaining run is on the vanishing side of a weir. */
 function retainingSegmentFacesInfinity(
   a: PointMm,
   b: PointMm,
@@ -2000,94 +1999,53 @@ function retainingSegmentFacesInfinity(
     const wdy = e.edgeB.y - e.edgeA.y;
     const wlen = Math.hypot(wdx, wdy) || 1;
     const cross = Math.abs(ux * (wdy / wlen) - uy * (wdx / wlen));
-    if (cross > 0.12) continue;
     const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    const weirMid = {
-      x: (e.edgeA.x + e.edgeB.x) / 2,
-      y: (e.edgeA.y + e.edgeB.y) / 2,
-    };
-    const along =
-      (mid.x - e.edgeA.x) * (wdx / wlen) + (mid.y - e.edgeA.y) * (wdy / wlen);
-    if (along < -400 || along > wlen + 400) continue;
-    const outward =
-      (mid.x - weirMid.x) * e.nx + (mid.y - weirMid.y) * e.ny;
-    if (outward > 80) return true;
+    const outward = weirOutwardMm(mid, e);
+    if (outward <= 80) continue;
+    // Parallel to the weir (the outer patio edge beyond the trough), or
+    // entirely on the vanishing side (the "box" sides in the yard).
+    if (cross <= 0.15) return true;
+    const da = weirOutwardMm(a, e);
+    const db = weirOutwardMm(b, e);
+    if (da > 80 && db > 80) return true;
   }
   return false;
 }
-
-const WEIR_RETAIN_REVEAL_MM = 900;
 
 function weirOutwardMm(p: PointMm, edge: ResolvedInfinityEdge): number {
   const a = edge.edgeA ?? edge.a;
   return (p.x - a.x) * edge.nx + (p.y - a.y) * edge.ny;
 }
 
-/** Clip retaining that would stand in the vanishing view; split the weir returns. */
+/** Clip retaining at the weir; drop any piece that would stand in the spill. */
 function splitRetainingForInfinity(
   a: PointMm,
   b: PointMm,
   edges: ResolvedInfinityEdge[],
-): { a: PointMm; b: PointMm; belowSpill: boolean }[] {
-  if (!edges.length) return [{ a, b, belowSpill: false }];
+): { a: PointMm; b: PointMm }[] {
+  if (!edges.length) return [{ a, b }];
+  // Keep walls only on the patio side of the weir, not in the vanishing view.
+  const stopMm = -400;
   let a0 = a;
   let b0 = b;
   for (const e of edges) {
     const da = weirOutwardMm(a0, e);
     const db = weirOutwardMm(b0, e);
-    if (da > 30 && db > 30) return [];
-    if (da > 30 !== db > 30) {
-      const t = da / (da - db);
+    if (da > stopMm && db > stopMm) return [];
+    const lo = Math.min(da, db);
+    const hi = Math.max(da, db);
+    if (lo <= stopMm && hi > stopMm) {
+      const t = Math.max(0, Math.min(1, (stopMm - da) / (db - da)));
       const hit = {
         x: a0.x + (b0.x - a0.x) * t,
         y: a0.y + (b0.y - a0.y) * t,
       };
-      if (da > 30) a0 = hit;
+      if (da > db) a0 = hit;
       else b0 = hit;
     }
   }
   if (Math.hypot(b0.x - a0.x, b0.y - a0.y) < 80) return [];
-
-  let pieces: { a: PointMm; b: PointMm }[] = [{ a: a0, b: b0 }];
-  for (const e of edges) {
-    const next: { a: PointMm; b: PointMm }[] = [];
-    for (const p of pieces) {
-      const da = weirOutwardMm(p.a, e);
-      const db = weirOutwardMm(p.b, e);
-      if (Math.abs(db - da) < 1) {
-        next.push(p);
-        continue;
-      }
-      const t = (-WEIR_RETAIN_REVEAL_MM - da) / (db - da);
-      if (t <= 0.02 || t >= 0.98) {
-        next.push(p);
-        continue;
-      }
-      const hit = {
-        x: p.a.x + (p.b.x - p.a.x) * t,
-        y: p.a.y + (p.b.y - p.a.y) * t,
-      };
-      next.push({ a: p.a, b: hit });
-      next.push({ a: hit, b: p.b });
-    }
-    pieces = next;
-  }
-
-  return pieces.map((p) => {
-    const mid = { x: (p.a.x + p.b.x) / 2, y: (p.a.y + p.b.y) / 2 };
-    const belowSpill = edges.some((e) => {
-      const d = weirOutwardMm(mid, e);
-      if (d <= -WEIR_RETAIN_REVEAL_MM - 20) return false;
-      const wdx = e.edgeB.x - e.edgeA.x;
-      const wdy = e.edgeB.y - e.edgeA.y;
-      const wlen = Math.hypot(wdx, wdy) || 1;
-      const along =
-        (mid.x - e.edgeA.x) * (wdx / wlen) +
-        (mid.y - e.edgeA.y) * (wdy / wlen);
-      return along > -2500 && along < wlen + 2500;
-    });
-    return { ...p, belowSpill };
-  });
+  return [{ a: a0, b: b0 }];
 }
 
 function pipeMaterialForCircuit(
@@ -2417,14 +2375,12 @@ export function buildSceneModel(
     if (p.outline.length >= 3) poolPitHoles.push(pitHoleOutline(p.outline));
   }
   const infinityDeckCuts: PointMm[][] = [];
-  const infinityFillReveals: PointMm[][] = [];
   const infinityEdgesAll: ResolvedInfinityEdge[] = [];
   for (const p of pools) {
     if (p.outline.length < 3) continue;
     for (const edge of resolveInfinityEdges(p)) {
       infinityEdgesAll.push(edge);
       infinityDeckCuts.push(closeOutline(infinityDeckCutPolygon(edge, 40)));
-      infinityFillReveals.push(closeOutline(infinityFillRevealPolygon(edge)));
     }
   }
   for (const s of spas) {
@@ -2897,17 +2853,13 @@ export function buildSceneModel(
           maxDropMm > PATIO_SLAB_THICKNESS_MM + 40
         ) {
           const dropM = mmToMeters(maxDropMm);
-          const fillHoles = deckPunchHoles(poolPitHoles, [
-            ...infinityDeckCuts,
-            ...infinityFillReveals,
-          ]);
           // Continuous fill pad: existing grade → slab underside (y = 0).
           // Punch pool/spa pits the same way as the deck (AABB subtract is
           // reliable; ExtrudeGeometry holes often leave wedges in the basin).
-          if (isAxisAlignedRect(open, 80) && canAabbPunch(open, fillHoles)) {
+          if (isAxisAlignedRect(open, 80) && canAabbPunch(open, punchHoles)) {
             const fillRegions =
-              fillHoles.length > 0
-                ? subtractAabbHoles(open, fillHoles)
+              punchHoles.length > 0
+                ? subtractAabbHoles(open, punchHoles)
                 : [open];
             let fi = 0;
             for (const region of fillRegions) {
@@ -2928,7 +2880,8 @@ export function buildSceneModel(
               id: `fill_${p.id}`,
               material: "fill",
               outlineMm: closeOutline(p.outline),
-              holeOutlinesMm: fillHoles.length > 0 ? fillHoles : undefined,
+              holeOutlinesMm:
+                punchHoles.length > 0 ? punchHoles : undefined,
               bottomY: -dropM,
               height: dropM,
               select,
@@ -3000,10 +2953,6 @@ export function buildSceneModel(
               infinityEdgesAll,
             );
             for (const piece of pieces) {
-              const topY = piece.belowSpill ? waterTopY : t;
-              if (topY <= -Math.max(0.2, mmToMeters(seg.dropMm)) + 0.05) {
-                continue;
-              }
               pushRetainBox(
                 piece.a,
                 piece.b,
@@ -3011,7 +2960,7 @@ export function buildSceneModel(
                 ny,
                 120,
                 seg.dropMm,
-                topY,
+                t,
               );
             }
           }
