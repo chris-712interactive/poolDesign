@@ -170,4 +170,34 @@ describe("site-grade", () => {
     assert.equal(analysis.fillVolumeCy, 0);
     assert.ok(analysis.retainingLengthMm > 0);
   });
+
+  it("honors per-edge wall / fill / open overrides", () => {
+    const patio = {
+      ...rect(20 * FT, 30 * FT),
+      gradeStrategy: "both" as const,
+      edgeGrades: [
+        { edgeIndex: 0, grade: "none" as const },
+        { edgeIndex: 1, grade: "fill" as const },
+        { edgeIndex: 2, grade: "retaining" as const },
+      ],
+    };
+    const samples: GradeSample[] = [
+      { id: "far", position: { x: 10 * FT, y: 30 * FT }, dropMm: 3 * FT },
+    ];
+    const analysis = analyzePatioGrade(patio, samples);
+    const byEdge = new Map(analysis.resolvedEdges.map((e) => [e.edgeIndex, e]));
+    assert.equal(byEdge.get(0)?.grade, "none");
+    assert.equal(byEdge.get(1)?.grade, "fill");
+    assert.equal(byEdge.get(2)?.grade, "retaining");
+    assert.ok(
+      !analysis.retainingSegments.some((s) => s.edgeIndex === 0),
+      "open edge has no wall",
+    );
+    assert.ok(
+      !analysis.retainingSegments.some((s) => s.edgeIndex === 1),
+      "fill edge has no wall",
+    );
+    assert.ok(analysis.retainingSegments.some((s) => s.edgeIndex === 2));
+    assert.ok(analysis.includeFill);
+  });
 });

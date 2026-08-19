@@ -5,6 +5,8 @@ import {
   segmentLengthMm,
   type DesignGradeOptions,
   type GradeSample,
+  type PatioEdgeGrade,
+  type PatioEdgeGradeOverride,
   type PatioGradeStrategy,
   type PatioRegion,
   type PointMm,
@@ -25,11 +27,25 @@ export type RetainingSegment = {
   lengthMm: number;
   /** Drop at edge midpoint (mm below FFE) */
   dropMm: number;
+  edgeIndex: number;
+  /** `retaining` = author explicitly asked for a wall. */
+  source: "auto" | "retaining";
+};
+
+export type PatioEdgeGradeResolved = {
+  edgeIndex: number;
+  authored: PatioEdgeGrade;
+  /** Auto resolved to retaining / fill / none. */
+  grade: Exclude<PatioEdgeGrade, "auto">;
+  a: PointMm;
+  b: PointMm;
+  dropMm: number;
 };
 
 export type PatioGradeAnalysis = {
   patioId: string;
   strategy: PatioGradeStrategy;
+  includeFill: boolean;
   /** Fill volume under patio to slab bottom (mm³); 0 if strategy excludes fill */
   fillVolumeMm3: number;
   fillVolumeCy: number;
@@ -37,6 +53,7 @@ export type PatioGradeAnalysis = {
   maxFillHeightMm: number;
   retainingSegments: RetainingSegment[];
   retainingLengthMm: number;
+  resolvedEdges: PatioEdgeGradeResolved[];
 };
 
 type GradeShot = { x: number; y: number; z: number };
@@ -382,9 +399,67 @@ export function resolveGradeStrategy(
     : "both";
 }
 
+export const PATIO_EDGE_GRADES: PatioEdgeGrade[] = [
+  "auto",
+  "retaining",
+  "fill",
+  "none",
+];
+
+export function isPatioEdgeGrade(value: unknown): value is PatioEdgeGrade {
+  return (
+    value === "auto" ||
+    value === "retaining" ||
+    value === "fill" ||
+    value === "none"
+  );
+}
+
+export function patioEdgeGrade(
+  patio: PatioRegion,
+  edgeIndex: number,
+): PatioEdgeGrade {
+  const hit = patio.edgeGrades?.find((e) => e.edgeIndex === edgeIndex);
+  return hit && isPatioEdgeGrade(hit.grade) ? hit.grade : "auto";
+}
+
+export function patchPatioEdgeGrade(
+  patio: PatioRegion,
+  edgeIndex: number,
+  grade: PatioEdgeGrade,
+): PatioRegion {
+  const rest = (patio.edgeGrades ?? []).filter((e) => e.edgeIndex !== edgeIndex);
+  const edgeGrades: PatioEdgeGradeOverride[] =
+    grade === "auto" ? rest : [...rest, { edgeIndex, grade }];
+  return {
+    ...patio,
+    edgeGrades: edgeGrades.length ? edgeGrades : undefined,
+  };
+}
+
+export function cyclePatioEdgeGrade(grade: PatioEdgeGrade): PatioEdgeGrade {
+  const i = PATIO_EDGE_GRADES.indexOf(grade);
+  return PATIO_EDGE_GRADES[(i + 1) % PATIO_EDGE_GRADES.length];
+}
+
 export function retainingTriggerMm(options?: DesignGradeOptions): number {
   const t = options?.retainingTriggerMm;
   return typeof t === "number" && t > 0 ? t : DEFAULT_RETAINING_TRIGGER_MM;
+}
+
+function resolveEdgeTreatment(
+  authored: PatioEdgeGrade,
+  strategy: PatioGradeStrategy,
+  dropMm: number,
+  trigger: number,
+): Exclude<PatioEdgeGrade, "auto"> {
+  if (authored === "retaining" || authored === "fill" || authored === "none") {
+    return authored;
+  }
+  const includeWall = strategy === "retaining" || strategy === "both";
+  if (includeWall && dropMm >= trigger) return "retaining";
+  if (strategy === "fill" || strategy === "both") return "fill";
+  return "none";
 }
 
 /**
@@ -405,51 +480,71 @@ export function analyzePatioGrade(
   let avgFillHeightMm = 0;
   let maxFillHeightMm = 0;
   const retainingSegments: RetainingSegment[] = [];
+  const resolvedEdges: PatioEdgeGradeResolved[] = [];
 
-  if (outline.length >= 3 && samples.length > 0) {
-    const includeFill = strategy === "fill" || strategy === "both";
-    const includeWall = strategy === "retaining" || strategy === "both";
-
-    if (includeFill) {
-      const { minX, maxX, minY, maxY } = patioBounds(outline);
-      const step = Math.max(200, gridStepMm);
-      let heightSum = 0;
-      let cellCount = 0;
-      for (let x = minX + step / 2; x < maxX; x += step) {
-        for (let y = minY + step / 2; y < maxY; y += step) {
-          const p = { x, y };
-          if (!pointInPolygon(p, outline)) continue;
-          const drop = existingGradeDropMm(p, samples);
-          const h = fillHeightUnderSlabMm(drop);
-          if (h <= 0) continue;
-          fillVolumeMm3 += h * step * step;
-          heightSum += h;
-          cellCount += 1;
-          if (h > maxFillHeightMm) maxFillHeightMm = h;
-        }
-      }
-      avgFillHeightMm = cellCount > 0 ? heightSum / cellCount : 0;
-
-      // Scale volume to actual polygon area vs sampled cells to reduce grid bias.
-      if (cellCount > 0) {
-        const sampledArea = cellCount * step * step;
-        const trueArea = polygonAreaMm2(outline);
-        if (sampledArea > 0 && trueArea > 0) {
-          fillVolumeMm3 *= trueArea / sampledArea;
-        }
+  const n = outline.length;
+  if (n >= 3) {
+    for (let i = 0; i < n; i++) {
+      const a = outline[i];
+      const b = outline[(i + 1) % n];
+      const lengthMm = segmentLengthMm(a, b);
+      if (lengthMm < 80) continue;
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const dropMm = samples.length > 0 ? existingGradeDropMm(mid, samples) : 0;
+      const authored = patioEdgeGrade(patio, i);
+      const grade = resolveEdgeTreatment(authored, strategy, dropMm, trigger);
+      resolvedEdges.push({
+        edgeIndex: i,
+        authored,
+        grade,
+        a,
+        b,
+        dropMm,
+      });
+      if (grade === "retaining") {
+        retainingSegments.push({
+          a,
+          b,
+          lengthMm,
+          dropMm: Math.max(dropMm, 200),
+          edgeIndex: i,
+          source: authored === "retaining" ? "retaining" : "auto",
+        });
       }
     }
+  }
 
-    if (includeWall) {
-      for (let i = 0; i < outline.length; i++) {
-        const a = outline[i];
-        const b = outline[(i + 1) % outline.length];
-        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        const drop = existingGradeDropMm(mid, samples);
-        if (drop >= trigger) {
-          const lengthMm = segmentLengthMm(a, b);
-          retainingSegments.push({ a, b, lengthMm, dropMm: drop });
-        }
+  const includeFill =
+    strategy === "fill" ||
+    strategy === "both" ||
+    resolvedEdges.some((e) => e.grade === "fill" || e.authored === "fill");
+
+  if (includeFill && outline.length >= 3 && samples.length > 0) {
+    const { minX, maxX, minY, maxY } = patioBounds(outline);
+    const step = Math.max(200, gridStepMm);
+    let heightSum = 0;
+    let cellCount = 0;
+    for (let x = minX + step / 2; x < maxX; x += step) {
+      for (let y = minY + step / 2; y < maxY; y += step) {
+        const p = { x, y };
+        if (!pointInPolygon(p, outline)) continue;
+        const drop = existingGradeDropMm(p, samples);
+        const h = fillHeightUnderSlabMm(drop);
+        if (h <= 0) continue;
+        fillVolumeMm3 += h * step * step;
+        heightSum += h;
+        cellCount += 1;
+        if (h > maxFillHeightMm) maxFillHeightMm = h;
+      }
+    }
+    avgFillHeightMm = cellCount > 0 ? heightSum / cellCount : 0;
+
+    // Scale volume to actual polygon area vs sampled cells to reduce grid bias.
+    if (cellCount > 0) {
+      const sampledArea = cellCount * step * step;
+      const trueArea = polygonAreaMm2(outline);
+      if (sampledArea > 0 && trueArea > 0) {
+        fillVolumeMm3 *= trueArea / sampledArea;
       }
     }
   }
@@ -462,12 +557,14 @@ export function analyzePatioGrade(
   return {
     patioId: patio.id,
     strategy,
+    includeFill,
     fillVolumeMm3,
     fillVolumeCy: mm3ToCy(fillVolumeMm3),
     avgFillHeightMm,
     maxFillHeightMm,
     retainingSegments,
     retainingLengthMm,
+    resolvedEdges,
   };
 }
 

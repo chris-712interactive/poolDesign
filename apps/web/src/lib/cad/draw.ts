@@ -34,6 +34,7 @@ import {
   type PoolBody,
   type PoolFeature,
   type RetainingSegment,
+  type PatioEdgeGradeResolved,
   type UnitSystem,
   resolveSpaSpillovers,
   listSpaSpilloverEdges,
@@ -1239,6 +1240,60 @@ export function drawRetainingEdges(
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
+  }
+  ctx.restore();
+}
+
+export function drawPatioGradeEdges(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  edges: PatioEdgeGradeResolved[],
+  opts?: { selected?: boolean },
+) {
+  if (!edges.length) return;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.font = "11px Source Sans 3, sans-serif";
+  for (const edge of edges) {
+    const a = worldToScreen(edge.a, vp);
+    const b = worldToScreen(edge.b, vp);
+    if (edge.grade === "retaining") {
+      ctx.strokeStyle = "#8a3a1a";
+      ctx.lineWidth = 3.6;
+      ctx.setLineDash([]);
+    } else if (edge.grade === "fill") {
+      ctx.strokeStyle = "#b0894a";
+      ctx.lineWidth = 2.4;
+      ctx.setLineDash([7, 5]);
+    } else {
+      if (!opts?.selected) continue;
+      ctx.strokeStyle = "rgba(80,110,90,0.55)";
+      ctx.lineWidth = 1.8;
+      ctx.setLineDash([3, 5]);
+    }
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    if (opts?.selected) {
+      const mx = (a.x + b.x) / 2;
+      const my = (a.y + b.y) / 2;
+      const label =
+        edge.grade === "retaining"
+          ? "Wall"
+          : edge.grade === "fill"
+            ? "Fill"
+            : "Open";
+      ctx.setLineDash([]);
+      ctx.fillStyle =
+        edge.grade === "retaining"
+          ? "#8a3a1a"
+          : edge.grade === "fill"
+            ? "#7a5a28"
+            : "#3d5c48";
+      ctx.fillText(label, mx + 6, my - 6);
+    }
   }
   ctx.restore();
 }

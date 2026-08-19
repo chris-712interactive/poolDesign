@@ -206,6 +206,17 @@ export type InfinityEdge = {
 /** How a patio handles existing grade fall-away relative to house FFE. */
 export type PatioGradeStrategy = "fill" | "retaining" | "both";
 
+/**
+ * Per-edge override for a patio outline edge.
+ * `auto` follows the patio grade strategy + ~18″ drop trigger.
+ */
+export type PatioEdgeGrade = "auto" | "retaining" | "fill" | "none";
+
+export type PatioEdgeGradeOverride = {
+  edgeIndex: number;
+  grade: PatioEdgeGrade;
+};
+
 export type PatioRegion = {
   id: string;
   name: string;
@@ -216,6 +227,8 @@ export type PatioRegion = {
    * Defaults to "both" (fill + retaining where triggered).
    */
   gradeStrategy?: PatioGradeStrategy;
+  /** Optional Wall / Fill / Open per outline edge. Missing = auto. */
+  edgeGrades?: PatioEdgeGradeOverride[];
 };
 
 /**

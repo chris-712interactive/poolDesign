@@ -2929,7 +2929,9 @@ export function buildSceneModel(
         }
 
         if (
-          (strategy === "fill" || strategy === "both") &&
+          (analysis.includeFill ||
+            strategy === "fill" ||
+            strategy === "both") &&
           maxDropMm > PATIO_SLAB_THICKNESS_MM + 40
         ) {
           const dropM = mmToMeters(maxDropMm);
@@ -2988,7 +2990,7 @@ export function buildSceneModel(
           }
         }
 
-        if (strategy === "retaining" || strategy === "both") {
+        if (analysis.retainingSegments.length > 0) {
           let ri = 0;
           const patioBb = outlineBounds(p.outline);
           const pushRetainBox = (
@@ -3030,7 +3032,10 @@ export function buildSceneModel(
             });
           };
           for (const seg of analysis.retainingSegments) {
-            if (retainingSegmentFacesInfinity(seg.a, seg.b, infinityEdgesAll)) {
+            if (
+              seg.source !== "retaining" &&
+              retainingSegmentFacesInfinity(seg.a, seg.b, infinityEdgesAll)
+            ) {
               continue;
             }
             const dx = seg.b.x - seg.a.x;
@@ -3046,11 +3051,10 @@ export function buildSceneModel(
               nx = -nx;
               ny = -ny;
             }
-            const pieces = clipRetainingAtWeir(
-              seg.a,
-              seg.b,
-              infinityEdgesAll,
-            );
+            const pieces =
+              seg.source === "retaining"
+                ? [{ a: seg.a, b: seg.b }]
+                : clipRetainingAtWeir(seg.a, seg.b, infinityEdgesAll);
             for (const piece of pieces) {
               pushRetainBox(
                 piece.a,

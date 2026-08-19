@@ -23,6 +23,8 @@ import {
   type FenceRun,
   type GradeSample,
   type PatioGradeStrategy,
+  type PatioEdgeGrade,
+  type PatioEdgeGradeOverride,
   type SpaSpillover,
   type BuildingStoryExterior,
   isSpaSpilloverStyle,
@@ -57,6 +59,12 @@ const PATIO_GRADE_STRATEGIES: PatioGradeStrategy[] = [
   "fill",
   "retaining",
   "both",
+];
+const PATIO_EDGE_GRADES: PatioEdgeGrade[] = [
+  "auto",
+  "retaining",
+  "fill",
+  "none",
 ];
 const ESTIMATE_CATEGORIES: Array<CatalogCategory | "other"> = [
   "structure",
@@ -348,18 +356,34 @@ export function normalizeDesignDocument(
           ? waterlineNosingBandMm(f.waterlineNosingBandMm)
           : undefined,
     })),
-    patios: (Array.isArray(doc.patios) ? doc.patios : []).map((p) => ({
-      ...p,
-      materialId:
-        p.materialId && isPatioFinishId(p.materialId)
-          ? p.materialId
-          : DEFAULT_PATIO_FINISH_ID,
-      gradeStrategy: PATIO_GRADE_STRATEGIES.includes(
-        p.gradeStrategy as PatioGradeStrategy,
-      )
-        ? (p.gradeStrategy as PatioGradeStrategy)
-        : "both",
-    })),
+    patios: (Array.isArray(doc.patios) ? doc.patios : []).map((p) => {
+      const edgeByIndex = new Map<number, PatioEdgeGradeOverride>();
+      for (const raw of p.edgeGrades ?? []) {
+        const edgeIndex = Math.max(0, Number(raw.edgeIndex) | 0);
+        if (!PATIO_EDGE_GRADES.includes(raw.grade as PatioEdgeGrade)) continue;
+        if (raw.grade === "auto") continue;
+        edgeByIndex.set(edgeIndex, {
+          edgeIndex,
+          grade: raw.grade as PatioEdgeGrade,
+        });
+      }
+      const edgeGrades = [...edgeByIndex.values()].sort(
+        (a, b) => a.edgeIndex - b.edgeIndex,
+      );
+      return {
+        ...p,
+        materialId:
+          p.materialId && isPatioFinishId(p.materialId)
+            ? p.materialId
+            : DEFAULT_PATIO_FINISH_ID,
+        gradeStrategy: PATIO_GRADE_STRATEGIES.includes(
+          p.gradeStrategy as PatioGradeStrategy,
+        )
+          ? (p.gradeStrategy as PatioGradeStrategy)
+          : "both",
+        edgeGrades: edgeGrades.length ? edgeGrades : undefined,
+      };
+    }),
     gradeSamples: normalizeGradeSamples(doc.gradeSamples),
     gradeOptions: normalizeGradeOptions(doc.gradeOptions),
     northDeg: normalizeNorthDeg(doc.northDeg),

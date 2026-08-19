@@ -59,6 +59,9 @@ import {
   isSpaFixtureId,
   isWaterFixtureId,
   analyzePatioGrade,
+  patchPatioEdgeGrade,
+  cyclePatioEdgeGrade,
+  patioEdgeGrade,
   defaultFabricFinishId,
   defaultFrameFinishId,
   diningSetCatalogId,
@@ -86,6 +89,7 @@ import {
   objectPlanSizeMm,
   type GradeSample,
   type PatioGradeStrategy,
+  type PatioEdgeGrade,
   outlineBounds,
   parseLengthToMm,
   normalizeNorthDeg,
@@ -236,7 +240,7 @@ import {
   drawPatioCover,
   drawPlacedObject,
   drawPolygon,
-  drawRetainingEdges,
+  drawPatioGradeEdges,
   drawRun,
   drawEdgeLabel,
   drawSpaSpillover,
@@ -1001,7 +1005,9 @@ export function CadWorkspace({
           design.gradeSamples ?? [],
           design.gradeOptions,
         );
-        drawRetainingEdges(ctx, vp, grade.retainingSegments);
+        drawPatioGradeEdges(ctx, vp, grade.resolvedEdges, {
+          selected: selection?.kind === "patio" && selection.id === patio.id,
+        });
       }
     }
 
@@ -2592,6 +2598,21 @@ export function CadWorkspace({
       }
       const edge = hitEdge(point);
       if (edge) {
+        if (e.shiftKey && edge.kind === "patio") {
+          const patio = design.patios.find((p) => p.id === edge.id);
+          if (patio) {
+            const next = cyclePatioEdgeGrade(patioEdgeGrade(patio, edge.edgeIndex));
+            commitDesign({
+              ...design,
+              patios: design.patios.map((p) =>
+                p.id === patio.id
+                  ? patchPatioEdgeGrade(p, edge.edgeIndex, next)
+                  : p,
+              ),
+            });
+          }
+          return;
+        }
         dragOriginRef.current = structuredClone(design);
         setDrag({ mode: "edge", ...edge, origin: point });
         return;
@@ -4502,9 +4523,66 @@ export function CadWorkspace({
                       </select>
                     </div>
                     <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
-                      Uses grade points relative to house FFE. Retaining along
-                      edges where drop exceeds ~18″ (when strategy includes it).
+                      Default for edges set to Auto. Uses grade points relative
+                      to house FFE. Auto retaining where drop exceeds ~18″.
                     </p>
+                    <div className="stack" style={{ gap: "0.35rem" }}>
+                      <strong style={{ fontSize: "0.85rem" }}>Deck edges</strong>
+                      <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
+                        Wall = retaining. Fill = berm the deck, no wall. Open =
+                        no wall (walk-off / vanishing side). Shift-click an
+                        edge on the plan to cycle.
+                      </p>
+                      {selectedPatio.outline.map((pt, i) => {
+                        const b =
+                          selectedPatio.outline[
+                            (i + 1) % selectedPatio.outline.length
+                          ];
+                        const len = Math.hypot(b.x - pt.x, b.y - pt.y);
+                        if (len < 80) return null;
+                        const grade = patioEdgeGrade(selectedPatio, i);
+                        return (
+                          <label
+                            key={`patio-edge-grade-${i}`}
+                            className="field"
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.45rem",
+                              flexDirection: "row",
+                            }}
+                          >
+                            <span style={{ fontSize: "0.85rem", minWidth: "5.5rem" }}>
+                              Edge {i + 1}
+                              <span className="muted">
+                                {" "}
+                                · {formatLength(len, unitSystem)}
+                              </span>
+                            </span>
+                            <select
+                              aria-label={`Grade for patio edge ${i + 1}`}
+                              value={grade}
+                              onChange={(ev) => {
+                                const next = ev.target.value as PatioEdgeGrade;
+                                commitDesign({
+                                  ...design,
+                                  patios: design.patios.map((p) =>
+                                    p.id === selectedPatio.id
+                                      ? patchPatioEdgeGrade(p, i, next)
+                                      : p,
+                                  ),
+                                });
+                              }}
+                            >
+                              <option value="auto">Auto</option>
+                              <option value="retaining">Wall</option>
+                              <option value="fill">Fill</option>
+                              <option value="none">Open</option>
+                            </select>
+                          </label>
+                        );
+                      })}
+                    </div>
                     <PatioFinishPicker
                       value={selectedPatio.materialId}
                       onChange={(materialId) =>
