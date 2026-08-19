@@ -70,6 +70,7 @@ import {
   resolveInfinityEdges,
   infinityOmitIntervals,
   infinityTroughPolygon,
+  infinityTroughOuterSpan,
   infinityDeckCutPolygon,
   siteLineLayerIds,
   siteLineSegments,
@@ -521,6 +522,7 @@ function pushInfinityEdgeMeshes(
     poolId: string;
     edges: ResolvedInfinityEdge[];
     crestY: number;
+    wallThicknessMm: number;
     select: SceneSelection;
   },
 ) {
@@ -534,6 +536,7 @@ function pushInfinityEdgeMeshes(
     thicknessMm: number,
     bottomY: number,
     topY: number,
+    material: SceneMaterialKey = "poolShell",
   ) => {
     const len = Math.hypot(b.x - a.x, b.y - a.y);
     if (len < 40) return;
@@ -548,11 +551,11 @@ function pushInfinityEdgeMeshes(
       y: mid.y + ny * (thicknessMm / 2),
     };
     const xz = planToWorldXZ(center);
-    const h = Math.max(0.08, topY - bottomY);
+    const h = Math.max(0.04, topY - bottomY);
     meshes.push({
       kind: "box",
       id,
-      material: "poolShell",
+      material,
       position: { x: xz.x, y: bottomY + h / 2, z: xz.z },
       size: {
         x: mmToMeters(len),
@@ -566,7 +569,12 @@ function pushInfinityEdgeMeshes(
     });
   };
 
+  const wallT = Math.max(80, opts.wallThicknessMm);
+
   for (const edge of opts.edges) {
+    const weirA = edge.edgeA ?? edge.a;
+    const weirB = edge.edgeB ?? edge.b;
+    const outer = infinityTroughOuterSpan(edge);
     const troughPoly = closeOutline(infinityTroughPolygon(edge));
     if (troughPoly.length < 4) continue;
 
@@ -589,8 +597,8 @@ function pushInfinityEdgeMeshes(
 
     pushWall(
       `pool_${opts.poolId}_troughouter_${edge.edgeIndex}`,
-      edge.troughOuterA,
-      edge.troughOuterB,
+      outer.a,
+      outer.b,
       { x: -edge.nx, y: -edge.ny },
       wallMm,
       troughBottom,
@@ -598,39 +606,53 @@ function pushInfinityEdgeMeshes(
     );
     pushWall(
       `pool_${opts.poolId}_troughendA_${edge.edgeIndex}`,
-      edge.a,
-      edge.troughOuterA,
-      { x: edge.b.x - edge.a.x, y: edge.b.y - edge.a.y },
+      weirA,
+      outer.a,
+      { x: weirB.x - weirA.x, y: weirB.y - weirA.y },
       wallMm,
       troughBottom,
       troughTop,
     );
     pushWall(
       `pool_${opts.poolId}_troughendB_${edge.edgeIndex}`,
-      edge.b,
-      edge.troughOuterB,
-      { x: edge.a.x - edge.b.x, y: edge.a.y - edge.b.y },
+      weirB,
+      outer.b,
+      { x: weirA.x - weirB.x, y: weirA.y - weirB.y },
       wallMm,
       troughBottom,
       troughTop,
     );
 
+    // Coping cap on the vanishing weir so adjacent coping meets the edge.
+    const capH = 0.022;
+    const capTop = opts.crestY + capH;
+    pushWall(
+      `pool_${opts.poolId}_weircap_${edge.edgeIndex}`,
+      weirA,
+      weirB,
+      { x: -edge.nx, y: -edge.ny },
+      wallT,
+      opts.crestY,
+      capTop,
+      "coping",
+    );
+
     const waterPoly = [
       {
-        x: edge.a.x + edge.nx * 50,
-        y: edge.a.y + edge.ny * 50,
+        x: weirA.x + edge.nx * 50,
+        y: weirA.y + edge.ny * 50,
       },
       {
-        x: edge.b.x + edge.nx * 50,
-        y: edge.b.y + edge.ny * 50,
+        x: weirB.x + edge.nx * 50,
+        y: weirB.y + edge.ny * 50,
       },
       {
-        x: edge.troughOuterB.x - edge.nx * wallMm,
-        y: edge.troughOuterB.y - edge.ny * wallMm,
+        x: outer.b.x - edge.nx * wallMm,
+        y: outer.b.y - edge.ny * wallMm,
       },
       {
-        x: edge.troughOuterA.x - edge.nx * wallMm,
-        y: edge.troughOuterA.y - edge.ny * wallMm,
+        x: outer.a.x - edge.nx * wallMm,
+        y: outer.a.y - edge.ny * wallMm,
       },
     ];
     const waterTop = troughBottom + Math.max(0.12, troughWaterM * 0.35);
@@ -665,13 +687,13 @@ function pushInfinityEdgeMeshes(
           ny: edge.ny,
         });
       }
-      const drop = Math.max(0.12, opts.crestY - waterTop);
+      const drop = Math.max(0.12, capTop - waterTop);
       meshes.push({
         kind: "spilloverRibbon",
         id: `pool_${opts.poolId}_inffall_${edge.edgeIndex}_${oi}`,
         material: "spilloverWater",
         crest,
-        crestY: opts.crestY + 0.004,
+        crestY: capTop + 0.003,
         poolWaterY: waterTop + 0.01,
         flareM: Math.max(0.12, Math.min(0.38, drop * 0.85)),
         lipTuckM: 0.04,
@@ -701,7 +723,7 @@ function pushInfinityEdgeMeshes(
         id: `pool_${opts.poolId}_weirfilm_${edge.edgeIndex}_${oi}`,
         material: "poolWater",
         outlineMm: closeOutline(film),
-        bottomY: opts.crestY - 0.004,
+        bottomY: capTop - 0.002,
         height: 0.012,
         opacity: 0.35,
         waterShallow: true,
@@ -768,7 +790,7 @@ function pushWallRing(
     let skipWeirEdge = false;
     for (const weir of opts.omitAgainst ?? []) {
       const iv = colinearOverlapInterval(a, b, weir.a, weir.b, 320);
-      if (iv && iv[1] - iv[0] > edgeLenMm * 0.4) {
+      if (iv && iv[1] - iv[0] > edgeLenMm * 0.55) {
         skipWeirEdge = true;
         break;
       }
@@ -1963,35 +1985,46 @@ function canAabbPunch(subject: PointMm[], holes: PointMm[][]): boolean {
   });
 }
 
-/** Retain-wall omit ranges where a vanishing-edge trough occupies the face. */
-function retainingOmitIntervals(
+/** True when a patio retaining run is the vanishing-edge face (not the trough). */
+function retainingSegmentFacesInfinity(
   a: PointMm,
   b: PointMm,
-  cuts: PointMm[][],
-): [number, number][] {
+  edges: ResolvedInfinityEdge[],
+): boolean {
   const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
   const ux = (b.x - a.x) / len;
   const uy = (b.y - a.y) / len;
-  const out: [number, number][] = [];
-  for (const cut of cuts) {
-    if (cut.length < 3) continue;
-    let minT = Infinity;
-    let maxT = -Infinity;
-    let near = 0;
-    for (const p of cut) {
-      const dist = Math.abs(ux * (p.y - a.y) - uy * (p.x - a.x));
-      if (dist > 520) continue;
-      near += 1;
-      const t = (p.x - a.x) * ux + (p.y - a.y) * uy;
-      minT = Math.min(minT, t);
-      maxT = Math.max(maxT, t);
-    }
-    if (near < 2) continue;
-    const lo = Math.max(0, minT);
-    const hi = Math.min(len, maxT);
-    if (hi - lo > 80) out.push([lo, hi]);
+  for (const e of edges) {
+    const wdx = e.edgeB.x - e.edgeA.x;
+    const wdy = e.edgeB.y - e.edgeA.y;
+    const wlen = Math.hypot(wdx, wdy) || 1;
+    const cross = Math.abs(ux * (wdy / wlen) - uy * (wdx / wlen));
+    if (cross > 0.12) continue;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const weirMid = {
+      x: (e.edgeA.x + e.edgeB.x) / 2,
+      y: (e.edgeA.y + e.edgeB.y) / 2,
+    };
+    const along = (mid.x - e.edgeA.x) * (wdx / wlen) + (mid.y - e.edgeA.y) * (wdy / wlen);
+    if (along < -400 || along > wlen + 400) continue;
+    const outward =
+      (mid.x - weirMid.x) * e.nx + (mid.y - weirMid.y) * e.ny;
+    if (outward > 80) return true;
   }
-  return out;
+  return false;
+}
+
+function patioOwnsInfinityEdge(
+  outline: PointMm[],
+  edge: ResolvedInfinityEdge,
+): boolean {
+  const outer = infinityTroughOuterSpan(edge);
+  const mid = {
+    x: (outer.a.x + outer.b.x) / 2,
+    y: (outer.a.y + outer.b.y) / 2,
+  };
+  if (pointInPolygon(mid, outline)) return true;
+  return distToPolygonBoundaryMm(mid, outline) < 2500;
 }
 
 function pipeMaterialForCircuit(
@@ -2321,13 +2354,12 @@ export function buildSceneModel(
     if (p.outline.length >= 3) poolPitHoles.push(pitHoleOutline(p.outline));
   }
   const infinityDeckCuts: PointMm[][] = [];
+  const infinityEdgesAll: ResolvedInfinityEdge[] = [];
   for (const p of pools) {
     if (p.outline.length < 3) continue;
-    const inset = poolWallThicknessMm(p);
     for (const edge of resolveInfinityEdges(p)) {
-      infinityDeckCuts.push(
-        closeOutline(infinityDeckCutPolygon(edge, inset)),
-      );
+      infinityEdgesAll.push(edge);
+      infinityDeckCuts.push(closeOutline(infinityDeckCutPolygon(edge, 40)));
     }
   }
   for (const s of spas) {
@@ -2839,59 +2871,75 @@ export function buildSceneModel(
         if (strategy === "retaining" || strategy === "both") {
           let ri = 0;
           const patioBb = outlineBounds(p.outline);
+          const pushRetainBox = (
+            a: PointMm,
+            b: PointMm,
+            nx: number,
+            ny: number,
+            offsetMm: number,
+            dropMm: number,
+          ) => {
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const len = Math.hypot(dx, dy) || 1;
+            if (len < 80) return;
+            const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+            const wallMid = {
+              x: mid.x + nx * offsetMm,
+              y: mid.y + ny * offsetMm,
+            };
+            const lenM = mmToMeters(len);
+            const hM = Math.max(0.2, mmToMeters(dropMm));
+            const thickM = 0.25;
+            const along = planDirToWorldXZ(dx, dy);
+            const xz = planToWorldXZ(wallMid);
+            meshes.push({
+              kind: "box",
+              id: `retain_${p.id}_${ri++}`,
+              material: "retaining",
+              position: {
+                x: xz.x,
+                y: -hM / 2 + t,
+                z: xz.z,
+              },
+              size: { x: Math.max(0.35, lenM), y: hM + t, z: thickM },
+              rotationY: Math.atan2(-along.z, along.x),
+              select,
+            });
+          };
           for (const seg of analysis.retainingSegments) {
-            const omit = retainingOmitIntervals(
-              seg.a,
-              seg.b,
-              infinityDeckCuts,
-            );
-            const pieces = omit.length
-              ? wallSegmentsMinusIntervals(seg.a, seg.b, omit)
-              : [{ a: seg.a, b: seg.b }];
-            for (const piece of pieces) {
-              const mid = {
-                x: (piece.a.x + piece.b.x) / 2,
-                y: (piece.a.y + piece.b.y) / 2,
-              };
-              const dx = piece.b.x - piece.a.x;
-              const dy = piece.b.y - piece.a.y;
-              const len = Math.hypot(dx, dy) || 1;
-              if (len < 80) continue;
-              // Outward normal (away from patio center)
-              let nx = -dy / len;
-              let ny = dx / len;
-              if (
-                nx * (patioBb.cx - mid.x) + ny * (patioBb.cy - mid.y) >
-                0
-              ) {
-                nx = -nx;
-                ny = -ny;
-              }
-              const offsetMm = 120;
-              const wallMid = {
-                x: mid.x + nx * offsetMm,
-                y: mid.y + ny * offsetMm,
-              };
-              const lenM = mmToMeters(len);
-              const hM = Math.max(0.2, mmToMeters(seg.dropMm));
-              const thickM = 0.25;
-              const along = planDirToWorldXZ(dx, dy);
-              const xz = planToWorldXZ(wallMid);
-              // Wall sits from existing grade up to patio top.
-              meshes.push({
-                kind: "box",
-                id: `retain_${p.id}_${ri++}`,
-                material: "retaining",
-                position: {
-                  x: xz.x,
-                  y: -hM / 2 + t,
-                  z: xz.z,
-                },
-                size: { x: Math.max(0.35, lenM), y: hM + t, z: thickM },
-                rotationY: Math.atan2(-along.z, along.x),
-                select,
-              });
+            if (retainingSegmentFacesInfinity(seg.a, seg.b, infinityEdgesAll)) {
+              continue;
             }
+            const mid = {
+              x: (seg.a.x + seg.b.x) / 2,
+              y: (seg.a.y + seg.b.y) / 2,
+            };
+            const dx = seg.b.x - seg.a.x;
+            const dy = seg.b.y - seg.a.y;
+            const len = Math.hypot(dx, dy) || 1;
+            let nx = -dy / len;
+            let ny = dx / len;
+            if (nx * (patioBb.cx - mid.x) + ny * (patioBb.cy - mid.y) > 0) {
+              nx = -nx;
+              ny = -ny;
+            }
+            pushRetainBox(seg.a, seg.b, nx, ny, 120, seg.dropMm);
+          }
+          for (const edge of infinityEdgesAll) {
+            if (!patioOwnsInfinityEdge(p.outline, edge)) continue;
+            const outer = infinityTroughOuterSpan(edge);
+            const mid = {
+              x: (outer.a.x + outer.b.x) / 2,
+              y: (outer.a.y + outer.b.y) / 2,
+            };
+            const dropMm = Math.max(
+              edge.troughDepthMm,
+              existingGradeDropMm(mid, gradeSamples),
+              analysis.maxFillHeightMm,
+            );
+            // Sit on the outer trough face (thickness grows outward).
+            pushRetainBox(outer.a, outer.b, edge.nx, edge.ny, 125, dropMm);
           }
         }
       }
@@ -3348,6 +3396,7 @@ export function buildSceneModel(
           poolId: body.id,
           edges: infinityEdges,
           crestY,
+          wallThicknessMm: wallT,
           select,
         });
 

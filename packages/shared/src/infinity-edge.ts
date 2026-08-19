@@ -26,7 +26,7 @@ const MIN_EDGE_MM = 24 * IN;
 const DEFAULT_NOTCH_MM = 1.5 * IN;
 const DEFAULT_SCUPPER_COUNT = 3;
 const DEFAULT_SCUPPER_GAP_MM = 4 * IN;
-const DEFAULT_WIDTH_FRAC = 0.85;
+const DEFAULT_WIDTH_FRAC = 1;
 const MIN_WEIR_WIDTH_MM = 24 * IN;
 const DEFAULT_TROUGH_WIDTH_MM = 24 * IN;
 const DEFAULT_TROUGH_DEPTH_MM = 30 * IN;
@@ -492,26 +492,48 @@ export function infinityOmitIntervals(
   });
 }
 
-/** Plan polygon for one trough segment (weir face → outer face). */
+/** Outer trough face spanning the full pool edge (not just the 85% opening). */
+export function infinityTroughOuterSpan(resolved: ResolvedInfinityEdge): {
+  a: PointMm;
+  b: PointMm;
+} {
+  const a = resolved.edgeA ?? resolved.a;
+  const b = resolved.edgeB ?? resolved.b;
+  return {
+    a: {
+      x: a.x + resolved.nx * resolved.troughWidthMm,
+      y: a.y + resolved.ny * resolved.troughWidthMm,
+    },
+    b: {
+      x: b.x + resolved.nx * resolved.troughWidthMm,
+      y: b.y + resolved.ny * resolved.troughWidthMm,
+    },
+  };
+}
+
+/** Plan polygon for one trough (weir face → outer face), corner to corner. */
 export function infinityTroughPolygon(
   resolved: ResolvedInfinityEdge,
 ): PointMm[] {
-  return [
-    resolved.a,
-    resolved.b,
-    resolved.troughOuterB,
-    resolved.troughOuterA,
-  ];
+  const a = resolved.edgeA ?? resolved.a;
+  const b = resolved.edgeB ?? resolved.b;
+  const outer = infinityTroughOuterSpan(resolved);
+  return [a, b, outer.b, outer.a];
 }
 
-/** Plan polygon to punch deck / fill / retaining along a vanishing weir. */
+/**
+ * Punch pavers / fill from the weir through the rest of the patio on that
+ * side. Outward and along-edge extents are large so leftover deck/fill does
+ * not sit past the trough or form towers at the weir returns. A small along
+ * pad previously left AABB remainder blocks at each corner.
+ */
 export function infinityDeckCutPolygon(
   resolved: ResolvedInfinityEdge,
-  insetMm = 120,
+  insetMm = 40,
 ): PointMm[] {
-  const inset = Math.max(80, insetMm);
-  const outPad = 400;
-  const alongPad = 250;
+  const inset = Math.max(20, Math.min(80, insetMm));
+  const outPad = 25000;
+  const alongPad = 25000;
   const a0 = resolved.edgeA ?? resolved.a;
   const b0 = resolved.edgeB ?? resolved.b;
   const len = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1;

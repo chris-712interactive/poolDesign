@@ -166,8 +166,17 @@ describe("infinity edge", () => {
       edge.edgeB.y - edge.edgeA.y,
     );
     assert.ok(
-      cutSpan > edgeSpan,
-      "deck cut extends past the pool corners",
+      cutSpan > edgeSpan + 10 * FT,
+      "deck cut clears the weir-side patio, including the returns",
+    );
+    const trough = infinityTroughPolygon(edge);
+    const troughSpan = Math.hypot(
+      trough[1].x - trough[0].x,
+      trough[1].y - trough[0].y,
+    );
+    assert.ok(
+      Math.abs(troughSpan - edgeSpan) < 1,
+      "trough spans the full vanishing edge",
     );
   });
 });
