@@ -517,6 +517,9 @@ function SelectableMaterial({
       shadowSide={THREE.DoubleSide}
       depthWrite={!transparent}
       envMapIntensity={mat.envMapIntensity ?? 0.85}
+      normalScale={
+        material === "patio" ? [1.35, 1.35] : [1, 1]
+      }
       emissive={selected ? "#1f8a70" : "#000000"}
       emissiveIntensity={selected ? 0.28 : 0}
       clippingPlanes={clippingPlanes}

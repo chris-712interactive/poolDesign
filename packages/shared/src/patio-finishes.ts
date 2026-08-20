@@ -36,6 +36,11 @@ export type PatioFinish = {
   /** Grout / joint / secondary tone. */
   accent: PatioFinishColor;
   description?: string;
+  /**
+   * Chamfered unit edge. Rectified porcelain / sawn tile is `false`
+   * (square edge, hairline joint, no grout dip).
+   */
+  beveled?: boolean;
 };
 
 export const DEFAULT_PATIO_FINISH_ID = "concrete_broomed_medium";
@@ -325,6 +330,7 @@ export const PATIO_FINISHES: PatioFinish[] = [
     color: rgb(210, 208, 200),
     accent: rgb(160, 158, 152),
     description: "Large-format 24″ × 24″ porcelain paver",
+    beveled: false,
   },
   {
     id: "stone_porcelain_dark",
@@ -334,6 +340,7 @@ export const PATIO_FINISHES: PatioFinish[] = [
     colorName: "Dark",
     color: rgb(70, 72, 76),
     accent: rgb(48, 50, 54),
+    beveled: false,
   },
   {
     id: "stone_coral",
@@ -351,6 +358,13 @@ const BY_ID = new Map(PATIO_FINISHES.map((f) => [f.id, f]));
 export function getPatioFinish(id: string | undefined | null): PatioFinish {
   if (id && BY_ID.has(id)) return BY_ID.get(id)!;
   return BY_ID.get(DEFAULT_PATIO_FINISH_ID)!;
+}
+
+/** Chamfered paver/stone edge. Rectified porcelain is square. */
+export function patioFinishBeveled(finish: PatioFinish): boolean {
+  if (finish.beveled === false) return false;
+  if (finish.beveled === true) return true;
+  return finish.pattern !== "porcelain";
 }
 
 export function isPatioFinishId(id: string): boolean {
