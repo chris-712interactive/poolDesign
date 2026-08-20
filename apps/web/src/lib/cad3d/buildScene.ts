@@ -2993,43 +2993,74 @@ export function buildSceneModel(
         if (analysis.retainingSegments.length > 0) {
           let ri = 0;
           const patioBb = outlineBounds(p.outline);
-          const pushRetainBox = (
+          const RETAIN_STEP_MM = 600;
+          const pushRetainRun = (
             a: PointMm,
             b: PointMm,
             nx: number,
             ny: number,
             offsetMm: number,
-            dropMm: number,
             topY: number,
           ) => {
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const len = Math.hypot(dx, dy) || 1;
             if (len < 80) return;
-            const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-            const wallMid = {
-              x: mid.x + nx * offsetMm,
-              y: mid.y + ny * offsetMm,
-            };
-            const lenM = mmToMeters(len);
-            const bottom = -Math.max(0.2, mmToMeters(dropMm));
-            const height = Math.max(0.08, topY - bottom);
-            const thickM = 0.25;
             const along = planDirToWorldXZ(dx, dy);
-            const xz = planToWorldXZ(wallMid);
-            meshes.push({
-              kind: "box",
-              id: `retain_${p.id}_${ri++}`,
-              material: "retaining",
-              position: {
-                x: xz.x,
-                y: bottom + height / 2,
-                z: xz.z,
-              },
-              size: { x: Math.max(0.35, lenM), y: height, z: thickM },
-              rotationY: Math.atan2(-along.z, along.x),
-              select,
-            });
+            const nSteps = Math.max(1, Math.ceil(len / RETAIN_STEP_MM));
+            const buryM = 0.08;
+            for (let i = 0; i < nSteps; i++) {
+              const t0 = i / nSteps;
+              const t1 = (i + 1) / nSteps;
+              const p0 = {
+                x: a.x + dx * t0,
+                y: a.y + dy * t0,
+              };
+              const p1 = {
+                x: a.x + dx * t1,
+                y: a.y + dy * t1,
+              };
+              const mid = {
+                x: (p0.x + p1.x) / 2,
+                y: (p0.y + p1.y) / 2,
+              };
+              const wallMid = {
+                x: mid.x + nx * offsetMm,
+                y: mid.y + ny * offsetMm,
+              };
+              const dropMm = hasGradeSamples
+                ? Math.max(
+                    existingGradeDropMm(
+                      { x: p0.x + nx * offsetMm, y: p0.y + ny * offsetMm },
+                      gradeSamples,
+                    ),
+                    existingGradeDropMm(wallMid, gradeSamples),
+                    existingGradeDropMm(
+                      { x: p1.x + nx * offsetMm, y: p1.y + ny * offsetMm },
+                      gradeSamples,
+                    ),
+                  )
+                : 200;
+              const span = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+              const lenM = mmToMeters(span);
+              const bottom = -mmToMeters(Math.max(0, dropMm)) - buryM;
+              const height = Math.max(0.08, topY - bottom);
+              const thickM = 0.25;
+              const xz = planToWorldXZ(wallMid);
+              meshes.push({
+                kind: "box",
+                id: `retain_${p.id}_${ri++}`,
+                material: "retaining",
+                position: {
+                  x: xz.x,
+                  y: bottom + height / 2,
+                  z: xz.z,
+                },
+                size: { x: Math.max(0.2, lenM), y: height, z: thickM },
+                rotationY: Math.atan2(-along.z, along.x),
+                select,
+              });
+            }
           };
           for (const seg of analysis.retainingSegments) {
             if (
@@ -3056,15 +3087,7 @@ export function buildSceneModel(
                 ? [{ a: seg.a, b: seg.b }]
                 : clipRetainingAtWeir(seg.a, seg.b, infinityEdgesAll);
             for (const piece of pieces) {
-              pushRetainBox(
-                piece.a,
-                piece.b,
-                nx,
-                ny,
-                120,
-                seg.dropMm,
-                t,
-              );
+              pushRetainRun(piece.a, piece.b, nx, ny, 120, t);
             }
           }
         }
