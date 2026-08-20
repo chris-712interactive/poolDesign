@@ -542,7 +542,7 @@ function peakSegmentAt(
   peaks: RoofRidge[],
 ): { a: PointMm; b: PointMm } | null {
   let best: { a: PointMm; b: PointMm } | null = null;
-  let bestD = 140;
+  let bestD = 220;
   for (const ridge of peaks) {
     for (let i = 1; i < ridge.points.length; i++) {
       const a = ridge.points[i - 1]!;
@@ -572,6 +572,105 @@ function nearestPeakEnd(p: PointMm, peaks: RoofRidge[]): PointMm | null {
   }
   if (!best || bestD < 400 || bestD > 25000) return null;
   return best;
+}
+
+function parallelEaveHeightsAt(
+  p: PointMm,
+  dirx: number,
+  diry: number,
+  eave: PointMm[],
+  sign: number,
+  pitch12: number,
+  gableSkip?: boolean[],
+): number[] {
+  const ranked: Array<{ h: number; len: number }> = [];
+  for (let i = 0; i < eave.length; i++) {
+    if (gableSkip?.[i]) continue;
+    const a = eave[i]!;
+    const b = eave[(i + 1) % eave.length]!;
+    if (!dirsParallel(b.x - a.x, b.y - a.y, dirx, diry)) continue;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 800) continue;
+    ranked.push({
+      h: heightFromSupport(p, a, b, sign, pitch12),
+      len,
+    });
+  }
+  ranked.sort((x, y) => y.len - x.len);
+  return ranked.slice(0, 2).map((r) => r.h);
+}
+
+function envelopeAtParallelEaves(
+  p: PointMm,
+  dirx: number,
+  diry: number,
+  eave: PointMm[],
+  sign: number,
+  pitch12: number,
+  gableSkip?: boolean[],
+): number {
+  const hs = parallelEaveHeightsAt(
+    p,
+    dirx,
+    diry,
+    eave,
+    sign,
+    pitch12,
+    gableSkip,
+  );
+  if (hs.length >= 2) return Math.max(hs[0]!, hs[1]!);
+  return hs[0] ?? 0;
+}
+
+/** One height for the whole peak run so the ridge cannot sag or slope. */
+function levelHeightForPeak(
+  ridge: RoofRidge,
+  eave: PointMm[],
+  sign: number,
+  pitch12: number,
+  gableSkip?: boolean[],
+): number {
+  const a = ridge.points[0]!;
+  const b = ridge.points[ridge.points.length - 1]!;
+  const dirx = b.x - a.x;
+  const diry = b.y - a.y;
+  const samples = [
+    a,
+    { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+    b,
+  ];
+  let h = 0;
+  for (const p of samples) {
+    h = Math.max(
+      h,
+      envelopeAtParallelEaves(p, dirx, diry, eave, sign, pitch12, gableSkip),
+    );
+  }
+  return h;
+}
+
+function applyLevelPeakHeights(
+  vertices: RoofVertexMm[],
+  peaks: RoofRidge[],
+  eave: PointMm[],
+  sign: number,
+  pitch12: number,
+  gableSkip?: boolean[],
+) {
+  if (peaks.length === 0) return;
+  const levels = peaks.map((ridge) => ({
+    ridge,
+    h: levelHeightForPeak(ridge, eave, sign, pitch12, gableSkip),
+  }));
+  for (const v of vertices) {
+    let h: number | null = null;
+    for (const { ridge, h: peakH } of levels) {
+      if (peakH < 80) continue;
+      if (distToRidgesMm(v, [ridge]) > 220) continue;
+      h = h == null ? peakH : Math.max(h, peakH);
+    }
+    if (h != null) v.hMm = h;
+  }
 }
 
 function heightFromIncidentPlanes(
@@ -653,6 +752,13 @@ export function roofHeightMm(
     ring,
     0,
   );
+  const meshPeaks = peakRidges(lines, ring);
+  const sign = planSignedAreaMm2(ring) >= 0 ? 1 : -1;
+  for (const ridge of meshPeaks) {
+    if (distToRidgesMm(p, [ridge]) > 220) continue;
+    const h = levelHeightForPeak(ridge, ring, sign, pitch12, skip);
+    if (h > 80) return h;
+  }
   const graph = buildRoofGraph(ring, lines);
   if (graph) {
     const sign = planSignedAreaMm2(ring) >= 0 ? 1 : -1;
@@ -1680,6 +1786,7 @@ function emitPlanarFaces(
       indices.push(face[local[t]!]!, face[local[t + 1]!]!, face[local[t + 2]!]!);
     }
   }
+  applyLevelPeakHeights(vertices, peaks, eave, sign, pitch12, gableSkip);
   return { vertices, indices };
 }
 
@@ -1709,12 +1816,13 @@ export function tessellatePitchedRoof(
     eave,
     overhangMm,
   );
+  const meshPeaks = peakRidges(allLines, eave);
 
   const graph = buildRoofGraph(eave, allLines);
   let vertices: RoofVertexMm[] = [];
   let indices: number[] = [];
   if (graph) {
-    const emitted = emitPlanarFaces(eave, graph, pitch12, gablesSkip, peaks);
+    const emitted = emitPlanarFaces(eave, graph, pitch12, gablesSkip, meshPeaks);
     vertices = emitted.vertices;
     indices = emitted.indices;
   }
@@ -1774,7 +1882,7 @@ export function tessellatePitchedRoof(
         inc[i]!,
         sign,
         pitch12,
-        peaks,
+        meshPeaks,
         eave,
         gablesSkip,
       ),
@@ -1782,6 +1890,14 @@ export function tessellatePitchedRoof(
     indices = mesh.tris.slice();
   }
   if (indices.length < 3) return empty;
+  applyLevelPeakHeights(
+    vertices,
+    meshPeaks,
+    eave,
+    planSignedAreaMm2(eave) >= 0 ? 1 : -1,
+    pitch12,
+    gablesSkip,
+  );
 
   const area = planSignedAreaMm2(eave);
   if (area >= 0) {

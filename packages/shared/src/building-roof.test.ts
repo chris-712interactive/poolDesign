@@ -180,6 +180,18 @@ describe("building roof", () => {
       Math.abs(left! - mid!) < 80 && Math.abs(right! - mid!) < 80,
       `ridge should stay level, L=${left} M=${mid} R=${right}`,
     );
+    const onRidge = mesh.vertices.filter(
+      (v) =>
+        Math.abs(v.y - 4000) < 220 &&
+        v.x > 3800 &&
+        v.x < 8200 &&
+        v.hMm > 400,
+    );
+    if (onRidge.length >= 2) {
+      const hs = onRidge.map((v) => v.hMm);
+      const span = Math.max(...hs) - Math.min(...hs);
+      assert.ok(span < 40, `ridge not even: ${Math.min(...hs)}..${Math.max(...hs)}`);
+    }
     const slope = 6 / 12;
     const oh = 280;
     for (let x = 1800; x <= 10200; x += 1400) {
