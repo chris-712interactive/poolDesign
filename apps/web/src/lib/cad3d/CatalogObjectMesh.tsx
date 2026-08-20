@@ -1,6 +1,7 @@
 "use client";
 
 import { useContext, useLayoutEffect, useMemo, useRef } from "react";
+import { RoundedBox } from "@react-three/drei";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 import type { CanvasTexture } from "three";
@@ -27,7 +28,10 @@ import {
 } from "@/lib/cad3d/PadEquipmentMesh";
 import type { BoxDescriptor, SceneSelection } from "@/lib/cad3d/buildScene";
 import { ClipPlanesContext } from "@/lib/cad3d/clipContext";
-import { getFurnitureFinishTexture } from "@/lib/cad3d/furnitureFinishTextures";
+import {
+  getFurnitureFinishTexture,
+  type FurnTexPair,
+} from "@/lib/cad3d/furnitureFinishTextures";
 import {
   isNightTime,
   ledBoostForTimeOfDay,
@@ -67,6 +71,8 @@ function Mat({
   color,
   map,
   roughnessMap,
+  bumpMap,
+  bumpScale = 0,
   roughness = 0.7,
   metalness = 0.05,
   opacity = 1,
@@ -77,6 +83,8 @@ function Mat({
   color?: string;
   map?: CanvasTexture;
   roughnessMap?: CanvasTexture;
+  bumpMap?: CanvasTexture;
+  bumpScale?: number;
   roughness?: number;
   metalness?: number;
   opacity?: number;
@@ -90,6 +98,8 @@ function Mat({
       color={color ?? "#ffffff"}
       map={map}
       roughnessMap={roughnessMap}
+      bumpMap={bumpMap}
+      bumpScale={bumpScale}
       roughness={roughness}
       metalness={metalness}
       transparent={opacity < 0.99}
@@ -1357,6 +1367,445 @@ function TrellisMesh({
   );
 }
 
+function cloneFurnRepeat(
+  pair: FurnTexPair | null | undefined,
+  rx: number,
+  ry: number,
+): FurnTexPair | null {
+  if (!pair) return null;
+  const color = pair.color.clone();
+  const roughness = pair.roughness.clone();
+  color.wrapS = color.wrapT = THREE.RepeatWrapping;
+  roughness.wrapS = roughness.wrapT = THREE.RepeatWrapping;
+  color.repeat.set(rx, ry);
+  roughness.repeat.set(rx, ry);
+  color.needsUpdate = true;
+  roughness.needsUpdate = true;
+  return { color, roughness };
+}
+
+function WoodMat({
+  frame,
+  selected,
+  roughness = 0.5,
+}: {
+  frame?: FurnTexPair | null;
+  selected: boolean;
+  roughness?: number;
+}) {
+  return (
+    <Mat
+      map={frame?.color}
+      roughnessMap={frame?.roughness}
+      color={frame?.color ? "#ffffff" : "#c4a06a"}
+      roughness={roughness}
+      selected={selected}
+    />
+  );
+}
+
+function FabricMat({
+  fabric,
+  selected,
+  roughness = 0.88,
+}: {
+  fabric?: FurnTexPair | null;
+  selected: boolean;
+  roughness?: number;
+}) {
+  return (
+    <Mat
+      map={fabric?.color}
+      roughnessMap={fabric?.roughness}
+      bumpMap={fabric?.roughness}
+      bumpScale={fabric ? 0.55 : 0}
+      color={fabric?.color ? "#ffffff" : "#5c6e62"}
+      roughness={roughness}
+      selected={selected}
+    />
+  );
+}
+
+function DiningChairMesh({
+  yBottom,
+  seatH,
+  w,
+  d,
+  backH,
+  frame,
+  fabric,
+  selected,
+}: {
+  yBottom: number;
+  seatH: number;
+  w: number;
+  d: number;
+  backH: number;
+  frame?: FurnTexPair | null;
+  fabric?: FurnTexPair | null;
+  selected: boolean;
+}) {
+  const y0 = yBottom;
+  const seatY = y0 + seatH;
+  const insetX = w * 0.37;
+  const frontZ = d * 0.34;
+  const rearZ = -d * 0.38;
+  const cushionH = 0.05;
+  const woodSeatT = 0.022;
+  const slatSpan = w * 0.7;
+
+  return (
+    <group>
+      {([-1, 1] as const).map((side) => (
+        <mesh
+          key={`fl-${side}`}
+          position={[side * insetX, y0 + seatH * 0.48, frontZ]}
+          castShadow
+        >
+          <cylinderGeometry args={[0.013, 0.017, seatH * 0.96, 10]} />
+          <WoodMat frame={frame} selected={selected} />
+        </mesh>
+      ))}
+      {([-1, 1] as const).map((side) => (
+        <mesh
+          key={`rl-${side}`}
+          position={[side * insetX, y0 + (seatH + backH) * 0.5, rearZ]}
+          castShadow
+        >
+          <cylinderGeometry args={[0.014, 0.017, seatH + backH, 10]} />
+          <WoodMat frame={frame} selected={selected} />
+        </mesh>
+      ))}
+      <mesh
+        position={[0, y0 + 0.1, frontZ]}
+        rotation={[0, 0, Math.PI / 2]}
+        castShadow
+      >
+        <cylinderGeometry args={[0.007, 0.007, insetX * 2, 8]} />
+        <WoodMat frame={frame} selected={selected} />
+      </mesh>
+      {([-1, 1] as const).map((side) => (
+        <mesh
+          key={`st-${side}`}
+          position={[side * insetX, y0 + 0.1, (frontZ + rearZ) / 2]}
+          rotation={[Math.PI / 2, 0, 0]}
+          castShadow
+        >
+          <cylinderGeometry
+            args={[0.007, 0.007, Math.abs(frontZ - rearZ), 8]}
+          />
+          <WoodMat frame={frame} selected={selected} />
+        </mesh>
+      ))}
+      <mesh
+        position={[0, seatY - woodSeatT / 2, (frontZ + rearZ) * 0.12]}
+        castShadow
+        receiveShadow
+      >
+        <boxGeometry args={[w * 0.78, woodSeatT, d * 0.72]} />
+        <WoodMat frame={frame} selected={selected} roughness={0.48} />
+      </mesh>
+      <mesh position={[0, seatY - 0.04, frontZ - 0.008]} castShadow>
+        <boxGeometry args={[w * 0.72, 0.038, 0.016]} />
+        <WoodMat frame={frame} selected={selected} />
+      </mesh>
+      <RoundedBox
+        args={[w * 0.88, cushionH, d * 0.7]}
+        radius={Math.min(0.022, cushionH * 0.42)}
+        smoothness={4}
+        position={[0, seatY + cushionH * 0.42, d * 0.02]}
+        castShadow
+        receiveShadow
+      >
+        <FabricMat fabric={fabric} selected={selected} />
+      </RoundedBox>
+      {[0.22, 0.42, 0.62, 0.82].map((t) => (
+        <mesh
+          key={`slat-${t}`}
+          position={[0, seatY + backH * t, rearZ + 0.012]}
+          castShadow
+        >
+          <boxGeometry args={[slatSpan, 0.028, 0.012]} />
+          <WoodMat frame={frame} selected={selected} />
+        </mesh>
+      ))}
+      <mesh position={[0, seatY + backH * 0.96, rearZ + 0.01]} castShadow>
+        <boxGeometry args={[w * 0.74, 0.032, 0.022]} />
+        <WoodMat frame={frame} selected={selected} />
+      </mesh>
+      <group
+        position={[0, seatY + backH * 0.42, rearZ + 0.045]}
+        rotation={[0.12, 0, 0]}
+      >
+        <RoundedBox
+          args={[w * 0.72, backH * 0.72, 0.04]}
+          radius={0.016}
+          smoothness={4}
+          castShadow
+        >
+          <FabricMat fabric={fabric} selected={selected} />
+        </RoundedBox>
+      </group>
+    </group>
+  );
+}
+
+function DiningSetMesh({
+  catalogId,
+  sx,
+  sy,
+  sz,
+  selected,
+  groupProps,
+  frame,
+  fabric,
+}: {
+  catalogId: string;
+  sx: number;
+  sy: number;
+  sz: number;
+  selected: boolean;
+  groupProps: Record<string, unknown>;
+  frame?: FurnTexPair | null;
+  fabric?: FurnTexPair | null;
+}) {
+  const chairFabric = useMemo(
+    () => cloneFurnRepeat(fabric, 2.4, 2.4),
+    [fabric],
+  );
+  const shape = diningTableShape(catalogId);
+  const tableW = shape === "round" ? Math.max(sx, sz) : sx;
+  const tableD = shape === "round" ? Math.max(sx, sz) : sz;
+  const clearM = DINING_CHAIR_CLEARANCE_MM / 1000;
+  const topT = Math.max(0.04, sy * 0.07);
+  const topY = sy * 0.28;
+  const legH = sy * 0.55;
+  const chairSeatH = sy * 0.38;
+  const chairW = Math.min(0.48, clearM * 0.85);
+  const chairD = Math.min(0.5, clearM * 0.9);
+  const backH = sy * 0.32;
+  const chairSlots = diningChairSlotsMm(shape, tableW * 1000, tableD * 1000).map(
+    (s) => ({
+      x: s.xMm / 1000,
+      z: s.yMm / 1000,
+      yaw: s.yawRad,
+    }),
+  );
+
+  return (
+    <group {...groupProps}>
+      {shape === "round" ? (
+        <mesh position={[0, topY, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[tableW / 2, tableW / 2, topT, 32]} />
+          <WoodMat frame={frame} selected={selected} roughness={0.45} />
+        </mesh>
+      ) : (
+        <mesh position={[0, topY, 0]} castShadow receiveShadow>
+          <boxGeometry args={[tableW, topT, tableD]} />
+          <WoodMat frame={frame} selected={selected} roughness={0.45} />
+        </mesh>
+      )}
+      {shape === "round" ? (
+        <>
+          <mesh position={[0, topY - legH / 2 - topT / 2, 0]} castShadow>
+            <cylinderGeometry args={[0.055, 0.07, legH, 14]} />
+            <WoodMat frame={frame} selected={selected} />
+          </mesh>
+          <mesh
+            position={[0, topY - legH - topT / 2, 0]}
+            castShadow
+            receiveShadow
+          >
+            <cylinderGeometry args={[tableW * 0.22, tableW * 0.26, 0.04, 20]} />
+            <WoodMat frame={frame} selected={selected} />
+          </mesh>
+        </>
+      ) : (
+        (
+          [
+            [-tableW * 0.4, -tableD * 0.38],
+            [tableW * 0.4, -tableD * 0.38],
+            [-tableW * 0.4, tableD * 0.38],
+            [tableW * 0.4, tableD * 0.38],
+          ] as const
+        ).map(([lx, lz], i) => (
+          <mesh
+            key={`leg-${i}`}
+            position={[lx, topY - legH / 2 - topT / 2, lz]}
+            castShadow
+          >
+            <boxGeometry args={[0.06, legH, 0.06]} />
+            <WoodMat frame={frame} selected={selected} />
+          </mesh>
+        ))
+      )}
+      {chairSlots.map((c, i) => (
+        <group
+          key={`chair-${i}`}
+          position={[c.x, 0, c.z]}
+          rotation={[0, c.yaw, 0]}
+        >
+          <DiningChairMesh
+            yBottom={-sy * 0.5}
+            seatH={chairSeatH}
+            w={chairW}
+            d={chairD}
+            backH={backH}
+            frame={frame}
+            fabric={chairFabric}
+            selected={selected}
+          />
+        </group>
+      ))}
+    </group>
+  );
+}
+
+function OutdoorSofaMesh({
+  sx,
+  sy,
+  sz,
+  selected,
+  groupProps,
+  frame,
+  fabric,
+}: {
+  sx: number;
+  sy: number;
+  sz: number;
+  selected: boolean;
+  groupProps: Record<string, unknown>;
+  frame?: FurnTexPair | null;
+  fabric?: FurnTexPair | null;
+}) {
+  const cushionTex = useMemo(() => cloneFurnRepeat(fabric, 5, 5), [fabric]);
+  const y0 = -sy * 0.5;
+  const legH = Math.min(0.14, sy * 0.18);
+  const deckT = 0.07;
+  const seatH = Math.min(0.15, sy * 0.2);
+  const nCush = Math.max(2, Math.min(4, Math.round(sx / 0.68)));
+  const armW = Math.min(0.14, sx * 0.08);
+  const innerW = sx - armW * 2 - 0.04;
+  const gap = 0.018;
+  const cushW = (innerW - gap * (nCush - 1)) / nCush;
+  const seatD = sz * 0.62;
+  const deckY = y0 + legH + deckT / 2;
+  const seatY = y0 + legH + deckT + seatH / 2;
+  const backT = 0.15;
+  const backH = sy * 0.52;
+  const cushXs = Array.from({ length: nCush }, (_, i) => {
+    const start = -innerW / 2 + cushW / 2;
+    return start + i * (cushW + gap);
+  });
+  const cushRadius = Math.min(0.04, seatH * 0.42, cushW * 0.2);
+
+  return (
+    <group {...groupProps}>
+      {([-1, 1] as const).flatMap((x) =>
+        ([-1, 1] as const).map((z) => (
+          <mesh
+            key={`leg-${x}-${z}`}
+            position={[x * (sx * 0.44), y0 + legH / 2, z * (sz * 0.38)]}
+            castShadow
+          >
+            <cylinderGeometry args={[0.028, 0.032, legH, 10]} />
+            <WoodMat frame={frame} selected={selected} />
+          </mesh>
+        )),
+      )}
+      <mesh position={[0, deckY, sz * 0.02]} castShadow receiveShadow>
+        <boxGeometry args={[sx * 0.96, deckT, sz * 0.88]} />
+        <WoodMat frame={frame} selected={selected} roughness={0.48} />
+      </mesh>
+      <mesh position={[0, y0 + legH * 0.55, sz * 0.42]} castShadow>
+        <boxGeometry args={[sx * 0.9, legH * 0.55, 0.03]} />
+        <WoodMat frame={frame} selected={selected} />
+      </mesh>
+      {cushXs.map((x, i) => (
+        <RoundedBox
+          key={`seat-${i}`}
+          args={[cushW, seatH, seatD]}
+          radius={cushRadius}
+          smoothness={4}
+          position={[x, seatY, sz * 0.08]}
+          castShadow
+          receiveShadow
+        >
+          <FabricMat fabric={cushionTex} selected={selected} />
+        </RoundedBox>
+      ))}
+      <mesh
+        position={[0, y0 + legH + deckT + backH * 0.45, -sz * 0.42]}
+        castShadow
+      >
+        <boxGeometry args={[sx * 0.92, backH * 0.85, 0.04]} />
+        <WoodMat frame={frame} selected={selected} />
+      </mesh>
+      {cushXs.map((x, i) => (
+        <group
+          key={`back-${i}`}
+          position={[x, y0 + legH + deckT + seatH + backH * 0.38, -sz * 0.28]}
+          rotation={[0.18, 0, 0]}
+        >
+          <RoundedBox
+            args={[cushW * 0.98, backH, backT]}
+            radius={Math.min(0.038, cushW * 0.18)}
+            smoothness={4}
+            castShadow
+          >
+            <FabricMat fabric={cushionTex} selected={selected} />
+          </RoundedBox>
+        </group>
+      ))}
+      {([-1, 1] as const).map((side) => (
+        <group key={`arm-${side}`}>
+          <mesh
+            position={[
+              side * (sx * 0.5 - armW * 0.5),
+              y0 + legH + deckT + 0.16,
+              sz * 0.02,
+            ]}
+            castShadow
+          >
+            <boxGeometry args={[armW * 0.7, 0.28, sz * 0.72]} />
+            <WoodMat frame={frame} selected={selected} />
+          </mesh>
+          <RoundedBox
+            args={[armW, 0.12, sz * 0.7]}
+            radius={Math.min(0.04, armW * 0.4)}
+            smoothness={4}
+            position={[
+              side * (sx * 0.5 - armW * 0.55),
+              y0 + legH + deckT + 0.32,
+              sz * 0.04,
+            ]}
+            castShadow
+          >
+            <FabricMat fabric={cushionTex} selected={selected} />
+          </RoundedBox>
+        </group>
+      ))}
+      {([-1, 1] as const).map((side) => (
+        <RoundedBox
+          key={`pillow-${side}`}
+          args={[0.32, 0.2, 0.1]}
+          radius={0.04}
+          smoothness={4}
+          position={[
+            side * innerW * 0.28,
+            y0 + legH + deckT + seatH + 0.14,
+            -sz * 0.12,
+          ]}
+          rotation={[0.25, side * 0.35, side * 0.08]}
+          castShadow
+        >
+          <FabricMat fabric={cushionTex} selected={selected} />
+        </RoundedBox>
+      ))}
+    </group>
+  );
+}
+
 export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   const catalogId = desc.catalogItemId ?? "";
   const { x: sx, y: sy, z: sz } = desc.size;
@@ -1486,212 +1935,31 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   }
 
   if (isDiningSetId(catalogId)) {
-    const shape = diningTableShape(catalogId);
-    const frame = furnTex?.frame;
-    const fabric = furnTex?.fabric;
-    // desc.size is tabletop; chairs sit in clearance beyond the top.
-    const tableW = shape === "round" ? Math.max(sx, sz) : sx;
-    const tableD = shape === "round" ? Math.max(sx, sz) : sz;
-    const clearM = DINING_CHAIR_CLEARANCE_MM / 1000;
-    const topT = Math.max(0.04, sy * 0.07);
-    const topY = sy * 0.28;
-    const legH = sy * 0.55;
-    const chairSeatH = sy * 0.38;
-    const chairW = Math.min(0.48, clearM * 0.85);
-    const chairD = Math.min(0.5, clearM * 0.9);
-    const chairSeatT = 0.05;
-    const backH = sy * 0.32;
-
-    // Shared layout: chairs on all four sides (rect) or full orbit (round).
-    const chairSlots = diningChairSlotsMm(
-      shape,
-      tableW * 1000,
-      tableD * 1000,
-    ).map((s) => ({
-      x: s.xMm / 1000,
-      z: s.yMm / 1000,
-      yaw: s.yawRad,
-    }));
-
     return (
-      <group {...groupProps}>
-        {/* Tabletop */}
-        {shape === "round" ? (
-          <mesh position={[0, topY, 0]} castShadow receiveShadow>
-            <cylinderGeometry args={[tableW / 2, tableW / 2, topT, 32]} />
-            <Mat
-              map={frame?.color}
-              roughnessMap={frame?.roughness}
-              roughness={0.45}
-              selected={selected}
-            />
-          </mesh>
-        ) : (
-          <mesh position={[0, topY, 0]} castShadow receiveShadow>
-            <boxGeometry args={[tableW, topT, tableD]} />
-            <Mat
-              map={frame?.color}
-              roughnessMap={frame?.roughness}
-              roughness={0.45}
-              selected={selected}
-            />
-          </mesh>
-        )}
-        {/* Pedestal / legs */}
-        {shape === "round" ? (
-          <>
-            <mesh position={[0, topY - legH / 2 - topT / 2, 0]} castShadow>
-              <cylinderGeometry args={[0.055, 0.07, legH, 14]} />
-              <Mat
-                map={frame?.color}
-                roughnessMap={frame?.roughness}
-                roughness={0.5}
-                selected={selected}
-              />
-            </mesh>
-            <mesh
-              position={[0, topY - legH - topT / 2, 0]}
-              castShadow
-              receiveShadow
-            >
-              <cylinderGeometry
-                args={[tableW * 0.22, tableW * 0.26, 0.04, 20]}
-              />
-              <Mat
-                map={frame?.color}
-                roughnessMap={frame?.roughness}
-                roughness={0.5}
-                selected={selected}
-              />
-            </mesh>
-          </>
-        ) : (
-          (
-            [
-              [-tableW * 0.4, -tableD * 0.38],
-              [tableW * 0.4, -tableD * 0.38],
-              [-tableW * 0.4, tableD * 0.38],
-              [tableW * 0.4, tableD * 0.38],
-            ] as const
-          ).map(([lx, lz], i) => (
-            <mesh
-              key={`leg-${i}`}
-              position={[lx, topY - legH / 2 - topT / 2, lz]}
-              castShadow
-            >
-              <boxGeometry args={[0.06, legH, 0.06]} />
-              <Mat
-                map={frame?.color}
-                roughnessMap={frame?.roughness}
-                roughness={0.5}
-                selected={selected}
-              />
-            </mesh>
-          ))
-        )}
-        {/* Chairs */}
-        {chairSlots.map((c, i) => (
-          <group key={`chair-${i}`} position={[c.x, 0, c.z]} rotation={[0, c.yaw, 0]}>
-            <mesh position={[0, -sy * 0.5 + chairSeatH, 0]} castShadow>
-              <boxGeometry args={[chairW, chairSeatT, chairD]} />
-              <Mat
-                map={fabric?.color}
-                roughnessMap={fabric?.roughness}
-                roughness={0.85}
-                selected={selected}
-              />
-            </mesh>
-            <mesh
-              position={[0, -sy * 0.5 + chairSeatH + backH / 2, -chairD * 0.38]}
-              castShadow
-            >
-              <boxGeometry args={[chairW * 0.95, backH, 0.04]} />
-              <Mat
-                map={frame?.color}
-                roughnessMap={frame?.roughness}
-                roughness={0.55}
-                selected={selected}
-              />
-            </mesh>
-            {(
-              [
-                [-chairW * 0.38, -chairD * 0.35],
-                [chairW * 0.38, -chairD * 0.35],
-                [-chairW * 0.38, chairD * 0.35],
-                [chairW * 0.38, chairD * 0.35],
-              ] as const
-            ).map(([lx, lz], li) => (
-              <mesh
-                key={li}
-                position={[lx, -sy * 0.5 + chairSeatH / 2, lz]}
-                castShadow
-              >
-                <boxGeometry args={[0.035, chairSeatH, 0.035]} />
-                <Mat
-                  map={frame?.color}
-                  roughnessMap={frame?.roughness}
-                  roughness={0.5}
-                  selected={selected}
-                />
-              </mesh>
-            ))}
-          </group>
-        ))}
-      </group>
+      <DiningSetMesh
+        catalogId={catalogId}
+        sx={sx}
+        sy={sy}
+        sz={sz}
+        selected={selected}
+        groupProps={groupProps}
+        frame={furnTex?.frame}
+        fabric={furnTex?.fabric}
+      />
     );
   }
 
   if (catalogId === "sofa_outdoor") {
-    const frame = furnTex?.frame;
-    const fabric = furnTex?.fabric;
     return (
-      <group {...groupProps}>
-        <mesh position={[0, -sy * 0.28, 0]} castShadow receiveShadow>
-          <boxGeometry args={[sx * 0.98, sy * 0.18, sz * 0.95]} />
-          <Mat
-            map={frame?.color}
-            roughnessMap={frame?.roughness}
-            roughness={0.5}
-            selected={selected}
-          />
-        </mesh>
-        <mesh position={[0, -sy * 0.12, 0]} castShadow receiveShadow>
-          <boxGeometry args={[sx * 0.92, sy * 0.22, sz * 0.88]} />
-          <Mat
-            map={fabric?.color}
-            roughnessMap={fabric?.roughness}
-            roughness={0.88}
-            selected={selected}
-          />
-        </mesh>
-        <mesh position={[0, sy * 0.12, -sz * 0.35]} castShadow>
-          <boxGeometry args={[sx * 0.94, sy * 0.5, sz * 0.2]} />
-          <Mat
-            map={fabric?.color}
-            roughnessMap={fabric?.roughness}
-            roughness={0.88}
-            selected={selected}
-          />
-        </mesh>
-        <mesh position={[-sx * 0.42, sy * 0.02, sz * 0.05]} castShadow>
-          <boxGeometry args={[sx * 0.1, sy * 0.38, sz * 0.75]} />
-          <Mat
-            map={fabric?.color}
-            roughnessMap={fabric?.roughness}
-            roughness={0.88}
-            selected={selected}
-          />
-        </mesh>
-        <mesh position={[sx * 0.42, sy * 0.02, sz * 0.05]} castShadow>
-          <boxGeometry args={[sx * 0.1, sy * 0.38, sz * 0.75]} />
-          <Mat
-            map={fabric?.color}
-            roughnessMap={fabric?.roughness}
-            roughness={0.88}
-            selected={selected}
-          />
-        </mesh>
-      </group>
+      <OutdoorSofaMesh
+        sx={sx}
+        sy={sy}
+        sz={sz}
+        selected={selected}
+        groupProps={groupProps}
+        frame={furnTex?.frame}
+        fabric={furnTex?.fabric}
+      />
     );
   }
 

@@ -118,24 +118,36 @@ function drawFabric(finish: FurnitureFinish): FurnTexPair {
   const base = finish.color;
   const accent = finish.accent;
   return makePair(
-    256,
+    512,
     (cImg, rImg, size) => {
+      const cell = 10;
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
-          const weave =
-            ((Math.floor(x / 3) + Math.floor(y / 3)) % 2) * 0.08 +
-            fbm(x / 28, y / 28, 112, 3) * 0.12;
-          const t = Math.min(1, Math.max(0, 0.45 + weave));
+          const bx = Math.floor(x / cell);
+          const by = Math.floor(y / cell);
+          const lx = x % cell;
+          const ly = y % cell;
+          const basket = (bx + by) % 2 === 0;
+          const thread = basket
+            ? lx < cell * 0.55
+              ? 0.28
+              : 0.06
+            : ly < cell * 0.55
+              ? 0.24
+              : 0.05;
+          const yarn = Math.sin((basket ? y : x) * 0.85) * 0.05;
+          const n = fbm(x / 42, y / 42, 112, 3) * 0.12;
+          const t = Math.min(1, Math.max(0, 0.34 + thread + yarn + n));
           const r = base.r + (accent.r - base.r) * (1 - t);
           const g = base.g + (accent.g - base.g) * (1 - t);
           const b = base.b + (accent.b - base.b) * (1 - t);
           setPixel(cImg, x, y, r, g, b);
-          const rough = 140 + weave * 90;
+          const rough = 105 + thread * 130 + n * 50;
           setPixel(rImg, x, y, rough, rough, rough);
         }
       }
     },
-    [3, 3],
+    [6, 6],
   );
 }
 
