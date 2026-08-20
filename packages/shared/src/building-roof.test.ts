@@ -7,6 +7,7 @@ import {
   peakRidges,
   resolvedBuildingRoof,
   roofHeightMm,
+  sampleRoofMeshHeightMm,
   tessellatePitchedRoof,
 } from "./building-roof";
 import type { PointMm } from "./design-model";
@@ -117,6 +118,14 @@ describe("building roof", () => {
       pitch12,
       rise,
       outline,
+    );
+    const mesh = tessellatePitchedRoof(outline, ridges, pitch12, 280);
+    const meshHip = sampleRoofMeshHeightMm(mesh, { x: 200, y: 4000 });
+    const meshRidge = sampleRoofMeshHeightMm(mesh, { x: 6000, y: 4000 });
+    assert.ok(meshRidge != null && meshRidge > 1500, `mesh ridge ${meshRidge}`);
+    assert.ok(
+      meshHip != null && meshHip < meshRidge * 0.4,
+      `mesh hip end ${meshHip} vs ridge ${meshRidge}`,
     );
     assert.ok(atRidge > 1500);
     assert.ok(atEnd < atRidge * 0.35, `hip end ${atEnd} vs ridge ${atRidge}`);
@@ -235,6 +244,21 @@ describe("building roof", () => {
     const peak = mesh.vertices.reduce((m, v) => Math.max(m, v.hMm), 0);
     assert.ok(peak > 500);
     assert.ok(mesh.gables.length > 0, "gable infill along the ends");
+    const atRidge = sampleRoofMeshHeightMm(mesh, { x: 5000, y: 3500 });
+    assert.ok(
+      atRidge != null && atRidge > mesh.riseMm * 0.85,
+      `ridge sample ${atRidge} vs rise ${mesh.riseMm}`,
+    );
+    const atEave = sampleRoofMeshHeightMm(mesh, { x: 5000, y: 0 });
+    assert.ok(
+      atEave != null && atEave < mesh.riseMm * 0.2,
+      `eave sample ${atEave}`,
+    );
+    const atFace = sampleRoofMeshHeightMm(mesh, { x: 5000, y: 1750 });
+    assert.ok(
+      atFace != null && atFace > mesh.riseMm * 0.25 && atFace < mesh.riseMm * 0.85,
+      `face should slope, got ${atFace} vs rise ${mesh.riseMm}`,
+    );
   });
 
   it("resolved pitched roof auto-fills a gable ridge", () => {

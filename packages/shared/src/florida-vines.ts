@@ -15,6 +15,16 @@ export type VineGroup =
   | "tropical"
   | "foliage";
 
+/** Stylized 3D bloom — not photo-real, but readable as that flower. */
+export type VineBloomShape =
+  | "bract"
+  | "star"
+  | "trumpet"
+  | "passion"
+  | "cluster"
+  | "saucer"
+  | "none";
+
 export type FloridaVine = {
   id: string;
   name: string;
@@ -594,6 +604,34 @@ export function resolveVineId(id?: string | null): string {
 export function getFloridaVine(id?: string | null): FloridaVine {
   const resolved = resolveVineId(id);
   return FLORIDA_VINES.find((v) => v.id === resolved)!;
+}
+
+export function vineBloomShape(vine: FloridaVine): VineBloomShape {
+  if (vine.flowerSize < 0.35 || vine.group === "foliage") return "none";
+  if (vine.group === "bougainvillea") return "bract";
+  if (vine.group === "passionflower") return "passion";
+  const id = vine.id;
+  if (
+    id.includes("trumpet") ||
+    id.includes("honeysuckle") ||
+    id.includes("crossvine") ||
+    id.includes("jessamine") ||
+    id.includes("mandevilla") ||
+    id.includes("allamanda") ||
+    id.includes("cape_honeysuckle") ||
+    id.includes("madagascar_jasmine")
+  ) {
+    return "trumpet";
+  }
+  if (
+    id.includes("moonflower") ||
+    id.includes("dawn") ||
+    id.includes("thunbergia")
+  ) {
+    return "saucer";
+  }
+  if (vine.group === "jasmine") return "star";
+  return "cluster";
 }
 
 export function vinesInGroup(group: VineGroup): FloridaVine[] {

@@ -17,6 +17,7 @@ import {
   isTrellisId,
   resolvePersonOutfitId,
   resolvePersonSex,
+  vineBloomShape,
   vineCssColor,
 } from "@pool-design/shared";
 import { PersonMesh } from "@/lib/cad3d/PersonMesh";
@@ -952,6 +953,100 @@ function mulberry32(seed: number) {
   };
 }
 
+function mergeGeoms(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (const g of parts) {
+    const p = g.getAttribute("position");
+    const base = pos.length / 3;
+    for (let i = 0; i < p.count; i++) {
+      pos.push(p.getX(i), p.getY(i), p.getZ(i));
+    }
+    const index = g.getIndex();
+    if (index) {
+      for (let i = 0; i < index.count; i++) idx.push(index.getX(i) + base);
+    } else {
+      for (let i = 0; i < p.count; i++) idx.push(base + i);
+    }
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  out.setIndex(idx);
+  out.computeVertexNormals();
+  return out;
+}
+
+function flowerGeometry(shape: ReturnType<typeof vineBloomShape>): THREE.BufferGeometry {
+  if (shape === "bract") {
+    const parts: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < 3; i++) {
+      const c = new THREE.ConeGeometry(0.028, 0.052, 4);
+      c.rotateX(Math.PI / 2);
+      c.translate(0, 0, 0.018);
+      c.rotateY((i * Math.PI * 2) / 3);
+      c.rotateX(-0.5);
+      parts.push(c);
+    }
+    return mergeGeoms(parts);
+  }
+  if (shape === "star") {
+    const petal = new THREE.ConeGeometry(0.03, 0.012, 5);
+    petal.rotateX(Math.PI);
+    const bud = new THREE.SphereGeometry(0.008, 6, 4);
+    bud.translate(0, 0.006, 0);
+    return mergeGeoms([petal, bud]);
+  }
+  if (shape === "trumpet") {
+    const bell = new THREE.ConeGeometry(0.026, 0.05, 6);
+    bell.rotateX(Math.PI / 2);
+    bell.translate(0, 0, 0.02);
+    const tube = new THREE.CylinderGeometry(0.006, 0.009, 0.028, 6);
+    tube.rotateX(Math.PI / 2);
+    tube.translate(0, 0, -0.012);
+    return mergeGeoms([bell, tube]);
+  }
+  if (shape === "passion") {
+    const disc = new THREE.CylinderGeometry(0.03, 0.03, 0.004, 12);
+    const rim = new THREE.TorusGeometry(0.02, 0.004, 5, 12);
+    rim.rotateX(Math.PI / 2);
+    const rays: THREE.BufferGeometry[] = [disc, rim];
+    for (let i = 0; i < 5; i++) {
+      const ray = new THREE.BoxGeometry(0.004, 0.028, 0.003);
+      ray.translate(0, 0.02, 0);
+      ray.rotateZ((i * Math.PI * 2) / 5);
+      rays.push(ray);
+    }
+    return mergeGeoms(rays);
+  }
+  if (shape === "saucer") {
+    const g = new THREE.SphereGeometry(
+      0.032,
+      8,
+      6,
+      0,
+      Math.PI * 2,
+      0,
+      Math.PI / 2,
+    );
+    g.scale(1, 0.35, 1);
+    return g;
+  }
+  const parts: THREE.BufferGeometry[] = [];
+  const offs = [
+    [0, 0, 0],
+    [0.018, 0.006, 0.008],
+    [-0.014, 0.008, -0.006],
+    [0.004, -0.01, 0.012],
+  ];
+  for (const o of offs) {
+    const s = new THREE.SphereGeometry(0.012, 6, 5);
+    s.translate(o[0], o[1], o[2]);
+    parts.push(s);
+  }
+  return mergeGeoms(parts);
+}
+
 function TrellisFoliage({
   width,
   height,
@@ -968,46 +1063,143 @@ function TrellisFoliage({
   selected: boolean;
 }) {
   const vine = getFloridaVine(vineId);
-  const leafN = Math.max(24, Math.round(90 * vine.leafDensity * Math.max(0.4, width)));
+  const bloom = vineBloomShape(vine);
+  const leafN = Math.max(
+    48,
+    Math.round(170 * vine.leafDensity * Math.max(0.4, width)),
+  );
   const flowerN =
-    vine.flowerSize < 0.35
-      ? 4
-      : Math.max(10, Math.round(42 * vine.flowerSize * Math.max(0.4, width)));
+    bloom === "none"
+      ? 0
+      : Math.max(18, Math.round(64 * vine.flowerSize * Math.max(0.4, width)));
   const leafRef = useRef<THREE.InstancedMesh>(null);
   const flowerRef = useRef<THREE.InstancedMesh>(null);
+  const leafGeo = useMemo(() => {
+    const g = new THREE.SphereGeometry(0.046, 7, 5);
+    g.scale(1, 0.22, 0.62);
+    return g;
+  }, []);
+  const flowerGeo = useMemo(
+    () => (bloom === "none" ? null : flowerGeometry(bloom)),
+    [bloom],
+  );
+  const stems = useMemo(() => {
+    const n = 6;
+    const phase = (hashStr(vine.id) % 50) / 8;
+    const paths: Array<Array<[number, number, number]>> = [];
+    for (let i = 0; i < n; i++) {
+      const pts: Array<[number, number, number]> = [];
+      const x0 = ((i + 0.5) / n - 0.5) * width * 0.82;
+      const steps = 8;
+      for (let k = 0; k <= steps; k++) {
+        const t = k / steps;
+        pts.push([
+          x0 + Math.sin(t * 5.2 + i * 1.1 + phase) * width * 0.07,
+          -height * 0.5 + t * height,
+          centerZ + Math.sin(t * 3.4 + i * 0.8 + phase) * depth * 0.55,
+        ]);
+      }
+      paths.push(pts);
+    }
+    return { paths };
+  }, [centerZ, depth, height, vine.id, width]);
 
   useLayoutEffect(() => {
     const dummy = new THREE.Object3D();
     const rng = mulberry32(hashStr(vine.id) ^ Math.round(width * 100));
-    const scatter = (mesh: THREE.InstancedMesh | null, n: number, scale: number) => {
-      if (!mesh) return;
+    const yMin = -height * 0.5 + 0.03;
+    const ySpan = Math.max(0.08, height - 0.06);
+    const place = (
+      mesh: THREE.InstancedMesh | null,
+      n: number,
+      scale: number,
+      leaf: boolean,
+    ) => {
+      if (!mesh || n <= 0) return;
       for (let i = 0; i < n; i++) {
         dummy.position.set(
-          (rng() - 0.5) * width * 0.92,
-          (rng() - 0.08) * height * 0.92,
+          (rng() - 0.5) * width * 0.9,
+          yMin + rng() * ySpan,
           centerZ + (rng() - 0.5) * depth,
         );
-        dummy.rotation.set(rng() * 1.2, rng() * Math.PI * 2, rng() * 0.8);
-        dummy.scale.setScalar(scale * (0.65 + rng() * 0.7));
+        dummy.rotation.set(
+          (rng() - 0.5) * (leaf ? 1.4 : 0.9),
+          rng() * Math.PI * 2,
+          (rng() - 0.5) * 0.8,
+        );
+        const s = scale * (0.7 + rng() * 0.65);
+        dummy.scale.set(s, leaf ? s : s, s);
         dummy.updateMatrix();
         mesh.setMatrixAt(i, dummy.matrix);
       }
       mesh.instanceMatrix.needsUpdate = true;
     };
-    scatter(leafRef.current, leafN, 1);
-    scatter(flowerRef.current, flowerN, vine.flowerSize);
-  }, [centerZ, depth, flowerN, height, leafN, vine.flowerSize, vine.id, width]);
+    place(leafRef.current, leafN, 1, true);
+    place(flowerRef.current, flowerN, Math.max(0.85, vine.flowerSize), false);
+  }, [
+    centerZ,
+    depth,
+    flowerN,
+    height,
+    leafN,
+    vine.flowerSize,
+    vine.id,
+    width,
+  ]);
+
+  const stemColor = vineCssColor({
+    r: Math.max(20, vine.foliage.r - 18),
+    g: Math.max(28, vine.foliage.g - 22),
+    b: Math.max(16, vine.foliage.b - 16),
+  });
 
   return (
     <group>
-      <instancedMesh ref={leafRef} args={[undefined, undefined, leafN]} castShadow>
-        <sphereGeometry args={[0.055, 8, 6]} />
-        <Mat color={vineCssColor(vine.foliage)} roughness={0.92} selected={selected} />
+      {stems.paths.flatMap((path, pi) =>
+        path.slice(0, -1).map((a, k) => {
+          const b = path[k + 1]!;
+          const dx = b[0] - a[0];
+          const dy = b[1] - a[1];
+          const dz = b[2] - a[2];
+          const len = Math.hypot(dx, dy, dz);
+          if (len < 1e-4) return null;
+          const quat = new THREE.Quaternion().setFromUnitVectors(
+            new THREE.Vector3(0, 1, 0),
+            new THREE.Vector3(dx / len, dy / len, dz / len),
+          );
+          const r = 0.007 + (1 - k / path.length) * 0.006;
+          return (
+            <mesh
+              key={`stem-${pi}-${k}`}
+              position={[(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]}
+              quaternion={quat}
+            >
+              <cylinderGeometry args={[r * 0.82, r, len, 5]} />
+              <Mat color={stemColor} roughness={0.92} selected={selected} />
+            </mesh>
+          );
+        }),
+      )}
+      <instancedMesh
+        ref={leafRef}
+        args={[leafGeo, undefined, leafN]}
+        castShadow
+      >
+        <Mat color={vineCssColor(vine.foliage)} roughness={0.9} selected={selected} />
       </instancedMesh>
-      <instancedMesh ref={flowerRef} args={[undefined, undefined, flowerN]} castShadow>
-        <sphereGeometry args={[0.032, 8, 6]} />
-        <Mat color={vineCssColor(vine.flower)} roughness={0.7} selected={selected} />
-      </instancedMesh>
+      {flowerN > 0 && flowerGeo ? (
+        <instancedMesh
+          ref={flowerRef}
+          args={[flowerGeo, undefined, flowerN]}
+          castShadow
+        >
+          <Mat
+            color={vineCssColor(vine.flower)}
+            roughness={0.62}
+            selected={selected}
+          />
+        </instancedMesh>
+      ) : null}
     </group>
   );
 }

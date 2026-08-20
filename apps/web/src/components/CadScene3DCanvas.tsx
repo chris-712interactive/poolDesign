@@ -526,6 +526,7 @@ function SelectableMaterial({
       map={pair?.color}
       roughnessMap={pair?.roughness}
       normalMap={normalMap}
+      flatShading={material === "roof"}
       roughness={mat.roughness}
       metalness={roofPair?.metalness ?? mat.metalness}
       transparent={transparent}

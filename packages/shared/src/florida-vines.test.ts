@@ -7,6 +7,7 @@ import {
   getFloridaVine,
   isTrellisId,
   resolveVineId,
+  vineBloomShape,
   vinesInGroup,
 } from "./florida-vines";
 
@@ -32,5 +33,13 @@ describe("florida vines", () => {
     assert.equal(isTrellisId("planter"), false);
     assert.equal(defaultVineId("trellis"), DEFAULT_VINE_ID);
     assert.equal(defaultVineId("lounge_chair"), undefined);
+  });
+
+  it("picks a bloom shape that matches the vine", () => {
+    assert.equal(vineBloomShape(getFloridaVine("bougainvillea_magenta")), "bract");
+    assert.equal(vineBloomShape(getFloridaVine("confederate_jasmine")), "star");
+    assert.equal(vineBloomShape(getFloridaVine("mandevilla_pink")), "trumpet");
+    assert.equal(vineBloomShape(getFloridaVine("maypop")), "passion");
+    assert.equal(vineBloomShape(getFloridaVine("creeping_fig")), "none");
   });
 });
