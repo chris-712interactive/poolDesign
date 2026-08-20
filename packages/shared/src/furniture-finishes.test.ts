@@ -35,6 +35,12 @@ describe("furniture finishes", () => {
       fabric: false,
       canopy: true,
     });
+    assert.deepEqual(furnitureFinishRoles("trellis"), {
+      frame: true,
+      fabric: false,
+      canopy: false,
+    });
+    assert.equal(defaultFrameFinishId("trellis_arbor"), "wood_cedar");
     assert.deepEqual(furnitureFinishRoles("person_scale"), {
       frame: false,
       fabric: false,

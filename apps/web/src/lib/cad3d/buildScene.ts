@@ -207,6 +207,8 @@ export type BoxDescriptor = {
   frameFinishId?: string;
   /** Furniture cushion / canopy finish id. */
   fabricFinishId?: string;
+  /** Florida vine on a trellis / arbor. */
+  vineId?: string;
   /** Optional solid color override (e.g. fence powder coat). */
   colorHex?: string;
   /**
@@ -4417,6 +4419,7 @@ export function buildSceneModel(
       catalogItemId: obj.catalogItemId,
       frameFinishId: obj.frameFinishId,
       fabricFinishId: obj.fabricFinishId,
+      vineId: obj.vineId,
       ...(bubblerWaterY != null ? { waterSurfaceY: bubblerWaterY } : {}),
       ...(isBubbler ? { hasLedLight: obj.hasLedLight === true } : {}),
       ...(obj.catalogItemId === "person_scale"

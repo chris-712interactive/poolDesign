@@ -75,6 +75,8 @@ import {
   diningSetCatalogId,
   diningTableShape,
   furnitureFinishRoles,
+  defaultVineId,
+  isTrellisId,
   getPlaceableItem,
   isBubblerId,
   isDiningSetId,
@@ -218,6 +220,7 @@ import { FenceFinishPicker } from "@/components/FenceFinishPicker";
 import { HouseFinishPicker } from "@/components/HouseFinishPicker";
 import { RoofFinishPicker } from "@/components/RoofFinishPicker";
 import { FurnitureFinishPicker } from "@/components/FurnitureFinishPicker";
+import { VinePicker } from "@/components/VinePicker";
 import { PatioFinishPicker } from "@/components/PatioFinishPicker";
 import { WaterlineTilePicker } from "@/components/WaterlineTilePicker";
 import {
@@ -3881,7 +3884,7 @@ export function CadWorkspace({
             }. Edit story/size in Properties; drag to slide along the wall.`
         : tool === "roof_ridge"
           ? draftPoints.length === 0
-            ? "Roof ridge: click the first peak, then the second. Run it to the walls for a gable, or stop short for a hip. Select the house first if you have more than one."
+            ? "Roof ridge: draw peak lines only (not hips or eaves). Run a ridge to the walls for a gable, or stop short for a hip. Select the house first if you have more than one."
             : "Click the other end of the ridge (Shift = 90°). Type length + Enter for an exact run."
           : tool === "cover_rect"
           ? draftPoints.length === 0
@@ -5509,8 +5512,9 @@ export function CadWorkspace({
                       Use 2+ for multi-story homes — floors and ceilings are
                       added between stories. Siding and paint can differ per
                       story. Default ceiling height is 8′ (adjust for taller
-                      rooms). Draw ridge lines on plan for a gable (ridge to
-                      the walls) or hip (ridge short of the ends).
+                      rooms). Draw peak / ridge lines only — not hips or
+                      eaves. Run a ridge to the walls for a gable, or stop
+                      short of the ends for a hip.
                       {(selectedBuilding.openings ?? []).length > 0
                         ? ` ${(selectedBuilding.openings ?? []).length} opening(s) on walls — select an opening to edit size.`
                         : " Use the Door / window tool to click openings onto walls."}
@@ -6180,7 +6184,7 @@ export function CadWorkspace({
                 )}
                 {selectedObject && (
                   <FurnitureFields
-                    key={`${selectedObject.id}-${selectedObject.catalogItemId}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.heightMm}-${selectedObject.rotationDeg}-${selectedObject.frameFinishId}-${selectedObject.fabricFinishId}-${selectedObject.hasLedLight}-${selectedObject.personSex}-${selectedObject.personOutfitId}`}
+                    key={`${selectedObject.id}-${selectedObject.catalogItemId}-${selectedObject.widthMm}-${selectedObject.depthMm}-${selectedObject.heightMm}-${selectedObject.rotationDeg}-${selectedObject.frameFinishId}-${selectedObject.fabricFinishId}-${selectedObject.vineId}-${selectedObject.hasLedLight}-${selectedObject.personSex}-${selectedObject.personOutfitId}`}
                     object={selectedObject}
                     unitSystem={unitSystem}
                     onRotate={(deg) => {
@@ -8106,6 +8110,7 @@ function FurnitureFields({
   onFinishChange?: (patch: {
     frameFinishId?: string;
     fabricFinishId?: string;
+    vineId?: string;
   }) => void;
   onLedChange?: (hasLedLight: boolean) => void;
   onPersonChange?: (patch: {
@@ -8133,6 +8138,12 @@ function FurnitureFields({
   return (
     <div className="stack">
       <strong>{object.name}</strong>
+      {isTrellisId(object.catalogItemId) && (
+        <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
+          Place anywhere on the plan. R rotates 15°. Lattice frame finish and
+          Florida vine variety are below.
+        </p>
+      )}
       {isPerson && onPersonChange && (
         <>
           <div className="field">
@@ -8207,6 +8218,12 @@ function FurnitureFields({
           fabricFinishId={object.fabricFinishId}
           onFrameChange={(frameFinishId) => onFinishChange({ frameFinishId })}
           onFabricChange={(fabricFinishId) => onFinishChange({ fabricFinishId })}
+        />
+      )}
+      {isTrellisId(object.catalogItemId) && onFinishChange && (
+        <VinePicker
+          vineId={object.vineId}
+          onChange={(vineId) => onFinishChange({ vineId })}
         />
       )}
       {bubbler && onLedChange && (
@@ -8394,6 +8411,7 @@ function placeLibraryItem(
     parentBodyId,
     frameFinishId: defaultFrameFinishId(item.id),
     fabricFinishId: defaultFabricFinishId(item.id),
+    vineId: defaultVineId(item.id),
     ...(isPerson
       ? {
           personSex,

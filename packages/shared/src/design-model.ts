@@ -438,6 +438,10 @@ export type PlacedObject = {
    */
   fabricFinishId?: string;
   /**
+   * Florida vine variety on a trellis / arbor (see florida-vines).
+   */
+  vineId?: string;
+  /**
    * Bubbler option: niche LED under the fountain (affects estimate).
    * Only meaningful for spa_bubbler / pool_bubbler.
    */

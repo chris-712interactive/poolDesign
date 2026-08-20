@@ -96,6 +96,7 @@ import {
   getFurnitureFinish,
   isFurnitureFinishId,
 } from "./furniture-finishes";
+import { defaultVineId, isTrellisId, resolveVineId } from "./florida-vines";
 import {
   isFenceFinishId,
   resolveFenceFinish,
@@ -289,6 +290,10 @@ export function normalizeDesignDocument(
         fabricFinishId = undefined;
       }
 
+      const vineId = isTrellisId(catalogItemId)
+        ? resolveVineId(o.vineId ?? defaultVineId(catalogItemId))
+        : undefined;
+
       const isBubbler =
         catalogItemId === "spa_bubbler" || catalogItemId === "pool_bubbler";
       const isPerson = catalogItemId === "person_scale";
@@ -344,6 +349,7 @@ export function normalizeDesignDocument(
         parentBodyId,
         frameFinishId,
         fabricFinishId,
+        vineId,
         heightMm,
         hasLedLight: isBubbler ? o.hasLedLight === true : undefined,
         personSex,

@@ -94,7 +94,7 @@ export const TOOL_GROUPS: {
     id: "furniture",
     realm: "land",
     label: "Furniture & yard",
-    hint: "Lounge furniture, fire pit, planters, and similar",
+    hint: "Lounge furniture, fire pit, planters, flowering trellis, and similar",
     icon: (
       <Svg>
         <path d="M5 11h14v7H5zM7 11V8a5 5 0 0 1 10 0v3" />

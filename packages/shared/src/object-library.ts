@@ -426,6 +426,32 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     unitPriceCents: 18000,
   },
   {
+    id: "trellis",
+    name: "Flowering trellis",
+    category: "hardscape",
+    widthMm: 6 * FT,
+    depthMm: 10 * IN,
+    heightMm: 7 * FT,
+    layerId: "furniture",
+    levels: ["residential", "commercial"],
+    unitPriceCents: 85000,
+    description:
+      "Freestanding lattice panel. Place anywhere, rotate to face, pick a Florida vine in Properties.",
+  },
+  {
+    id: "trellis_arbor",
+    name: "Flowering arbor",
+    category: "hardscape",
+    widthMm: 5 * FT,
+    depthMm: 3 * FT,
+    heightMm: 8 * FT,
+    layerId: "furniture",
+    levels: ["residential", "commercial"],
+    unitPriceCents: 185000,
+    description:
+      "Walk-through arbor with vines on both sides. Place anywhere on the plan.",
+  },
+  {
     id: "outdoor_kitchen",
     name: "Outdoor kitchen run",
     category: "amenity",

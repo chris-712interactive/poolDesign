@@ -1,11 +1,13 @@
 /**
- * House roof: 2D ridges → pitched 3D height field.
+ * House roof: 2D peak lines → pitched 3D planes.
  *
- * Height at a plan point is a tent off the nearest ridge segment:
- *   h = max(0, rise − (pitch12/12) · distToRidge)
+ * Height interpolates from the eaves (0) to peak ridges (rise):
+ *   h = rise · dE / (dE + dR)
  *
- * A ridge that runs to the gable walls makes a classic two-plane gable.
- * A ridge that stops short of the ends reads as a hip.
+ * That is planar on a rectangular gable. Hip lines (a segment into a
+ * footprint corner) are not treated as peaks, so roof faces don't sag.
+ * Walls that a ridge meets become gables and are omitted from the eave
+ * distance so the peak can sit on the gable wall.
  */
 
 import type { PointMm } from "./design-model";
@@ -75,7 +77,10 @@ export type RoofTessellation = {
 };
 
 const RIDGE_LEN_MIN_MM = 200;
-const GRID_STEP_MM = 420;
+const CORNER_HIT_MM = 550;
+const GABLE_EDGE_HIT_MM = 900;
+const DENSIFY_MM = 1400;
+const SPLIT_EDGE_MM = 1800;
 const GABLE_SAMPLE_MM = 380;
 const GABLE_MIN_MM = 80;
 
@@ -118,6 +123,116 @@ export function distToRidgesMm(p: PointMm, ridges: RoofRidge[]): number {
     }
   }
   return best;
+}
+
+function vertexTurnSign(ring: PointMm[], i: number): number {
+  const n = ring.length;
+  const prev = ring[(i - 1 + n) % n]!;
+  const cur = ring[i]!;
+  const next = ring[(i + 1) % n]!;
+  return (
+    (cur.x - prev.x) * (next.y - cur.y) - (cur.y - prev.y) * (next.x - cur.x)
+  );
+}
+
+/** Hip / eave traces land on convex corners, not gable mid-edges or L-valleys. */
+function isNearConvexCorner(p: PointMm, ring: PointMm[]): boolean {
+  if (ring.length < 3) return false;
+  const polySign = planSignedAreaMm2(ring) >= 0 ? 1 : -1;
+  let bestI = -1;
+  let bestD = CORNER_HIT_MM;
+  for (let i = 0; i < ring.length; i++) {
+    const v = ring[i]!;
+    const d = Math.hypot(p.x - v.x, p.y - v.y);
+    if (d < bestD) {
+      bestD = d;
+      bestI = i;
+    }
+  }
+  if (bestI < 0) return false;
+  if (vertexTurnSign(ring, bestI) * polySign < -1e-4) return false;
+  const n = ring.length;
+  const prev = ring[(bestI - 1 + n) % n]!;
+  const cur = ring[bestI]!;
+  const next = ring[(bestI + 1) % n]!;
+  const minLen = Math.min(
+    Math.hypot(cur.x - prev.x, cur.y - prev.y),
+    Math.hypot(next.x - cur.x, next.y - cur.y),
+  );
+  const zone = Math.min(CORNER_HIT_MM, Math.max(120, minLen * 0.22));
+  return bestD < zone;
+}
+
+function distToEdgesMm(
+  p: PointMm,
+  ring: PointMm[],
+  skip?: boolean[],
+): number {
+  if (ring.length < 2) return Infinity;
+  let best = Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    if (skip?.[i]) continue;
+    const d = distPointToSegmentMm(p, ring[i], ring[(i + 1) % ring.length]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/**
+ * Peak ridges only. A segment that lands on a footprint *corner* is a hip
+ * (or an eave the user traced) and must not sit at full rise — that is what
+ * caved the roof faces in.
+ */
+export function peakRidges(ridges: RoofRidge[], outline: PointMm[]): RoofRidge[] {
+  const ring = ringOf(outline);
+  if (ring.length < 3) return ridges;
+  const out: RoofRidge[] = [];
+  for (const ridge of ridges) {
+    const points: PointMm[] = [];
+    for (const p of ridge.points) {
+      if (points.length === 0) {
+        points.push(p);
+        continue;
+      }
+      const prev = points[points.length - 1]!;
+      const aCorner = isNearConvexCorner(prev, ring);
+      const bCorner = isNearConvexCorner(p, ring);
+      if (aCorner || bCorner) continue;
+      points.push(p);
+    }
+    if (points.length >= 2) out.push({ ...ridge, points });
+  }
+  return out.length ? out : ridges;
+}
+
+/** Edges a peak ridge meets — those become gable walls, not eaves. */
+export function gableEdgeMask(
+  ring: PointMm[],
+  ridges: RoofRidge[],
+): boolean[] {
+  const skip = ring.map(() => false);
+  if (ring.length < 2 || ridges.length === 0) return skip;
+  for (const ridge of ridges) {
+    for (const p of [ridge.points[0], ridge.points[ridge.points.length - 1]]) {
+      if (!p) continue;
+      if (isNearConvexCorner(p, ring)) continue;
+      let best = -1;
+      let bestD = GABLE_EDGE_HIT_MM;
+      for (let i = 0; i < ring.length; i++) {
+        const d = distPointToSegmentMm(
+          p,
+          ring[i],
+          ring[(i + 1) % ring.length],
+        );
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
+      }
+      if (best >= 0) skip[best] = true;
+    }
+  }
+  return skip;
 }
 
 function centroidOf(ring: PointMm[]): PointMm {
@@ -261,22 +376,27 @@ export function estimateRoofRiseMm(
   pitch12: number,
 ): number {
   const ring = ringOf(outline);
-  if (ring.length < 3 || ridges.length === 0) {
+  const peaks = peakRidges(ridges, ring);
+  const gables = gableEdgeMask(ring, peaks);
+  const samples: number[] = [];
+  for (const ridge of peaks) {
+    for (let i = 1; i < ridge.points.length; i++) {
+      const a = ridge.points[i - 1]!;
+      const b = ridge.points[i]!;
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      const n = Math.max(2, Math.round(len / 600));
+      for (let k = 0; k <= n; k++) {
+        const t = k / n;
+        const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+        const dE = distToEdgesMm(p, ring, gables);
+        if (Number.isFinite(dE)) samples.push(dE);
+      }
+    }
+  }
+  if (samples.length === 0) {
     const b = outlineBounds(ring.length ? ring : outline);
     const half = Math.max(b.width, b.height) * 0.5;
     return (clampRoofPitch12(pitch12) / 12) * half;
-  }
-  const samples: number[] = [];
-  for (let i = 0; i < ring.length; i++) {
-    const a = ring[i];
-    const b = ring[(i + 1) % ring.length];
-    const len = Math.hypot(b.x - a.x, b.y - a.y);
-    const n = Math.max(1, Math.round(len / 500));
-    for (let k = 0; k < n; k++) {
-      const t = (k + 0.5) / n;
-      const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-      samples.push(distToRidgesMm(p, ridges));
-    }
   }
   samples.sort((a, b) => a - b);
   const mid = samples[Math.floor(samples.length / 2)] ?? 3000;
@@ -288,11 +408,22 @@ export function roofHeightMm(
   ridges: RoofRidge[],
   pitch12: number,
   riseMm: number,
+  eave: PointMm[] = [],
+  gableEdges?: boolean[],
 ): number {
-  if (ridges.length === 0) return 0;
-  const d = distToRidgesMm(p, ridges);
-  const run = 12 / Math.max(2, pitch12);
-  return Math.max(0, riseMm - d / run);
+  const ring = eave.length >= 3 ? ringOf(eave) : [];
+  const peaks = ring.length ? peakRidges(ridges, ring) : ridges;
+  const skip = gableEdges ?? (ring.length ? gableEdgeMask(ring, peaks) : undefined);
+  const dR = distToRidgesMm(p, peaks);
+  const dE = ring.length ? distToEdgesMm(p, ring, skip) : Infinity;
+  if (!Number.isFinite(dR) && !Number.isFinite(dE)) return 0;
+  const denom = dE + dR;
+  if (denom < 8) return dR <= dE ? riseMm : 0;
+  if (!Number.isFinite(dE)) {
+    const run = 12 / Math.max(2, pitch12);
+    return Math.max(0, riseMm - dR / run);
+  }
+  return Math.max(0, riseMm * (dE / denom));
 }
 
 function eaveOutline(outline: PointMm[], overhangMm: number): PointMm[] {
@@ -302,26 +433,193 @@ function eaveOutline(outline: PointMm[], overhangMm: number): PointMm[] {
   return offset.length >= 3 ? offset : ring;
 }
 
-function addVertex(
-  list: RoofVertexMm[],
-  map: Map<string, number>,
-  p: PointMm,
-  hMm: number,
-): number {
-  const key = `${Math.round(p.x)}:${Math.round(p.y)}`;
-  const hit = map.get(key);
-  if (hit != null) {
-    if (hMm > list[hit].hMm) list[hit].hMm = hMm;
-    return hit;
+function densifyRing(ring: PointMm[], stepMm: number): PointMm[] {
+  const out: PointMm[] = [];
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i]!;
+    const b = ring[(i + 1) % ring.length]!;
+    out.push({ x: a.x, y: a.y });
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.max(1, Math.floor(len / stepMm));
+    for (let k = 1; k < n; k++) {
+      const t = k / n;
+      out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
   }
-  const i = list.length;
-  list.push({ x: p.x, y: p.y, hMm });
-  map.set(key, i);
-  return i;
+  return out.length >= 3 ? out : ring.map((p) => ({ x: p.x, y: p.y }));
+}
+
+function orientSign(ring: PointMm[]): number {
+  const a = planSignedAreaMm2(ring);
+  return a >= 0 ? 1 : -1;
+}
+
+function isConvexEar(
+  prev: PointMm,
+  cur: PointMm,
+  next: PointMm,
+  sign: number,
+): boolean {
+  const cross =
+    (cur.x - prev.x) * (next.y - cur.y) - (cur.y - prev.y) * (next.x - cur.x);
+  return cross * sign >= -1e-4;
+}
+
+function pointInTri(p: PointMm, a: PointMm, b: PointMm, c: PointMm): boolean {
+  const s = (x1: number, y1: number, x2: number, y2: number, x3: number, y3: number) =>
+    (x1 - x3) * (y2 - y3) - (x2 - x3) * (y1 - y3);
+  const d1 = s(p.x, p.y, a.x, a.y, b.x, b.y);
+  const d2 = s(p.x, p.y, b.x, b.y, c.x, c.y);
+  const d3 = s(p.x, p.y, c.x, c.y, a.x, a.y);
+  const hasNeg = d1 < -1e-4 || d2 < -1e-4 || d3 < -1e-4;
+  const hasPos = d1 > 1e-4 || d2 > 1e-4 || d3 > 1e-4;
+  return !(hasNeg && hasPos);
+}
+
+function earClip(pts: PointMm[]): number[] {
+  const n0 = pts.length;
+  if (n0 < 3) return [];
+  const sign = orientSign(pts);
+  const idx = pts.map((_, i) => i);
+  const indices: number[] = [];
+  let guard = 0;
+  while (idx.length > 3 && guard++ < n0 * n0 + 8) {
+    let clipped = false;
+    for (let i = 0; i < idx.length; i++) {
+      const i0 = idx[(i - 1 + idx.length) % idx.length]!;
+      const i1 = idx[i]!;
+      const i2 = idx[(i + 1) % idx.length]!;
+      const a = pts[i0]!;
+      const b = pts[i1]!;
+      const c = pts[i2]!;
+      if (!isConvexEar(a, b, c, sign)) continue;
+      let empty = true;
+      for (const j of idx) {
+        if (j === i0 || j === i1 || j === i2) continue;
+        if (pointInTri(pts[j]!, a, b, c)) {
+          empty = false;
+          break;
+        }
+      }
+      if (!empty) continue;
+      indices.push(i0, i1, i2);
+      idx.splice(i, 1);
+      clipped = true;
+      break;
+    }
+    if (!clipped) break;
+  }
+  if (idx.length === 3) indices.push(idx[0]!, idx[1]!, idx[2]!);
+  else if (idx.length > 3) {
+    for (let i = 1; i < idx.length - 1; i++) {
+      indices.push(idx[0]!, idx[i]!, idx[i + 1]!);
+    }
+  }
+  return indices;
+}
+
+function splitLongEdges(
+  pts: PointMm[],
+  indices: number[],
+  maxEdgeMm: number,
+): { pts: PointMm[]; indices: number[] } {
+  let verts = pts.map((p) => ({ x: p.x, y: p.y }));
+  let tris = indices.slice();
+  const key = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+  for (let pass = 0; pass < 8; pass++) {
+    const mid = new Map<string, number>();
+    const next: number[] = [];
+    let split = false;
+    const midpoint = (ia: number, ib: number) => {
+      const k = key(ia, ib);
+      const hit = mid.get(k);
+      if (hit != null) return hit;
+      const a = verts[ia]!;
+      const b = verts[ib]!;
+      const i = verts.length;
+      verts.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      mid.set(k, i);
+      return i;
+    };
+    for (let t = 0; t < tris.length; t += 3) {
+      const ia = tris[t]!;
+      const ib = tris[t + 1]!;
+      const ic = tris[t + 2]!;
+      const a = verts[ia]!;
+      const b = verts[ib]!;
+      const c = verts[ic]!;
+      const ab = Math.hypot(b.x - a.x, b.y - a.y);
+      const bc = Math.hypot(c.x - b.x, c.y - b.y);
+      const ca = Math.hypot(a.x - c.x, a.y - c.y);
+      const longAb = ab > maxEdgeMm;
+      const longBc = bc > maxEdgeMm;
+      const longCa = ca > maxEdgeMm;
+      const n = (longAb ? 1 : 0) + (longBc ? 1 : 0) + (longCa ? 1 : 0);
+      if (n === 0) {
+        next.push(ia, ib, ic);
+        continue;
+      }
+      split = true;
+      if (n === 1) {
+        if (longAb) {
+          const m = midpoint(ia, ib);
+          next.push(ia, m, ic, m, ib, ic);
+        } else if (longBc) {
+          const m = midpoint(ib, ic);
+          next.push(ia, ib, m, ia, m, ic);
+        } else {
+          const m = midpoint(ic, ia);
+          next.push(ia, ib, m, m, ib, ic);
+        }
+      } else {
+        const mab = midpoint(ia, ib);
+        const mbc = midpoint(ib, ic);
+        const mca = midpoint(ic, ia);
+        next.push(ia, mab, mca, mab, ib, mbc, mca, mbc, ic, mab, mbc, mca);
+      }
+    }
+    tris = next;
+    if (!split) break;
+  }
+  return { pts: verts, indices: tris };
+}
+
+function insertSteiner(
+  pts: PointMm[],
+  indices: number[],
+  extra: PointMm[],
+): { pts: PointMm[]; indices: number[] } {
+  let verts = pts.map((p) => ({ x: p.x, y: p.y }));
+  let tris = indices.slice();
+  const ring = pts;
+  for (const p of extra) {
+    if (verts.some((v) => Math.hypot(v.x - p.x, v.y - p.y) < 40)) continue;
+    if (!pointInPolygon(p, ring)) continue;
+    let found = -1;
+    for (let t = 0; t < tris.length; t += 3) {
+      const a = verts[tris[t]!]!;
+      const b = verts[tris[t + 1]!]!;
+      const c = verts[tris[t + 2]!]!;
+      if (pointInTri(p, a, b, c)) {
+        found = t;
+        break;
+      }
+    }
+    if (found < 0) continue;
+    const ia = tris[found]!;
+    const ib = tris[found + 1]!;
+    const ic = tris[found + 2]!;
+    const ip = verts.length;
+    verts.push({ x: p.x, y: p.y });
+    const next = tris.slice(0, found).concat(tris.slice(found + 3));
+    next.push(ia, ib, ip, ib, ic, ip, ic, ia, ip);
+    tris = next;
+  }
+  return { pts: verts, indices: tris };
 }
 
 /**
- * Tessellate the eave polygon on a plan grid and lift vertices by ridge distance.
+ * Triangulate the eave polygon and lift vertices from eaves up to peak ridges.
  */
 export function tessellatePitchedRoof(
   outline: PointMm[],
@@ -337,71 +635,63 @@ export function tessellatePitchedRoof(
   };
   const eave = eaveOutline(outline, overhangMm);
   if (eave.length < 3 || ridges.length === 0) return empty;
-  const riseMm = estimateRoofRiseMm(eave, ridges, pitch12);
-  const bb = outlineBounds(eave);
-  const pad = 20;
-  const x0 = bb.minX - pad;
-  const y0 = bb.minY - pad;
-  const x1 = bb.maxX + pad;
-  const y1 = bb.maxY + pad;
-  const cols = Math.max(2, Math.ceil((x1 - x0) / GRID_STEP_MM) + 1);
-  const rows = Math.max(2, Math.ceil((y1 - y0) / GRID_STEP_MM) + 1);
-  const stepX = (x1 - x0) / (cols - 1);
-  const stepY = (y1 - y0) / (rows - 1);
+  const peaks = peakRidges(ridges, eave);
+  const gablesSkip = gableEdgeMask(eave, peaks);
+  const riseMm = estimateRoofRiseMm(eave, peaks, pitch12);
 
-  const vertices: RoofVertexMm[] = [];
-  const map = new Map<string, number>();
-  const grid: number[][] = [];
-  const inside: boolean[][] = [];
-  for (let j = 0; j < rows; j++) {
-    grid[j] = [];
-    inside[j] = [];
-    for (let i = 0; i < cols; i++) {
-      const p = { x: x0 + i * stepX, y: y0 + j * stepY };
-      const on = pointInPolygon(p, eave);
-      inside[j][i] = on;
-      const h = on ? roofHeightMm(p, ridges, pitch12, riseMm) : 0;
-      grid[j][i] = addVertex(vertices, map, p, h);
+  let ring = densifyRing(eave, DENSIFY_MM);
+  let indices = earClip(ring);
+  if (indices.length < 3) return empty;
+
+  const steiner: PointMm[] = [];
+  for (const ridge of peaks) {
+    for (let i = 0; i < ridge.points.length; i++) {
+      steiner.push(ridge.points[i]!);
+      if (i > 0) {
+        const a = ridge.points[i - 1]!;
+        const b = ridge.points[i]!;
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        const n = Math.max(1, Math.round(len / DENSIFY_MM));
+        for (let k = 1; k < n; k++) {
+          const t = k / n;
+          steiner.push({
+            x: a.x + (b.x - a.x) * t,
+            y: a.y + (b.y - a.y) * t,
+          });
+        }
+      }
     }
   }
+  const withRidge = insertSteiner(ring, indices, steiner);
+  ring = withRidge.pts;
+  indices = withRidge.indices;
+  const split = splitLongEdges(ring, indices, SPLIT_EDGE_MM);
+  ring = split.pts;
+  indices = split.indices;
 
-  const indices: number[] = [];
-  const pushTri = (a: number, b: number, c: number, flip: boolean) => {
-    if (a === b || b === c || c === a) return;
-    if (flip) indices.push(a, c, b);
-    else indices.push(a, b, c);
-  };
+  const heightAt = (p: PointMm) =>
+    roofHeightMm(p, peaks, pitch12, riseMm, eave, gablesSkip);
+  const vertices: RoofVertexMm[] = ring.map((p) => ({
+    x: p.x,
+    y: p.y,
+    hMm: heightAt(p),
+  }));
+
   const area = planSignedAreaMm2(eave);
-  const flip = area >= 0;
-  for (let j = 0; j < rows - 1; j++) {
-    for (let i = 0; i < cols - 1; i++) {
-      const c00 = inside[j][i];
-      const c10 = inside[j][i + 1];
-      const c01 = inside[j + 1][i];
-      const c11 = inside[j + 1][i + 1];
-      const count = (c00 ? 1 : 0) + (c10 ? 1 : 0) + (c01 ? 1 : 0) + (c11 ? 1 : 0);
-      if (count < 3) continue;
-      const a = grid[j][i];
-      const b = grid[j][i + 1];
-      const c = grid[j + 1][i];
-      const d = grid[j + 1][i + 1];
-      if (count === 4) {
-        pushTri(a, b, c, flip);
-        pushTri(b, d, c, flip);
-      } else {
-        if (c00 && c10 && c01) pushTri(a, b, c, flip);
-        if (c10 && c11 && c01) pushTri(b, d, c, flip);
-        if (c00 && c10 && c11) pushTri(a, b, d, flip);
-        if (c00 && c11 && c01) pushTri(a, d, c, flip);
-      }
+  if (area >= 0) {
+    for (let i = 0; i < indices.length; i += 3) {
+      const t = indices[i + 1]!;
+      indices[i + 1] = indices[i + 2]!;
+      indices[i + 2] = t;
     }
   }
 
   const footprint = ringOf(outline);
-  const gables: RoofTessellation["gables"] = [];
+  const footSkip = gableEdgeMask(footprint, peaks);
+  const gableStrips: RoofTessellation["gables"] = [];
   for (let i = 0; i < footprint.length; i++) {
-    const a = footprint[i];
-    const bpt = footprint[(i + 1) % footprint.length];
+    const a = footprint[i]!;
+    const bpt = footprint[(i + 1) % footprint.length]!;
     const len = Math.hypot(bpt.x - a.x, bpt.y - a.y);
     if (len < 80) continue;
     const n = Math.max(2, Math.ceil(len / GABLE_SAMPLE_MM));
@@ -409,18 +699,15 @@ export function tessellatePitchedRoof(
     for (let k = 0; k <= n; k++) {
       const t = k / n;
       const p = { x: a.x + (bpt.x - a.x) * t, y: a.y + (bpt.y - a.y) * t };
-      samples.push({
-        p,
-        h: roofHeightMm(p, ridges, pitch12, riseMm),
-      });
+      samples.push({ p, h: heightAt(p) });
     }
     const maxH = samples.reduce((m, s) => Math.max(m, s.h), 0);
-    if (maxH < GABLE_MIN_MM) continue;
+    if (!footSkip[i] || maxH < GABLE_MIN_MM) continue;
     for (let k = 0; k < samples.length - 1; k++) {
-      const s0 = samples[k];
-      const s1 = samples[k + 1];
+      const s0 = samples[k]!;
+      const s1 = samples[k + 1]!;
       if (s0.h < 12 && s1.h < 12) continue;
-      gables.push({
+      gableStrips.push({
         a: s0.p,
         b: s1.p,
         haMm: s0.h,
@@ -429,7 +716,7 @@ export function tessellatePitchedRoof(
     }
   }
 
-  return { vertices, indices, gables, riseMm };
+  return { vertices, indices, gables: gableStrips, riseMm };
 }
 
 export function withBuildingRoof<T extends { roof?: BuildingRoof | null }>(

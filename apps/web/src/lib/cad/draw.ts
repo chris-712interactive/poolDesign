@@ -21,6 +21,10 @@ import {
   siteLineEdgeTag,
   siteLineSegments,
   bearingToUnitVector,
+  getFloridaVine,
+  isTrellisId,
+  vineCssColor,
+  vineDisplayName,
   type Building,
   type BuildingOpening,
   type FenceGate,
@@ -988,6 +992,68 @@ export function drawPlacedObject(
       ctx.fillStyle = "rgba(20,32,41,0.8)";
       ctx.font = "10px Source Sans 3, sans-serif";
       ctx.fillText(obj.name, center.x + r + 3, center.y + 3);
+    }
+    return;
+  }
+
+  if (isTrellisId(obj.catalogItemId)) {
+    const vine = getFloridaVine(obj.vineId);
+    const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
+    const w = obj.widthMm * vp.scale;
+    const d = Math.max(obj.depthMm * vp.scale, 6);
+    const arbor = obj.catalogItemId === "trellis_arbor";
+    ctx.save();
+    ctx.translate(center.x, center.y);
+    ctx.rotate(rad);
+    if (preview) ctx.setLineDash([5, 4]);
+    const flower = vineCssColor(vine.flower);
+    const leaf = vineCssColor(vine.foliage);
+    ctx.fillStyle = selected || preview
+      ? leaf.replace("rgb(", "rgba(").replace(")", ",0.42)")
+      : leaf.replace("rgb(", "rgba(").replace(")", ",0.28)");
+    ctx.strokeStyle = selected || preview ? "#4a3a22" : "#6a5438";
+    ctx.lineWidth = selected ? 2.2 : 1.4;
+    ctx.beginPath();
+    ctx.rect(-w / 2, -d / 2, w, d);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = flower;
+    ctx.lineWidth = 1.1;
+    const innerW = w * 0.82;
+    const innerD = d * 0.55;
+    for (let i = 0; i <= 4; i++) {
+      const x = -innerW / 2 + (i / 4) * innerW;
+      ctx.beginPath();
+      ctx.moveTo(x, -innerD / 2);
+      ctx.lineTo(x, innerD / 2);
+      ctx.stroke();
+    }
+    for (let i = 0; i <= (arbor ? 3 : 2); i++) {
+      const y = -innerD / 2 + (i / (arbor ? 3 : 2)) * innerD;
+      ctx.beginPath();
+      ctx.moveTo(-innerW / 2, y);
+      ctx.lineTo(innerW / 2, y);
+      ctx.stroke();
+    }
+    ctx.fillStyle = flower;
+    ctx.globalAlpha = 0.85;
+    for (let i = 0; i < 5; i++) {
+      const x = -innerW * 0.35 + i * innerW * 0.175;
+      ctx.beginPath();
+      ctx.arc(x, 0, Math.max(1.6, w * 0.03), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+    ctx.restore();
+    if (selected || preview) {
+      ctx.fillStyle = "rgba(20,32,41,0.8)";
+      ctx.font = "10px Source Sans 3, sans-serif";
+      ctx.fillText(
+        vineDisplayName(vine),
+        center.x + w * 0.4,
+        center.y + 3,
+      );
     }
     return;
   }

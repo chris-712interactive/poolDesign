@@ -216,10 +216,16 @@ export function furnitureFinishRoles(catalogItemId: string): {
   if (catalogItemId === "umbrella") {
     return { frame: false, fabric: false, canopy: true };
   }
+  if (catalogItemId === "trellis" || catalogItemId === "trellis_arbor") {
+    return { frame: true, fabric: false, canopy: false };
+  }
   return { frame: false, fabric: false, canopy: false };
 }
 
 export function defaultFrameFinishId(catalogItemId: string): string | undefined {
+  if (catalogItemId === "trellis" || catalogItemId === "trellis_arbor") {
+    return "wood_cedar";
+  }
   return furnitureFinishRoles(catalogItemId).frame
     ? DEFAULT_FURNITURE_FRAME_FINISH_ID
     : undefined;

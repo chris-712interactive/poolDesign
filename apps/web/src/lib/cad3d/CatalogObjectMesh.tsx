@@ -13,8 +13,11 @@ import {
   diningTableShape,
   isDiningSetId,
   PATIO_SLAB_THICKNESS_MM,
+  getFloridaVine,
+  isTrellisId,
   resolvePersonOutfitId,
   resolvePersonSex,
+  vineCssColor,
 } from "@pool-design/shared";
 import { PersonMesh } from "@/lib/cad3d/PersonMesh";
 import {
@@ -929,6 +932,239 @@ function CoverLightMesh({
   );
 }
 
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function TrellisFoliage({
+  width,
+  height,
+  depth,
+  centerZ,
+  vineId,
+  selected,
+}: {
+  width: number;
+  height: number;
+  depth: number;
+  centerZ: number;
+  vineId?: string;
+  selected: boolean;
+}) {
+  const vine = getFloridaVine(vineId);
+  const leafN = Math.max(24, Math.round(90 * vine.leafDensity * Math.max(0.4, width)));
+  const flowerN =
+    vine.flowerSize < 0.35
+      ? 4
+      : Math.max(10, Math.round(42 * vine.flowerSize * Math.max(0.4, width)));
+  const leafRef = useRef<THREE.InstancedMesh>(null);
+  const flowerRef = useRef<THREE.InstancedMesh>(null);
+
+  useLayoutEffect(() => {
+    const dummy = new THREE.Object3D();
+    const rng = mulberry32(hashStr(vine.id) ^ Math.round(width * 100));
+    const scatter = (mesh: THREE.InstancedMesh | null, n: number, scale: number) => {
+      if (!mesh) return;
+      for (let i = 0; i < n; i++) {
+        dummy.position.set(
+          (rng() - 0.5) * width * 0.92,
+          (rng() - 0.08) * height * 0.92,
+          centerZ + (rng() - 0.5) * depth,
+        );
+        dummy.rotation.set(rng() * 1.2, rng() * Math.PI * 2, rng() * 0.8);
+        dummy.scale.setScalar(scale * (0.65 + rng() * 0.7));
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    scatter(leafRef.current, leafN, 1);
+    scatter(flowerRef.current, flowerN, vine.flowerSize);
+  }, [centerZ, depth, flowerN, height, leafN, vine.flowerSize, vine.id, width]);
+
+  return (
+    <group>
+      <instancedMesh ref={leafRef} args={[undefined, undefined, leafN]} castShadow>
+        <sphereGeometry args={[0.055, 8, 6]} />
+        <Mat color={vineCssColor(vine.foliage)} roughness={0.92} selected={selected} />
+      </instancedMesh>
+      <instancedMesh ref={flowerRef} args={[undefined, undefined, flowerN]} castShadow>
+        <sphereGeometry args={[0.032, 8, 6]} />
+        <Mat color={vineCssColor(vine.flower)} roughness={0.7} selected={selected} />
+      </instancedMesh>
+    </group>
+  );
+}
+
+function LatticePanel({
+  width,
+  height,
+  z,
+  selected,
+  frame,
+}: {
+  width: number;
+  height: number;
+  z: number;
+  selected: boolean;
+  frame?: { color?: THREE.CanvasTexture; roughness?: THREE.CanvasTexture };
+}) {
+  const post = Math.min(0.07, width * 0.06);
+  const rail = 0.028;
+  const halfW = width / 2;
+  const cols = 5;
+  const rows = 6;
+  const Wood = () => (
+    <Mat
+      map={frame?.color}
+      roughnessMap={frame?.roughness}
+      color={frame?.color ? "#ffffff" : "#c4a06a"}
+      roughness={0.82}
+      selected={selected}
+    />
+  );
+  return (
+    <group position={[0, 0, z]}>
+      {[-1, 1].map((side) => (
+        <mesh
+          key={`post-${side}`}
+          position={[side * (halfW - post * 0.5), 0, 0]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[post, height, post]} />
+          <Wood />
+        </mesh>
+      ))}
+      <mesh position={[0, height / 2 - rail * 0.5, 0]} castShadow>
+        <boxGeometry args={[width - post * 0.2, rail, post * 0.7]} />
+        <Wood />
+      </mesh>
+      <mesh position={[0, -height / 2 + rail * 0.5, 0]} castShadow>
+        <boxGeometry args={[width - post * 0.2, rail, post * 0.7]} />
+        <Wood />
+      </mesh>
+      {Array.from({ length: cols }, (_, i) => {
+        const t = (i + 1) / (cols + 1);
+        const x = -halfW + t * width;
+        return (
+          <mesh key={`v-${i}`} position={[x, 0, 0]} castShadow>
+            <boxGeometry args={[rail * 0.55, height - rail * 2, rail * 0.45]} />
+            <Wood />
+          </mesh>
+        );
+      })}
+      {Array.from({ length: rows }, (_, i) => {
+        const t = (i + 1) / (rows + 1);
+        const y = -height / 2 + t * height;
+        return (
+          <mesh key={`h-${i}`} position={[0, y, 0]} castShadow>
+            <boxGeometry args={[width - post * 1.6, rail * 0.5, rail * 0.4]} />
+            <Wood />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+function TrellisMesh({
+  catalogId,
+  sx,
+  sy,
+  sz,
+  selected,
+  vineId,
+  frame,
+  groupProps,
+}: {
+  catalogId: string;
+  sx: number;
+  sy: number;
+  sz: number;
+  selected: boolean;
+  vineId?: string;
+  frame?: { color?: THREE.CanvasTexture; roughness?: THREE.CanvasTexture };
+  groupProps: Record<string, unknown>;
+}) {
+  const arbor = catalogId === "trellis_arbor";
+  const panelW = arbor ? sx * 0.92 : sx;
+  const panelH = sy;
+  const sideZ = arbor ? sz * 0.42 : 0;
+  return (
+    <group {...groupProps}>
+      <LatticePanel
+        width={panelW}
+        height={panelH}
+        z={arbor ? -sideZ : 0}
+        selected={selected}
+        frame={frame}
+      />
+      {arbor ? (
+        <>
+          <LatticePanel
+            width={panelW}
+            height={panelH}
+            z={sideZ}
+            selected={selected}
+            frame={frame}
+          />
+          {[-0.32, 0, 0.32].map((t) => (
+            <mesh
+              key={`rafter-${t}`}
+              position={[t * panelW, sy * 0.48, 0]}
+              castShadow
+            >
+              <boxGeometry args={[0.06, 0.05, sz * 0.92]} />
+              <Mat
+                map={frame?.color}
+                roughnessMap={frame?.roughness}
+                color={frame?.color ? "#ffffff" : "#c4a06a"}
+                roughness={0.82}
+                selected={selected}
+              />
+            </mesh>
+          ))}
+        </>
+      ) : null}
+      <TrellisFoliage
+        width={panelW}
+        height={panelH}
+        depth={arbor ? 0.1 : Math.max(0.08, sz * 0.7)}
+        centerZ={arbor ? -sideZ : 0}
+        vineId={vineId}
+        selected={selected}
+      />
+      {arbor ? (
+        <TrellisFoliage
+          width={panelW}
+          height={panelH}
+          depth={0.1}
+          centerZ={sideZ}
+          vineId={vineId}
+          selected={selected}
+        />
+      ) : null}
+    </group>
+  );
+}
+
 export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
   const catalogId = desc.catalogItemId ?? "";
   const { x: sx, y: sy, z: sz } = desc.size;
@@ -964,6 +1200,21 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
     rotation: [0, rotationY, 0] as [number, number, number],
     ...handlers,
   };
+
+  if (isTrellisId(catalogId)) {
+    return (
+      <TrellisMesh
+        catalogId={catalogId}
+        sx={sx}
+        sy={sy}
+        sz={sz}
+        selected={selected}
+        vineId={desc.vineId}
+        frame={furnTex?.frame ?? undefined}
+        groupProps={groupProps}
+      />
+    );
+  }
 
   if (catalogId === "person_scale") {
     return (

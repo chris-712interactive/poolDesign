@@ -598,9 +598,9 @@ export function CadToolPalette({
                         className="muted"
                         style={{ margin: 0, fontSize: "0.75rem" }}
                       >
-                        Draw a ridge across the house for a gable; stop short of
-                        the ends for a hip. Edit pitch and shingles in
-                        Properties.
+                        Draw peak / ridge lines only (not hips or eaves). Run
+                        a ridge to the walls for a gable; stop short for a hip.
+                        Edit pitch and shingles in Properties.
                       </p>
                       <div className="field" style={{ margin: 0 }}>
                         <label htmlFor="house-stories-tool">Stories</label>
