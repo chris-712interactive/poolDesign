@@ -131,6 +131,88 @@ describe("building roof", () => {
     assert.ok(atEnd < atRidge * 0.35, `hip end ${atEnd} vs ridge ${atRidge}`);
   });
 
+  it("hip roof with corner hips has no corner spikes", () => {
+    const outline = rect(12000, 8000);
+    const ridges = [
+      {
+        id: "peak",
+        points: [
+          { x: 4000, y: 4000 },
+          { x: 8000, y: 4000 },
+        ],
+      },
+      { id: "hip1", points: [{ x: 4000, y: 4000 }, { x: 0, y: 0 }] },
+      { id: "hip2", points: [{ x: 4000, y: 4000 }, { x: 0, y: 8000 }] },
+      { id: "hip3", points: [{ x: 8000, y: 4000 }, { x: 12000, y: 0 }] },
+      { id: "hip4", points: [{ x: 8000, y: 4000 }, { x: 12000, y: 8000 }] },
+    ];
+    const mesh = tessellatePitchedRoof(outline, ridges, 6, 280);
+    assert.ok(mesh.indices.length >= 3);
+    const ridgeH = sampleRoofMeshHeightMm(mesh, { x: 6000, y: 4000 });
+    assert.ok(ridgeH != null && ridgeH > 1500, `ridge ${ridgeH}`);
+    const cornerH = sampleRoofMeshHeightMm(mesh, { x: 250, y: 250 });
+    assert.ok(
+      cornerH != null && cornerH < ridgeH! * 0.25,
+      `corner spike ${cornerH} vs ridge ${ridgeH}`,
+    );
+    const corners = [
+      { x: 0, y: 0 },
+      { x: 12000, y: 0 },
+      { x: 12000, y: 8000 },
+      { x: 0, y: 8000 },
+    ];
+    for (const v of mesh.vertices) {
+      const dc = Math.min(
+        ...corners.map((c) => Math.hypot(v.x - c.x, v.y - c.y)),
+      );
+      if (dc < 450) {
+        assert.ok(
+          v.hMm < 400,
+          `vertex near corner (${v.x},${v.y}) height ${v.hMm}`,
+        );
+      }
+    }
+  });
+
+  it("notched hip roof keeps the main ridge high and the notch low", () => {
+    const outline = [
+      { x: 0, y: 0 },
+      { x: 12000, y: 0 },
+      { x: 12000, y: 5000 },
+      { x: 8000, y: 5000 },
+      { x: 8000, y: 8000 },
+      { x: 0, y: 8000 },
+    ];
+    const ridges = [
+      {
+        id: "peak",
+        points: [
+          { x: 3500, y: 4000 },
+          { x: 8500, y: 4000 },
+        ],
+      },
+      { id: "hip1", points: [{ x: 3500, y: 4000 }, { x: 0, y: 0 }] },
+      { id: "hip2", points: [{ x: 3500, y: 4000 }, { x: 0, y: 8000 }] },
+      { id: "hip3", points: [{ x: 8500, y: 4000 }, { x: 12000, y: 0 }] },
+      { id: "hip4", points: [{ x: 8500, y: 4000 }, { x: 8000, y: 8000 }] },
+      {
+        id: "porch",
+        points: [
+          { x: 9500, y: 6500 },
+          { x: 11000, y: 6500 },
+        ],
+      },
+    ];
+    const mesh = tessellatePitchedRoof(outline, ridges, 6, 280);
+    assert.ok(mesh.indices.length >= 3);
+    const main = sampleRoofMeshHeightMm(mesh, { x: 5000, y: 4000 });
+    const porch = sampleRoofMeshHeightMm(mesh, { x: 10000, y: 6500 });
+    assert.ok(main != null && main > 1200, `main ridge ${main}`);
+    if (porch != null) {
+      assert.ok(porch < main! * 0.85, `porch as high as main: ${porch} vs ${main}`);
+    }
+  });
+
   it("hip traces to corners are not treated as peaks", () => {
     const outline = rect(12000, 8000);
     const ridges = [

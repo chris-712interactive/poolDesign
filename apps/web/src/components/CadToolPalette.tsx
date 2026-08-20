@@ -598,7 +598,7 @@ export function CadToolPalette({
                         className="muted"
                         style={{ margin: 0, fontSize: "0.75rem" }}
                       >
-                        Draw peak / ridge lines only (not hips or eaves). Run
+                        Draw the main ridge and hip lines to the corners. Run
                         a ridge to the walls for a gable; stop short for a hip.
                         Edit pitch and shingles in Properties.
                       </p>

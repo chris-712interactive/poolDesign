@@ -3885,7 +3885,7 @@ export function CadWorkspace({
             }. Edit story/size in Properties; drag to slide along the wall.`
         : tool === "roof_ridge"
           ? draftPoints.length === 0
-            ? "Roof ridge: draw peak lines only (not hips or eaves). Run a ridge to the walls for a gable, or stop short for a hip. Select the house first if you have more than one."
+            ? "Roof ridge: draw the main ridge and hip lines to the corners. Run a ridge to the walls for a gable, or stop short for a hip. Select the house first if you have more than one."
             : "Click the other end of the ridge (Shift = 90°). Type length + Enter for an exact run."
           : tool === "cover_rect"
           ? draftPoints.length === 0
@@ -5513,9 +5513,9 @@ export function CadWorkspace({
                       Use 2+ for multi-story homes — floors and ceilings are
                       added between stories. Siding and paint can differ per
                       story. Default ceiling height is 8′ (adjust for taller
-                      rooms). Draw peak / ridge lines only — not hips or
-                      eaves. Run a ridge to the walls for a gable, or stop
-                      short of the ends for a hip.
+                      rooms). Draw the main ridge(s) and hip / valley lines
+                      to the corners. Run a ridge to the walls for a gable,
+                      or stop short for a hip.
                       {(selectedBuilding.openings ?? []).length > 0
                         ? ` ${(selectedBuilding.openings ?? []).length} opening(s) on walls — select an opening to edit size.`
                         : " Use the Door / window tool to click openings onto walls."}

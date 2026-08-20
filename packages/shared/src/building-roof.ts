@@ -1,11 +1,13 @@
 /**
- * House roof: 2D peak lines → pitched 3D planes.
+ * House roof: 2D roof lines → pitched 3D planes.
  *
- * The mesh is a constrained triangulation of the eave polygon with the
- * peak ridges as edges. Ridge vertices sit at full rise; eaves sit at 0;
- * gable rakes tent from the corners up to the ridge. Each triangle is a
- * plane, so hips, ridges, and valleys read as sharp creases — not a
- * smooth distance-field bowl.
+ * Height is the constant-pitch roof transform:
+ *   h = (pitch12 / 12) · distanceToEaves
+ *
+ * Gable walls (a peak ridge that meets a wall mid-span) are omitted from
+ * the eave distance so the ridge can run at full height to the rake.
+ * Hip and valley lines the user draws are kept as mesh edges; they slope
+ * down to the corners instead of sitting at the peak.
  */
 
 import type { PointMm } from "./design-model";
@@ -76,13 +78,14 @@ export type RoofTessellation = {
 
 const RIDGE_LEN_MIN_MM = 200;
 const CORNER_HIT_MM = 550;
-const GABLE_EDGE_HIT_MM = 900;
-const DENSIFY_MM = 1100;
-const RIDGE_STEP_MM = 800;
+const GABLE_EDGE_HIT_MM = 500;
+const DENSIFY_MM = 900;
+const RIDGE_STEP_MM = 650;
 const SNAP_MM = 70;
 const ON_EDGE_MM = 40;
 const GABLE_SAMPLE_MM = 380;
 const GABLE_MIN_MM = 80;
+const MIN_TRI_AREA2_MM = 400;
 
 function ringOf(outline: PointMm[]): PointMm[] {
   const src = outlineHasArcs(outline)
@@ -407,23 +410,17 @@ export function roofHeightMm(
   p: PointMm,
   ridges: RoofRidge[],
   pitch12: number,
-  riseMm: number,
+  _riseMm: number,
   eave: PointMm[] = [],
   gableEdges?: boolean[],
 ): number {
   const ring = eave.length >= 3 ? ringOf(eave) : [];
-  const peaks = ring.length ? peakRidges(ridges, ring) : ridges;
-  const skip = gableEdges ?? (ring.length ? gableEdgeMask(ring, peaks) : undefined);
-  const dR = distToRidgesMm(p, peaks);
-  const dE = ring.length ? distToEdgesMm(p, ring, skip) : Infinity;
-  if (!Number.isFinite(dR) && !Number.isFinite(dE)) return 0;
-  const denom = dE + dR;
-  if (denom < 8) return dR <= dE ? riseMm : 0;
-  if (!Number.isFinite(dE)) {
-    const run = 12 / Math.max(2, pitch12);
-    return Math.max(0, riseMm - dR / run);
-  }
-  return Math.max(0, riseMm * (dE / denom));
+  if (ring.length < 2) return 0;
+  const peaks = peakRidges(ridges, ring);
+  const skip = gableEdges ?? gableEdgeMask(ring, peaks);
+  const dE = distToEdgesMm(p, ring, skip);
+  if (!Number.isFinite(dE)) return 0;
+  return Math.max(0, (clampRoofPitch12(pitch12) / 12) * dE);
 }
 
 function eaveOutline(outline: PointMm[], overhangMm: number): PointMm[] {
@@ -555,74 +552,6 @@ function projectOnSeg(
       : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
   const q = { x: a.x + t * dx, y: a.y + t * dy };
   return { t, q, dist: Math.hypot(p.x - q.x, p.y - q.y) };
-}
-
-function closestOnRing(
-  p: PointMm,
-  ring: PointMm[],
-): { dist: number; edge: number; t: number; q: PointMm } {
-  let best = {
-    dist: Infinity,
-    edge: 0,
-    t: 0,
-    q: { x: p.x, y: p.y },
-  };
-  for (let i = 0; i < ring.length; i++) {
-    const hit = projectOnSeg(p, ring[i]!, ring[(i + 1) % ring.length]!);
-    if (hit.dist < best.dist) {
-      best = { dist: hit.dist, edge: i, t: hit.t, q: hit.q };
-    }
-  }
-  return best;
-}
-
-/**
- * Gable ridges run to the wall on plan; extend them to the eave so the
- * rake overhangs. Hip ridges (short of the walls) stay put.
- */
-function extendPeaksToEaves(
-  peaks: RoofRidge[],
-  eave: PointMm[],
-): RoofRidge[] {
-  return peaks.map((ridge) => {
-    if (ridge.points.length < 2) return ridge;
-    const pts = ridge.points.map((p) => ({ x: p.x, y: p.y }));
-    const snapEnd = (idx: number) => {
-      const p = pts[idx]!;
-      if (isNearConvexCorner(p, eave)) return;
-      const near = closestOnRing(p, eave);
-      if (near.dist < GABLE_EDGE_HIT_MM && !isNearConvexCorner(near.q, eave)) {
-        pts[idx] = near.q;
-      }
-    };
-    snapEnd(0);
-    snapEnd(pts.length - 1);
-    return { ...ridge, points: pts };
-  });
-}
-
-function gableRakeHeightMm(
-  p: PointMm,
-  a: PointMm,
-  b: PointMm,
-  peaks: RoofRidge[],
-  riseMm: number,
-): number {
-  const { t } = projectOnSeg(p, a, b);
-  let tPeak = 0.5;
-  let best = Infinity;
-  for (const ridge of peaks) {
-    for (const ep of [ridge.points[0], ridge.points[ridge.points.length - 1]]) {
-      if (!ep) continue;
-      const hit = projectOnSeg(ep, a, b);
-      if (hit.dist < best) {
-        best = hit.dist;
-        tPeak = hit.t;
-      }
-    }
-  }
-  const span = Math.max(tPeak, 1 - tPeak, 0.08);
-  return Math.max(0, riseMm * (1 - Math.abs(t - tPeak) / span));
 }
 
 function segSegHit(
@@ -902,16 +831,115 @@ function dropTinyTris(mesh: RoofMesh2) {
     const a = mesh.verts[mesh.tris[t]!]!;
     const b = mesh.verts[mesh.tris[t + 1]!]!;
     const c = mesh.verts[mesh.tris[t + 2]!]!;
-    const area = Math.abs(cross2(b.x - a.x, b.y - a.y, c.x - a.x, c.y - a.y));
-    if (area < 20) continue;
+    const area2 = Math.abs(cross2(b.x - a.x, b.y - a.y, c.x - a.x, c.y - a.y));
+    if (area2 < MIN_TRI_AREA2_MM) continue;
     next.push(mesh.tris[t]!, mesh.tris[t + 1]!, mesh.tris[t + 2]!);
   }
   mesh.tris = next;
 }
 
+function inCircumcircle(
+  p: PointMm,
+  a: PointMm,
+  b: PointMm,
+  c: PointMm,
+): boolean {
+  const adx = a.x - p.x;
+  const ady = a.y - p.y;
+  const bdx = b.x - p.x;
+  const bdy = b.y - p.y;
+  const cdx = c.x - p.x;
+  const cdy = c.y - p.y;
+  const det =
+    (adx * adx + ady * ady) * (bdx * cdy - cdx * bdy) +
+    (bdx * bdx + bdy * bdy) * (cdx * ady - adx * cdy) +
+    (cdx * cdx + cdy * cdy) * (adx * bdy - bdx * ady);
+  return det * Math.sign(cross2(b.x - a.x, b.y - a.y, c.x - a.x, c.y - a.y)) > 0;
+}
+
+function delaunayIndices(pts: PointMm[]): number[] {
+  const n = pts.length;
+  if (n < 3) return [];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const span = Math.max(maxX - minX, maxY - minY, 1) * 10;
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const all: PointMm[] = [
+    ...pts,
+    { x: cx, y: cy - 2 * span },
+    { x: cx - 2 * span, y: cy + span },
+    { x: cx + 2 * span, y: cy + span },
+  ];
+  type Tri = { a: number; b: number; c: number };
+  let tris: Tri[] = [{ a: n, b: n + 1, c: n + 2 }];
+  for (let i = 0; i < n; i++) {
+    const p = all[i]!;
+    const bad: Tri[] = [];
+    const keep: Tri[] = [];
+    for (const t of tris) {
+      if (inCircumcircle(p, all[t.a]!, all[t.b]!, all[t.c]!)) bad.push(t);
+      else keep.push(t);
+    }
+    const edges: Array<[number, number]> = [];
+    const pushEdge = (u: number, v: number) => {
+      const ix = edges.findIndex((e) => e[0] === v && e[1] === u);
+      if (ix >= 0) edges.splice(ix, 1);
+      else edges.push([u, v]);
+    };
+    for (const t of bad) {
+      pushEdge(t.a, t.b);
+      pushEdge(t.b, t.c);
+      pushEdge(t.c, t.a);
+    }
+    tris = keep;
+    for (const [u, v] of edges) {
+      if (Math.abs(cross2(all[v]!.x - all[u]!.x, all[v]!.y - all[u]!.y, p.x - all[u]!.x, p.y - all[u]!.y)) < 1e-4) {
+        continue;
+      }
+      tris.push({ a: u, b: v, c: i });
+    }
+  }
+  const out: number[] = [];
+  for (const t of tris) {
+    if (t.a >= n || t.b >= n || t.c >= n) continue;
+    out.push(t.a, t.b, t.c);
+  }
+  return out;
+}
+
+function keepInsidePolygon(mesh: RoofMesh2, ring: PointMm[]) {
+  const next: number[] = [];
+  for (let t = 0; t < mesh.tris.length; t += 3) {
+    const ia = mesh.tris[t]!;
+    const ib = mesh.tris[t + 1]!;
+    const ic = mesh.tris[t + 2]!;
+    const a = mesh.verts[ia]!;
+    const b = mesh.verts[ib]!;
+    const c = mesh.verts[ic]!;
+    const area2 = Math.abs(cross2(b.x - a.x, b.y - a.y, c.x - a.x, c.y - a.y));
+    if (area2 < MIN_TRI_AREA2_MM) continue;
+    const mid = {
+      x: (a.x + b.x + c.x) / 3,
+      y: (a.y + b.y + c.y) / 3,
+    };
+    if (!pointInPolygon(mid, ring)) continue;
+    next.push(ia, ib, ic);
+  }
+  mesh.tris = next;
+}
+
 /**
- * Triangulate the eave polygon with peak ridges as constrained edges,
- * then lift: ridges at full rise, eaves at 0, gable rakes in between.
+ * Triangulate the eave polygon with all roof lines as edges, then lift
+ * by pitch × distance-to-eave so hips fall to the corners.
  */
 export function tessellatePitchedRoof(
   outline: PointMm[],
@@ -927,61 +955,69 @@ export function tessellatePitchedRoof(
   };
   const eave = eaveOutline(outline, overhangMm);
   if (eave.length < 3 || ridges.length === 0) return empty;
-  const peaks0 = peakRidges(ridges, eave);
-  const peaks = extendPeaksToEaves(peaks0, eave);
+  const peaks = peakRidges(ridges, eave);
   const gablesSkip = gableEdgeMask(eave, peaks);
   const riseMm = estimateRoofRiseMm(eave, peaks, pitch12);
-
-  const ring = densifyRing(eave, DENSIFY_MM);
-  const clipped = earClip(ring);
-  if (clipped.length < 3) return empty;
-  const mesh: RoofMesh2 = {
-    verts: ring.map((p) => ({ x: p.x, y: p.y })),
-    tris: clipped.slice(),
+  const slope = clampRoofPitch12(pitch12) / 12;
+  const heightAt = (p: PointMm) => {
+    const dE = distToEdgesMm(p, eave, gablesSkip);
+    return Number.isFinite(dE) ? Math.max(0, slope * dE) : 0;
   };
-  const ridgeIds = new Set<number>();
-  for (const ridge of peaks) {
+
+  const verts: PointMm[] = [];
+  for (const p of densifyRing(eave, DENSIFY_MM)) {
+    if (snapVert(verts, p) >= 0) continue;
+    verts.push({ x: p.x, y: p.y });
+  }
+  const roofChains: number[][] = [];
+  for (const ridge of ridges) {
+    if (ridge.points.length < 2) continue;
     const chain: number[] = [];
     for (const p of densifyOpen(ridge.points, RIDGE_STEP_MM)) {
-      const id = insertPoint(mesh, p);
-      if (id >= 0) {
-        chain.push(id);
-        ridgeIds.add(id);
+      const hit = snapVert(verts, p);
+      if (hit >= 0) {
+        chain.push(hit);
+        continue;
+      }
+      chain.push(verts.length);
+      verts.push({ x: p.x, y: p.y });
+    }
+    if (chain.length >= 2) roofChains.push(chain);
+  }
+  if (verts.length < 3) return empty;
+
+  let tris = delaunayIndices(verts);
+  const mesh: RoofMesh2 = { verts, tris };
+  keepInsidePolygon(mesh, eave);
+  if (mesh.tris.length < 3) {
+    mesh.verts = densifyRing(eave, DENSIFY_MM).map((p) => ({ x: p.x, y: p.y }));
+    mesh.tris = earClip(mesh.verts);
+    keepInsidePolygon(mesh, eave);
+    for (const ridge of ridges) {
+      const chain: number[] = [];
+      for (const p of densifyOpen(ridge.points, RIDGE_STEP_MM)) {
+        const id = insertPoint(mesh, p);
+        if (id >= 0) chain.push(id);
+      }
+      for (let i = 1; i < chain.length; i++) {
+        constrainEdge(mesh, chain[i - 1]!, chain[i]!);
       }
     }
-    for (let i = 1; i < chain.length; i++) {
-      constrainEdge(mesh, chain[i - 1]!, chain[i]!);
-      ridgeIds.add(chain[i - 1]!);
-      ridgeIds.add(chain[i]!);
+  } else {
+    for (const chain of roofChains) {
+      for (let i = 1; i < chain.length; i++) {
+        constrainEdge(mesh, chain[i - 1]!, chain[i]!);
+      }
     }
   }
+  keepInsidePolygon(mesh, eave);
   dropTinyTris(mesh);
+  if (mesh.tris.length < 3) return empty;
 
-  const nearRidge = (p: PointMm) => distToRidgesMm(p, peaks) < 80;
-  const eaveHeight = (p: PointMm) => {
-    let bestI = -1;
-    let bestD = 120;
-    for (let i = 0; i < eave.length; i++) {
-      const d = distPointToSegmentMm(p, eave[i]!, eave[(i + 1) % eave.length]!);
-      if (d < bestD) {
-        bestD = d;
-        bestI = i;
-      }
-    }
-    if (bestI < 0) return 0;
-    if (!gablesSkip[bestI]) return 0;
-    return gableRakeHeightMm(
-      p,
-      eave[bestI]!,
-      eave[(bestI + 1) % eave.length]!,
-      peaks,
-      riseMm,
-    );
-  };
-  const vertices: RoofVertexMm[] = mesh.verts.map((p, i) => ({
+  const vertices: RoofVertexMm[] = mesh.verts.map((p) => ({
     x: p.x,
     y: p.y,
-    hMm: ridgeIds.has(i) || nearRidge(p) ? riseMm : eaveHeight(p),
+    hMm: heightAt(p),
   }));
   const indices = mesh.tris.slice();
   const area = planSignedAreaMm2(eave);
@@ -1007,10 +1043,10 @@ export function tessellatePitchedRoof(
     for (let k = 0; k <= n; k++) {
       const t = k / n;
       const p = { x: a.x + (bpt.x - a.x) * t, y: a.y + (bpt.y - a.y) * t };
-      const h = nearRidge(p)
-        ? riseMm
-        : gableRakeHeightMm(p, a, bpt, peaks, riseMm);
-      samples.push({ p, h });
+      samples.push({
+        p,
+        h: roofHeightMm(p, peaks, pitch12, riseMm, footprint, footSkip),
+      });
     }
     const maxH = samples.reduce((m, s) => Math.max(m, s.h), 0);
     if (maxH < GABLE_MIN_MM) continue;
