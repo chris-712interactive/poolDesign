@@ -248,6 +248,17 @@ describe("building roof", () => {
     if (porch != null) {
       assert.ok(porch < main! * 0.85, `porch as high as main: ${porch} vs ${main}`);
     }
+    const along = [3500, 5000, 6500, 8500].map((x) =>
+      sampleRoofMeshHeightMm(mesh, { x, y: 4000 }),
+    );
+    const ridgeMax = along.reduce((m, h) => Math.max(m, h ?? 0), 0);
+    for (let i = 0; i < along.length; i++) {
+      const h = along[i];
+      assert.ok(
+        h != null && h > ridgeMax * 0.9,
+        `ridge trough at x=${[3500, 5000, 6500, 8500][i]}: ${h} vs ${ridgeMax}`,
+      );
+    }
   });
 
   it("hip traces to corners are not treated as peaks", () => {

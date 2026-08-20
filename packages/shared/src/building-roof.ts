@@ -525,6 +525,91 @@ function faceSupportingEave(
   return best;
 }
 
+function dirsParallel(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): boolean {
+  const la = Math.hypot(ax, ay);
+  const lb = Math.hypot(bx, by);
+  if (la < 1e-6 || lb < 1e-6) return false;
+  return Math.abs(ax * bx + ay * by) / (la * lb) > 0.86;
+}
+
+function peakSegmentAt(
+  p: PointMm,
+  peaks: RoofRidge[],
+): { a: PointMm; b: PointMm } | null {
+  let best: { a: PointMm; b: PointMm } | null = null;
+  let bestD = 140;
+  for (const ridge of peaks) {
+    for (let i = 1; i < ridge.points.length; i++) {
+      const a = ridge.points[i - 1]!;
+      const b = ridge.points[i]!;
+      const d = distPointToSegmentMm(p, a, b);
+      if (d < bestD) {
+        bestD = d;
+        best = { a, b };
+      }
+    }
+  }
+  return best;
+}
+
+function nearestPeakEnd(p: PointMm, peaks: RoofRidge[]): PointMm | null {
+  let best: PointMm | null = null;
+  let bestD = Infinity;
+  for (const ridge of peaks) {
+    if (ridge.points.length < 2) continue;
+    for (const q of [ridge.points[0]!, ridge.points[ridge.points.length - 1]!]) {
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d < bestD) {
+        bestD = d;
+        best = q;
+      }
+    }
+  }
+  if (!best || bestD < 400 || bestD > 25000) return null;
+  return best;
+}
+
+function heightFromIncidentPlanes(
+  p: PointMm,
+  planes: Array<{ a: PointMm; b: PointMm }>,
+  sign: number,
+  pitch12: number,
+  peaks: RoofRidge[],
+  eave: PointMm[],
+  gableSkip?: boolean[],
+): number {
+  const onPeak = peakSegmentAt(p, peaks);
+  const scored = planes.map((sup) => ({
+    h: heightFromSupport(p, sup.a, sup.b, sign, pitch12),
+    aligned: onPeak
+      ? dirsParallel(
+          sup.b.x - sup.a.x,
+          sup.b.y - sup.a.y,
+          onPeak.b.x - onPeak.a.x,
+          onPeak.b.y - onPeak.a.y,
+        )
+      : false,
+  }));
+  let h: number;
+  if (onPeak) {
+    const aligned = scored.filter((s) => s.aligned);
+    const pick = aligned.length > 0 ? aligned : scored;
+    h = pick.reduce((m, s) => Math.max(m, s.h), 0);
+  } else {
+    h = scored.reduce((m, s) => Math.min(m, s.h), Infinity);
+  }
+  if (!Number.isFinite(h)) {
+    h = heightFromEavePlanes(p, eave, gableSkip, pitch12);
+  }
+  if (!onPeak && onNonGableEave(p, eave, gableSkip)) h = 0;
+  return Math.max(0, h);
+}
+
 function onNonGableEave(
   p: PointMm,
   eave: PointMm[],
@@ -571,17 +656,17 @@ export function roofHeightMm(
   const graph = buildRoofGraph(ring, lines);
   if (graph) {
     const sign = planSignedAreaMm2(ring) >= 0 ? 1 : -1;
-    let best: number | null = null;
+    const planes: Array<{ a: PointMm; b: PointMm }> = [];
     for (const face of graph.faces) {
       const pts = face.map((i) => graph.verts[i]!);
       if (!pointInOrOnPolygon(p, pts)) continue;
       if (distinctNonGableEaveRuns(pts, ring, skip) >= 2) continue;
       const sup = faceSupportingEave(pts, ring, sign, pitch12, skip);
-      if (!sup) continue;
-      const h = heightFromSupport(p, sup.a, sup.b, sign, pitch12);
-      best = best == null ? h : Math.min(best, h);
+      if (sup) planes.push(sup);
     }
-    if (best != null) return best;
+    if (planes.length > 0) {
+      return heightFromIncidentPlanes(p, planes, sign, pitch12, peaks, ring, skip);
+    }
   }
   return heightFromEavePlanes(p, ring, skip, pitch12);
 }
@@ -1186,28 +1271,6 @@ function segmentCoveredByRidges(
   return false;
 }
 
-function closestPointOnRidges(
-  p: PointMm,
-  ridges: RoofRidge[],
-): { q: PointMm; dist: number } | null {
-  let best: PointMm | null = null;
-  let bestD = Infinity;
-  for (const ridge of ridges) {
-    for (let i = 1; i < ridge.points.length; i++) {
-      const hit = projectOnSeg(p, ridge.points[i - 1]!, ridge.points[i]!);
-      if (hit.dist < bestD) {
-        bestD = hit.dist;
-        best = hit.q;
-      }
-    }
-  }
-  return best ? { q: best, dist: bestD } : null;
-}
-
-/**
- * User hips land on wall corners; the mesh lives on the overhang eave.
- * Pull those endpoints out to the eave so each slope becomes a closed face.
- */
 function snapRidgesToEave(
   ridges: RoofRidge[],
   eave: PointMm[],
@@ -1337,8 +1400,8 @@ function autoValleyRidges(
       }
     }
     if (!target) {
-      const hit = closestPointOnRidges(c, peaks);
-      if (hit && hit.dist >= 400 && hit.dist <= 25000) target = hit.q;
+      const end = nearestPeakEnd(c, peaks);
+      if (end) target = end;
     }
     if (!target) continue;
     const mid = { x: (c.x + target.x) / 2, y: (c.y + target.y) / 2 };
@@ -1549,7 +1612,8 @@ function emitPlanarFaces(
   eave: PointMm[],
   graph: { verts: PointMm[]; faces: number[][] },
   pitch12: number,
-  gableSkip?: boolean[],
+  gableSkip: boolean[] | undefined,
+  peaks: RoofRidge[],
 ): { vertices: RoofVertexMm[]; indices: number[] } {
   const sign = planSignedAreaMm2(eave) >= 0 ? 1 : -1;
   const supports: Array<{ a: PointMm; b: PointMm } | null> = [];
@@ -1586,17 +1650,24 @@ function emitPlanarFaces(
   }
 
   const vertices: RoofVertexMm[] = graph.verts.map((p, i) => {
-    let h = Infinity;
+    const planes: Array<{ a: PointMm; b: PointMm }> = [];
     for (const fi of incident[i]!) {
       const sup = supports[fi];
-      if (!sup) continue;
-      h = Math.min(h, heightFromSupport(p, sup.a, sup.b, sign, pitch12));
+      if (sup) planes.push(sup);
     }
-    if (!Number.isFinite(h)) {
-      h = heightFromEavePlanes(p, eave, gableSkip, pitch12);
-    }
-    if (onNonGableEave(p, eave, gableSkip)) h = 0;
-    return { x: p.x, y: p.y, hMm: Math.max(0, h) };
+    return {
+      x: p.x,
+      y: p.y,
+      hMm: heightFromIncidentPlanes(
+        p,
+        planes,
+        sign,
+        pitch12,
+        peaks,
+        eave,
+        gableSkip,
+      ),
+    };
   });
 
   const indices: number[] = [];
@@ -1643,7 +1714,7 @@ export function tessellatePitchedRoof(
   let vertices: RoofVertexMm[] = [];
   let indices: number[] = [];
   if (graph) {
-    const emitted = emitPlanarFaces(eave, graph, pitch12, gablesSkip);
+    const emitted = emitPlanarFaces(eave, graph, pitch12, gablesSkip, peaks);
     vertices = emitted.vertices;
     indices = emitted.indices;
   }
@@ -1695,17 +1766,19 @@ export function tessellatePitchedRoof(
       if (!sup) continue;
       for (let k = 0; k < 3; k++) inc[mesh.tris[t + k]!]!.push(sup);
     }
-    vertices = mesh.verts.map((p, i) => {
-      let h = Infinity;
-      for (const sup of inc[i]!) {
-        h = Math.min(h, heightFromSupport(p, sup.a, sup.b, sign, pitch12));
-      }
-      if (!Number.isFinite(h)) {
-        h = heightFromEavePlanes(p, eave, gablesSkip, pitch12);
-      }
-      if (onNonGableEave(p, eave, gablesSkip)) h = 0;
-      return { x: p.x, y: p.y, hMm: Math.max(0, h) };
-    });
+    vertices = mesh.verts.map((p, i) => ({
+      x: p.x,
+      y: p.y,
+      hMm: heightFromIncidentPlanes(
+        p,
+        inc[i]!,
+        sign,
+        pitch12,
+        peaks,
+        eave,
+        gablesSkip,
+      ),
+    }));
     indices = mesh.tris.slice();
   }
   if (indices.length < 3) return empty;
