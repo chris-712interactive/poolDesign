@@ -439,30 +439,106 @@ function heightFromSupport(
   return Math.max(0, (clampRoofPitch12(pitch12) / 12) * d);
 }
 
-function longestEaveSupport(
+function faceCentroid(pts: PointMm[]): PointMm {
+  let x = 0;
+  let y = 0;
+  for (const p of pts) {
+    x += p.x;
+    y += p.y;
+  }
+  const n = Math.max(1, pts.length);
+  return { x: x / n, y: y / n };
+}
+
+function eaveEdgeIndexFor(
+  p: PointMm,
+  q: PointMm,
+  eave: PointMm[],
+): number {
+  for (let e = 0; e < eave.length; e++) {
+    const a = eave[e]!;
+    const b = eave[(e + 1) % eave.length]!;
+    const hp = projectOnSeg(p, a, b);
+    const hq = projectOnSeg(q, a, b);
+    if (hp.dist < SNAP_MM && hq.dist < SNAP_MM) return e;
+  }
+  return -1;
+}
+
+function angNormPi(rad: number): number {
+  let a = rad % Math.PI;
+  if (a < 0) a += Math.PI;
+  return a;
+}
+
+function distinctNonGableEaveRuns(
   facePts: PointMm[],
   eave: PointMm[],
+  gableSkip?: boolean[],
+): number {
+  const angs: number[] = [];
+  for (let i = 0; i < facePts.length; i++) {
+    const p = facePts[i]!;
+    const q = facePts[(i + 1) % facePts.length]!;
+    const e = eaveEdgeIndexFor(p, q, eave);
+    if (e < 0 || gableSkip?.[e]) continue;
+    const a = eave[e]!;
+    const b = eave[(e + 1) % eave.length]!;
+    const ang = angNormPi(Math.atan2(b.y - a.y, b.x - a.x));
+    if (
+      angs.some(
+        (x) => Math.abs(x - ang) < 0.22 || Math.abs(x - ang) > Math.PI - 0.22,
+      )
+    ) {
+      continue;
+    }
+    angs.push(ang);
+  }
+  return angs.length;
+}
+
+/** Supporting eave of a roof face: the plane that is lowest at the face center. */
+function faceSupportingEave(
+  facePts: PointMm[],
+  eave: PointMm[],
+  sign: number,
+  pitch12: number,
+  gableSkip?: boolean[],
 ): { a: PointMm; b: PointMm } | null {
   if (facePts.length < 2 || eave.length < 2) return null;
-  let bestLen = 80;
+  const c = faceCentroid(facePts);
+  let bestH = Infinity;
   let best: { a: PointMm; b: PointMm } | null = null;
   for (let i = 0; i < facePts.length; i++) {
     const p = facePts[i]!;
     const q = facePts[(i + 1) % facePts.length]!;
-    const len = Math.hypot(q.x - p.x, q.y - p.y);
-    if (len < bestLen) continue;
-    for (let e = 0; e < eave.length; e++) {
-      const a = eave[e]!;
-      const b = eave[(e + 1) % eave.length]!;
-      const hp = projectOnSeg(p, a, b);
-      const hq = projectOnSeg(q, a, b);
-      if (hp.dist < SNAP_MM && hq.dist < SNAP_MM) {
-        bestLen = len;
-        best = { a, b };
-      }
+    const e = eaveEdgeIndexFor(p, q, eave);
+    if (e < 0 || gableSkip?.[e]) continue;
+    const a = eave[e]!;
+    const b = eave[(e + 1) % eave.length]!;
+    const h = heightFromSupport(c, a, b, sign, pitch12);
+    if (h < bestH) {
+      bestH = h;
+      best = { a, b };
     }
   }
   return best;
+}
+
+function onNonGableEave(
+  p: PointMm,
+  eave: PointMm[],
+  gableSkip?: boolean[],
+): boolean {
+  for (let i = 0; i < eave.length; i++) {
+    if (gableSkip?.[i]) continue;
+    if (
+      distPointToSegmentMm(p, eave[i]!, eave[(i + 1) % eave.length]!) < SNAP_MM
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function pointInOrOnPolygon(p: PointMm, ring: PointMm[]): boolean {
@@ -486,6 +562,7 @@ export function roofHeightMm(
   const ring = eave.length >= 3 ? ringOf(eave) : [];
   if (ring.length < 2) return 0;
   const peaks = peakRidges(ridges, ring);
+  const skip = gableEdges ?? gableEdgeMask(ring, peaks);
   const lines = snapRidgesToEave(
     [...ridges, ...completeRoofLines(ring, ridges, peaks)],
     ring,
@@ -498,14 +575,14 @@ export function roofHeightMm(
     for (const face of graph.faces) {
       const pts = face.map((i) => graph.verts[i]!);
       if (!pointInOrOnPolygon(p, pts)) continue;
-      const sup = longestEaveSupport(pts, ring);
+      if (distinctNonGableEaveRuns(pts, ring, skip) >= 2) continue;
+      const sup = faceSupportingEave(pts, ring, sign, pitch12, skip);
       if (!sup) continue;
       const h = heightFromSupport(p, sup.a, sup.b, sign, pitch12);
-      best = best == null ? h : Math.max(best, h);
+      best = best == null ? h : Math.min(best, h);
     }
     if (best != null) return best;
   }
-  const skip = gableEdges ?? gableEdgeMask(ring, peaks);
   return heightFromEavePlanes(p, ring, skip, pitch12);
 }
 
@@ -1089,6 +1166,26 @@ function segmentOnEave(a: PointMm, b: PointMm, eave: PointMm[]): boolean {
   return ha.edge === hb.edge;
 }
 
+function segmentCoveredByRidges(
+  a: PointMm,
+  b: PointMm,
+  ridges: RoofRidge[],
+): boolean {
+  for (const ridge of ridges) {
+    for (let i = 1; i < ridge.points.length; i++) {
+      const p = ridge.points[i - 1]!;
+      const q = ridge.points[i]!;
+      if (
+        distPointToSegmentMm(a, p, q) < 140 &&
+        distPointToSegmentMm(b, p, q) < 140
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function closestPointOnRidges(
   p: PointMm,
   ridges: RoofRidge[],
@@ -1172,6 +1269,7 @@ function autoHipRidges(
       continue;
     }
     if (segmentOnEave(c, best, eave)) continue;
+    if (segmentCoveredByRidges(c, best, [...existing, ...hips])) continue;
     hips.push({
       id: `auto_hip_${i}`,
       points: [
@@ -1183,6 +1281,37 @@ function autoHipRidges(
   return hips;
 }
 
+function peakJunctionPoints(peaks: RoofRidge[]): PointMm[] {
+  const segs: Array<{ a: PointMm; b: PointMm }> = [];
+  for (const ridge of peaks) {
+    for (let i = 1; i < ridge.points.length; i++) {
+      segs.push({ a: ridge.points[i - 1]!, b: ridge.points[i]! });
+    }
+  }
+  const out: PointMm[] = [];
+  const push = (p: PointMm) => {
+    if (out.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < SNAP_MM)) return;
+    out.push({ x: p.x, y: p.y });
+  };
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 1; j < segs.length; j++) {
+      const s = segs[i]!;
+      const o = segs[j]!;
+      const cross = segSegHit(s.a, s.b, o.a, o.b);
+      if (cross) push(cross);
+      for (const p of [o.a, o.b]) {
+        const hit = projectOnSeg(p, s.a, s.b);
+        if (hit.dist < ON_EDGE_MM && hit.t > 0.02 && hit.t < 0.98) push(hit.q);
+      }
+      for (const p of [s.a, s.b]) {
+        const hit = projectOnSeg(p, o.a, o.b);
+        if (hit.dist < ON_EDGE_MM && hit.t > 0.02 && hit.t < 0.98) push(hit.q);
+      }
+    }
+  }
+  return out;
+}
+
 function autoValleyRidges(
   eave: PointMm[],
   peaks: RoofRidge[],
@@ -1190,21 +1319,37 @@ function autoValleyRidges(
 ): RoofRidge[] {
   if (peaks.length === 0 || eave.length < 3) return [];
   const sign = planSignedAreaMm2(eave) >= 0 ? 1 : -1;
+  const junctions = peakJunctionPoints(peaks);
   const valleys: RoofRidge[] = [];
   for (let i = 0; i < eave.length; i++) {
     if (vertexTurnSign(eave, i) * sign >= -1e-4) continue;
     const c = eave[i]!;
     if (userCornerHasTrace(c, existing)) continue;
-    const hit = closestPointOnRidges(c, peaks);
-    if (!hit || hit.dist < 400 || hit.dist > 25000) continue;
-    const mid = { x: (c.x + hit.q.x) / 2, y: (c.y + hit.q.y) / 2 };
+    let target: PointMm | null = null;
+    let bestD = Infinity;
+    for (const j of junctions) {
+      const d = Math.hypot(j.x - c.x, j.y - c.y);
+      const mid = { x: (c.x + j.x) / 2, y: (c.y + j.y) / 2 };
+      if (d < 400 || d > 25000 || !pointInPolygon(mid, eave)) continue;
+      if (d < bestD) {
+        bestD = d;
+        target = j;
+      }
+    }
+    if (!target) {
+      const hit = closestPointOnRidges(c, peaks);
+      if (hit && hit.dist >= 400 && hit.dist <= 25000) target = hit.q;
+    }
+    if (!target) continue;
+    const mid = { x: (c.x + target.x) / 2, y: (c.y + target.y) / 2 };
     if (!pointInPolygon(mid, eave)) continue;
-    if (segmentOnEave(c, hit.q, eave)) continue;
+    if (segmentOnEave(c, target, eave)) continue;
+    if (segmentCoveredByRidges(c, target, [...existing, ...valleys])) continue;
     valleys.push({
       id: `auto_valley_${i}`,
       points: [
         { x: c.x, y: c.y },
-        { x: hit.q.x, y: hit.q.y },
+        { x: target.x, y: target.y },
       ],
     });
   }
@@ -1216,10 +1361,9 @@ function completeRoofLines(
   ridges: RoofRidge[],
   peaks: RoofRidge[],
 ): RoofRidge[] {
-  return [
-    ...autoHipRidges(eave, peaks, ridges),
-    ...autoValleyRidges(eave, peaks, ridges),
-  ];
+  const hips = autoHipRidges(eave, peaks, ridges);
+  const valleys = autoValleyRidges(eave, peaks, [...ridges, ...hips]);
+  return [...hips, ...valleys];
 }
 
 type RoofSeg = { a: PointMm; b: PointMm };
@@ -1399,31 +1543,70 @@ function buildRoofGraph(
   return { verts, faces };
 }
 
+const MIN_FACE_AREA_MM2 = 25000;
+
 function emitPlanarFaces(
   eave: PointMm[],
   graph: { verts: PointMm[]; faces: number[][] },
   pitch12: number,
+  gableSkip?: boolean[],
 ): { vertices: RoofVertexMm[]; indices: number[] } {
   const sign = planSignedAreaMm2(eave) >= 0 ? 1 : -1;
-  const vertices: RoofVertexMm[] = [];
-  const indices: number[] = [];
-  const gablesSkip = gableEdgeMask(eave, []);
+  const supports: Array<{ a: PointMm; b: PointMm } | null> = [];
+  const keep: boolean[] = [];
   for (const face of graph.faces) {
-    if (face.length < 3) continue;
+    if (face.length < 3) {
+      keep.push(false);
+      supports.push(null);
+      continue;
+    }
     const pts = face.map((i) => graph.verts[i]!);
-    const sup = longestEaveSupport(pts, eave);
-    const hAt = (p: PointMm) =>
-      sup
-        ? heightFromSupport(p, sup.a, sup.b, sign, pitch12)
-        : heightFromEavePlanes(p, eave, gablesSkip, pitch12);
+    const area = Math.abs(planSignedAreaMm2(pts));
+    if (
+      area < MIN_FACE_AREA_MM2 ||
+      distinctNonGableEaveRuns(pts, eave, gableSkip) >= 2
+    ) {
+      keep.push(false);
+      supports.push(null);
+      continue;
+    }
+    keep.push(true);
+    supports.push(faceSupportingEave(pts, eave, sign, pitch12, gableSkip));
+  }
+
+  const incident: number[][] = graph.verts.map(() => []);
+  for (let fi = 0; fi < graph.faces.length; fi++) {
+    if (!keep[fi]) continue;
+    const seen = new Set<number>();
+    for (const i of graph.faces[fi]!) {
+      if (seen.has(i)) continue;
+      seen.add(i);
+      incident[i]!.push(fi);
+    }
+  }
+
+  const vertices: RoofVertexMm[] = graph.verts.map((p, i) => {
+    let h = Infinity;
+    for (const fi of incident[i]!) {
+      const sup = supports[fi];
+      if (!sup) continue;
+      h = Math.min(h, heightFromSupport(p, sup.a, sup.b, sign, pitch12));
+    }
+    if (!Number.isFinite(h)) {
+      h = heightFromEavePlanes(p, eave, gableSkip, pitch12);
+    }
+    if (onNonGableEave(p, eave, gableSkip)) h = 0;
+    return { x: p.x, y: p.y, hMm: Math.max(0, h) };
+  });
+
+  const indices: number[] = [];
+  for (let fi = 0; fi < graph.faces.length; fi++) {
+    if (!keep[fi]) continue;
+    const face = graph.faces[fi]!;
+    const pts = face.map((i) => graph.verts[i]!);
     const local = earClip(pts);
     for (let t = 0; t < local.length; t += 3) {
-      const base = vertices.length;
-      for (let k = 0; k < 3; k++) {
-        const p = pts[local[t + k]!]!;
-        vertices.push({ x: p.x, y: p.y, hMm: hAt(p) });
-      }
-      indices.push(base, base + 1, base + 2);
+      indices.push(face[local[t]!]!, face[local[t + 1]!]!, face[local[t + 2]!]!);
     }
   }
   return { vertices, indices };
@@ -1460,7 +1643,7 @@ export function tessellatePitchedRoof(
   let vertices: RoofVertexMm[] = [];
   let indices: number[] = [];
   if (graph) {
-    const emitted = emitPlanarFaces(eave, graph, pitch12);
+    const emitted = emitPlanarFaces(eave, graph, pitch12, gablesSkip);
     vertices = emitted.vertices;
     indices = emitted.indices;
   }
@@ -1495,25 +1678,35 @@ export function tessellatePitchedRoof(
     keepInsidePolygon(mesh, eave);
     dropTinyTris(mesh);
     const sign = planSignedAreaMm2(eave) >= 0 ? 1 : -1;
-    vertices = [];
-    indices = [];
+    const triSup: Array<{ a: PointMm; b: PointMm } | null> = [];
     for (let t = 0; t < mesh.tris.length; t += 3) {
       const pts = [
         mesh.verts[mesh.tris[t]!]!,
         mesh.verts[mesh.tris[t + 1]!]!,
         mesh.verts[mesh.tris[t + 2]!]!,
       ];
-      const sup = longestEaveSupport(pts, eave);
-      const hAt = (p: PointMm) =>
-        sup
-          ? heightFromSupport(p, sup.a, sup.b, sign, pitch12)
-          : heightFromEavePlanes(p, eave, gablesSkip, pitch12);
-      const base = vertices.length;
-      for (const p of pts) {
-        vertices.push({ x: p.x, y: p.y, hMm: hAt(p) });
-      }
-      indices.push(base, base + 1, base + 2);
+      triSup.push(faceSupportingEave(pts, eave, sign, pitch12, gablesSkip));
     }
+    const inc: Array<Array<{ a: PointMm; b: PointMm }>> = mesh.verts.map(
+      () => [],
+    );
+    for (let t = 0; t < mesh.tris.length; t += 3) {
+      const sup = triSup[t / 3];
+      if (!sup) continue;
+      for (let k = 0; k < 3; k++) inc[mesh.tris[t + k]!]!.push(sup);
+    }
+    vertices = mesh.verts.map((p, i) => {
+      let h = Infinity;
+      for (const sup of inc[i]!) {
+        h = Math.min(h, heightFromSupport(p, sup.a, sup.b, sign, pitch12));
+      }
+      if (!Number.isFinite(h)) {
+        h = heightFromEavePlanes(p, eave, gablesSkip, pitch12);
+      }
+      if (onNonGableEave(p, eave, gablesSkip)) h = 0;
+      return { x: p.x, y: p.y, hMm: Math.max(0, h) };
+    });
+    indices = mesh.tris.slice();
   }
   if (indices.length < 3) return empty;
 

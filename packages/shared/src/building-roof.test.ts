@@ -198,6 +198,17 @@ describe("building roof", () => {
         );
       }
     }
+    const xyH = new Map<string, number>();
+    for (const v of mesh.vertices) {
+      const k = `${Math.round(v.x / 10) * 10},${Math.round(v.y / 10) * 10}`;
+      const prev = xyH.get(k);
+      if (prev != null) {
+        assert.ok(
+          Math.abs(prev - v.hMm) < 20,
+          `split ridge at ${k}: ${prev} vs ${v.hMm}`,
+        );
+      } else xyH.set(k, v.hMm);
+    }
   });
 
   it("notched hip roof keeps the main ridge high and the notch low", () => {
