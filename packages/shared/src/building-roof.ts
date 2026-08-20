@@ -164,10 +164,25 @@ function isNearConvexCorner(p: PointMm, ring: PointMm[]): boolean {
   return bestD < zone;
 }
 
+function minDistToRingMm(p: PointMm, ring: PointMm[]): number {
+  let best = Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    const d = distPointToSegmentMm(p, ring[i]!, ring[(i + 1) % ring.length]!);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/** User traced the wall / eave — not a roof peak. */
+function segmentRunsAlongEave(a: PointMm, b: PointMm, ring: PointMm[]): boolean {
+  if (ring.length < 2) return false;
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  return minDistToRingMm(mid, ring) < 320;
+}
+
 /**
- * Peak ridges only. A segment that lands on a footprint *corner* is a hip
- * (or an eave the user traced) and must not sit at full rise — that is what
- * caved the roof faces in.
+ * Peak ridges only. Hips land on convex corners; valleys on inside corners.
+ * A line along the eave is not a peak — lifting those inverted ridges into troughs.
  */
 export function peakRidges(ridges: RoofRidge[], outline: PointMm[]): RoofRidge[] {
   const ring = ringOf(outline);
@@ -181,6 +196,7 @@ export function peakRidges(ridges: RoofRidge[], outline: PointMm[]): RoofRidge[]
         continue;
       }
       const prev = points[points.length - 1]!;
+      if (segmentRunsAlongEave(prev, p, ring)) continue;
       const aCorner = isNearConvexCorner(prev, ring);
       const bCorner = isNearConvexCorner(p, ring);
       if (aCorner || bCorner) continue;
@@ -188,7 +204,13 @@ export function peakRidges(ridges: RoofRidge[], outline: PointMm[]): RoofRidge[]
     }
     if (points.length >= 2) out.push({ ...ridge, points });
   }
-  return out.length ? out : ridges;
+  if (out.length) return out;
+  return ridges.filter((ridge) => {
+    if (ridge.points.length < 2) return false;
+    const a = ridge.points[0]!;
+    const b = ridge.points[ridge.points.length - 1]!;
+    return !segmentRunsAlongEave(a, b, ring);
+  });
 }
 
 /** Edges a peak ridge meets — those become gable walls, not eaves. */
@@ -618,7 +640,7 @@ function envelopeAtParallelEaves(
     pitch12,
     gableSkip,
   );
-  if (hs.length >= 2) return Math.max(hs[0]!, hs[1]!);
+  if (hs.length >= 2) return Math.min(hs[0]!, hs[1]!);
   return hs[0] ?? 0;
 }
 
@@ -634,19 +656,8 @@ function levelHeightForPeak(
   const b = ridge.points[ridge.points.length - 1]!;
   const dirx = b.x - a.x;
   const diry = b.y - a.y;
-  const samples = [
-    a,
-    { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
-    b,
-  ];
-  let h = 0;
-  for (const p of samples) {
-    h = Math.max(
-      h,
-      envelopeAtParallelEaves(p, dirx, diry, eave, sign, pitch12, gableSkip),
-    );
-  }
-  return h;
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  return envelopeAtParallelEaves(mid, dirx, diry, eave, sign, pitch12, gableSkip);
 }
 
 function applyLevelPeakHeights(
@@ -663,6 +674,7 @@ function applyLevelPeakHeights(
     h: levelHeightForPeak(ridge, eave, sign, pitch12, gableSkip),
   }));
   for (const v of vertices) {
+    if (minDistToRingMm(v, eave) < 380) continue;
     let h: number | null = null;
     for (const { ridge, h: peakH } of levels) {
       if (peakH < 80) continue;

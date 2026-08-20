@@ -314,6 +314,81 @@ describe("building roof", () => {
     );
   });
 
+  it("a line drawn on the eave is not lifted into a ridge", () => {
+    const outline = rect(12000, 8000);
+    const ridges = [
+      {
+        id: "peak",
+        points: [
+          { x: 4000, y: 4000 },
+          { x: 8000, y: 4000 },
+        ],
+      },
+      { id: "hip1", points: [{ x: 4000, y: 4000 }, { x: 0, y: 0 }] },
+      { id: "hip2", points: [{ x: 4000, y: 4000 }, { x: 0, y: 8000 }] },
+      { id: "hip3", points: [{ x: 8000, y: 4000 }, { x: 12000, y: 0 }] },
+      { id: "hip4", points: [{ x: 8000, y: 4000 }, { x: 12000, y: 8000 }] },
+      {
+        id: "eave_trace",
+        points: [
+          { x: 2000, y: 8000 },
+          { x: 6000, y: 8000 },
+        ],
+      },
+    ];
+    const peaks = peakRidges(ridges, outline);
+    assert.ok(
+      peaks.every((r) => r.id !== "eave_trace"),
+      "eave trace treated as a peak",
+    );
+    const mesh = tessellatePitchedRoof(outline, ridges, 6, 280);
+    const ridgeH = sampleRoofMeshHeightMm(mesh, { x: 6000, y: 4000 });
+    const eaveH = sampleRoofMeshHeightMm(mesh, { x: 4000, y: 7800 });
+    assert.ok(ridgeH != null && ridgeH > 1500, `ridge ${ridgeH}`);
+    if (eaveH != null) {
+      assert.ok(
+        eaveH < ridgeH! * 0.35,
+        `eave line inverted into a ridge: ${eaveH} vs ${ridgeH}`,
+      );
+    }
+  });
+
+  it("a T of two peak ridges stays high, not a valley", () => {
+    const outline = rect(12000, 8000);
+    const ridges = [
+      {
+        id: "main",
+        points: [
+          { x: 4000, y: 4000 },
+          { x: 8000, y: 4000 },
+        ],
+      },
+      {
+        id: "stub",
+        points: [
+          { x: 4000, y: 4000 },
+          { x: 4000, y: 6200 },
+        ],
+      },
+      { id: "hip1", points: [{ x: 4000, y: 4000 }, { x: 0, y: 0 }] },
+      { id: "hip2", points: [{ x: 4000, y: 6200 }, { x: 0, y: 8000 }] },
+      { id: "hip3", points: [{ x: 8000, y: 4000 }, { x: 12000, y: 0 }] },
+      { id: "hip4", points: [{ x: 8000, y: 4000 }, { x: 12000, y: 8000 }] },
+    ];
+    const mesh = tessellatePitchedRoof(outline, ridges, 6, 280);
+    const main = sampleRoofMeshHeightMm(mesh, { x: 6000, y: 4000 });
+    const stub = sampleRoofMeshHeightMm(mesh, { x: 4000, y: 5100 });
+    const atEave = sampleRoofMeshHeightMm(mesh, { x: 6000, y: 200 });
+    assert.ok(main != null && main > 1500, `main ridge ${main}`);
+    assert.ok(
+      stub != null && stub > main! * 0.75,
+      `vertical ridge became a trough: ${stub} vs main ${main}`,
+    );
+    if (atEave != null) {
+      assert.ok(atEave < main! * 0.3, `eave ${atEave} vs ridge ${main}`);
+    }
+  });
+
   it("L-shape with two peak ridges does not bowl", () => {
     const outline = ell();
     const ridges = [
