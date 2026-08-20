@@ -172,6 +172,32 @@ describe("building roof", () => {
         );
       }
     }
+    const left = sampleRoofMeshHeightMm(mesh, { x: 4000, y: 4000 });
+    const mid = sampleRoofMeshHeightMm(mesh, { x: 6000, y: 4000 });
+    const right = sampleRoofMeshHeightMm(mesh, { x: 8000, y: 4000 });
+    assert.ok(left != null && right != null && mid != null);
+    assert.ok(
+      Math.abs(left! - mid!) < 80 && Math.abs(right! - mid!) < 80,
+      `ridge should stay level, L=${left} M=${mid} R=${right}`,
+    );
+    const slope = 6 / 12;
+    const oh = 280;
+    for (let x = 1800; x <= 10200; x += 1400) {
+      for (let y = 500; y <= 3500; y += 1000) {
+        const env = Math.min(
+          slope * (y + oh),
+          slope * (8000 + oh - y),
+          slope * (x + oh),
+          slope * (12000 + oh - x),
+        );
+        const h = sampleRoofMeshHeightMm(mesh, { x, y });
+        assert.ok(h != null, `mesh hole at ${x},${y}`);
+        assert.ok(
+          Math.abs(h! - env) < 70,
+          `front/side bulge at (${x},${y}): mesh ${h!.toFixed(0)} vs plane ${env.toFixed(0)}`,
+        );
+      }
+    }
   });
 
   it("notched hip roof keeps the main ridge high and the notch low", () => {
@@ -305,7 +331,7 @@ describe("building roof", () => {
       `L stub face sag ${atStubFace} vs rise ${rise}`,
     );
     const mesh = tessellatePitchedRoof(outline, ridges, pitch12, 280);
-    assert.ok(mesh.vertices.length > 20);
+    assert.ok(mesh.vertices.length >= 6);
     assert.ok(mesh.indices.length >= 3);
     const peak = mesh.vertices.reduce((m, v) => Math.max(m, v.hMm), 0);
     assert.ok(peak > 500);
@@ -320,7 +346,7 @@ describe("building roof", () => {
       },
     ];
     const mesh = tessellatePitchedRoof(outline, ridges, 6, 280);
-    assert.ok(mesh.vertices.length > 20);
+    assert.ok(mesh.vertices.length >= 6);
     assert.ok(mesh.indices.length >= 3);
     assert.ok(mesh.riseMm > 500);
     const peak = mesh.vertices.reduce((m, v) => Math.max(m, v.hMm), 0);
@@ -340,6 +366,12 @@ describe("building roof", () => {
     assert.ok(
       atFace != null && atFace > mesh.riseMm * 0.25 && atFace < mesh.riseMm * 0.85,
       `face should slope, got ${atFace} vs rise ${mesh.riseMm}`,
+    );
+    const left = sampleRoofMeshHeightMm(mesh, { x: 200, y: 3500 });
+    const right = sampleRoofMeshHeightMm(mesh, { x: 9800, y: 3500 });
+    assert.ok(
+      left != null && right != null && Math.abs(left! - right!) < 80,
+      `gable ridge should stay level, L=${left} R=${right}`,
     );
   });
 
