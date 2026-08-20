@@ -45,6 +45,7 @@ import {
   type WallPanelDescriptor,
   type WaterBodyDescriptor,
   type GroundMarkDescriptor,
+  type TriMeshDescriptor,
 } from "@/lib/cad3d/buildScene";
 import {
   loadCameraPose,
@@ -72,6 +73,7 @@ import {
 import { getPatioFinishTexture } from "@/lib/cad3d/patioFinishTextures";
 import { getWaterlineTileTexture } from "@/lib/cad3d/waterlineTileTextures";
 import { getHouseSidingTexture } from "@/lib/cad3d/houseSidingTextures";
+import { getRoofFinishTexture } from "@/lib/cad3d/roofFinishTextures";
 import { OpeningMesh } from "@/lib/cad3d/OpeningMesh";
 import {
   BasinCausticOverlay,
@@ -245,6 +247,7 @@ const MATERIALS: Record<SceneMaterialKey, MatDef> = {
     clearcoat: 0.55,
     clearcoatRoughness: 0.18,
   },
+  roof: { color: "#ffffff", roughness: 0.9, metalness: 0 },
 };
 
 type SceneTextures = {
@@ -390,6 +393,7 @@ function SelectableMaterial({
   waterlineTileId,
   colorHex,
   houseSidingId,
+  roofFinishId,
   waterShallow,
 }: {
   material: SceneMaterialKey;
@@ -400,6 +404,7 @@ function SelectableMaterial({
   waterlineTileId?: string;
   colorHex?: string;
   houseSidingId?: string;
+  roofFinishId?: string;
   waterShallow?: boolean;
 }) {
   const clippingPlanes = useContext(ClipPlanesContext);
@@ -427,21 +432,34 @@ function SelectableMaterial({
       };
     return getHouseSidingTexture(resolveHouseSidingId(houseSidingId), paint);
   }, [material, houseSidingId, colorHex]);
-  const pair = patioPair ?? waterlinePair ?? housePair ??
+  const roofPair = useMemo(() => {
+    if (material !== "roof") return null;
+    const paint =
+      houseExteriorColorFromHex(colorHex ?? "") ?? {
+        r: 58,
+        g: 54,
+        b: 50,
+      };
+    return getRoofFinishTexture(roofFinishId, paint);
+  }, [material, roofFinishId, colorHex]);
+  const pair = patioPair ?? waterlinePair ?? housePair ?? roofPair ??
     (mat.map && textures ? textures[mat.map] : null);
   const normalMap =
-    patioPair?.normal ?? waterlinePair?.normal ?? housePair?.normal;
+    patioPair?.normal ??
+    waterlinePair?.normal ??
+    housePair?.normal ??
+    roofPair?.normal;
   const isWater =
     material === "poolWater" ||
     material === "spaWater" ||
     material === "sectionWater" ||
     material === "spilloverWater";
   const transparent =
-    material === "cover"
+    material === "cover" || material === "roof"
       ? false
       : (opacity ?? 1) < 0.99 || material === "window" || isWater;
-  // Siding albedo already bakes the paint color — don't multiply it again.
-  const color = housePair ? "#ffffff" : (colorHex ?? mat.color);
+  // Siding / roof albedo already bakes the paint color — don't multiply it again.
+  const color = housePair || roofPair ? "#ffffff" : (colorHex ?? mat.color);
   if (material === "spilloverWater") {
     return (
       <SpilloverWaterMaterial selected={selected} opacity={opacity ?? 0.7} />
@@ -509,7 +527,7 @@ function SelectableMaterial({
       roughnessMap={pair?.roughness}
       normalMap={normalMap}
       roughness={mat.roughness}
-      metalness={mat.metalness}
+      metalness={roofPair?.metalness ?? mat.metalness}
       transparent={transparent}
       opacity={opacity ?? 1}
       // Opaque shells keep DoubleSide for cutaways; water uses FrontSide above.
@@ -518,7 +536,11 @@ function SelectableMaterial({
       depthWrite={!transparent}
       envMapIntensity={mat.envMapIntensity ?? 0.85}
       normalScale={
-        material === "patio" ? [1.35, 1.35] : [1, 1]
+        material === "patio"
+          ? [1.35, 1.35]
+          : material === "roof"
+            ? [1.25, 1.25]
+            : [1, 1]
       }
       emissive={selected ? "#1f8a70" : "#000000"}
       emissiveIntensity={selected ? 0.28 : 0}
@@ -587,6 +609,46 @@ function TerrainMesh({ desc }: { desc: TerrainDescriptor }) {
   return (
     <mesh geometry={geometry} receiveShadow castShadow={false}>
       <SelectableMaterial material={desc.material} selected={false} />
+    </mesh>
+  );
+}
+
+function TriMesh({
+  desc,
+  selected,
+  onSelect,
+}: {
+  desc: TriMeshDescriptor;
+  selected: boolean;
+  onSelect?: (sel: SceneSelection | null) => void;
+}) {
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(desc.positions, 3),
+    );
+    if (desc.uvs && desc.uvs.length) {
+      geo.setAttribute("uv", new THREE.Float32BufferAttribute(desc.uvs, 2));
+    }
+    geo.setIndex(desc.indices);
+    geo.computeVertexNormals();
+    return geo;
+  }, [desc]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  const handlers = useSelectHandlers(desc.select, onSelect);
+
+  return (
+    <mesh geometry={geometry} castShadow receiveShadow {...handlers}>
+      <SelectableMaterial
+        material={desc.material}
+        selected={selected}
+        opacity={desc.opacity}
+        colorHex={desc.colorHex}
+        houseSidingId={desc.sidingId}
+        roofFinishId={desc.roofFinishId}
+      />
     </mesh>
   );
 }
@@ -664,6 +726,7 @@ function ExtrudeMesh({
           waterShallow={desc.waterShallow}
           colorHex={desc.colorHex}
           houseSidingId={desc.sidingId}
+          roofFinishId={desc.roofFinishId}
         />
       </mesh>
       {desc.material === "poolFloor" ? (
@@ -2086,6 +2149,16 @@ function SceneMeshes({
           "select" in m ? selectionEquals(m.select, selection) : false;
         if (m.kind === "terrain") {
           return <TerrainMesh key={m.id} desc={m} />;
+        }
+        if (m.kind === "triMesh") {
+          return (
+            <TriMesh
+              key={m.id}
+              desc={m}
+              selected={selected}
+              onSelect={onSelect}
+            />
+          );
         }
         if (m.kind === "extrude") {
           return (

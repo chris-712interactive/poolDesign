@@ -7,6 +7,7 @@ export type DrawToolId =
   | "house_rect"
   | "house_poly"
   | "opening"
+  | "roof_ridge"
   | "pool_rect"
   | "pool_poly"
   | "steps"
@@ -189,7 +190,7 @@ export const TOOL_GROUPS: {
     id: "house",
     realm: "house",
     label: "House footprint",
-    hint: "Draw the house / building outline",
+    hint: "Draw the house / building outline and roof ridges",
     icon: (
       <Svg>
         <path d="M3 11l9-7 9 7" />
@@ -257,6 +258,17 @@ export const TOOL_META: {
         <path d="M6 20V6h8v14" />
         <path d="M10 12h1" />
         <rect x="15" y="7" width="5" height="7" rx="0.5" />
+      </Svg>
+    ),
+  },
+  {
+    id: "roof_ridge",
+    label: "Roof ridge",
+    icon: (
+      <Svg>
+        <path d="M3 14l9-8 9 8" />
+        <path d="M5 14v6h14v-6" />
+        <path d="M12 6v8" />
       </Svg>
     ),
   },
@@ -523,7 +535,8 @@ export function toolGroupForTool(
   if (tool === "cover_rect") return "cover";
   if (tool === "fence" || tool === "gate") return "fence";
   if (tool === "plumbing") return "plumbing";
-  if (tool === "house_rect" || tool === "house_poly") return "house";
+  if (tool === "house_rect" || tool === "house_poly" || tool === "roof_ridge")
+    return "house";
   if (tool === "opening") return "openings";
   if (tool === "steps" || tool === "bench" || tool === "sunshelf") return "pool";
   if (tool === "pool_rect" || tool === "pool_poly") {

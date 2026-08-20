@@ -1675,6 +1675,55 @@ export function drawBuilding(
     );
     ctx.textAlign = "start";
   }
+  if (
+    building.roof?.style === "pitched" ||
+    (building.roof?.ridges?.length ?? 0) > 0
+  ) {
+    drawBuildingRoofRidges(ctx, vp, building, selected);
+  }
+}
+
+export function drawBuildingRoofRidges(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  building: Building,
+  selected: boolean,
+) {
+  const ridges = building.roof?.ridges ?? [];
+  for (const ridge of ridges) {
+    if (ridge.points.length < 2) continue;
+    ctx.save();
+    ctx.strokeStyle = selected ? "#7a2f1a" : "#8a4a2a";
+    ctx.lineWidth = selected ? 2.75 : 2;
+    ctx.setLineDash([7, 4]);
+    ctx.beginPath();
+    ridge.points.forEach((p, i) => {
+      const c = worldToScreen(p, vp);
+      if (i === 0) ctx.moveTo(c.x, c.y);
+      else ctx.lineTo(c.x, c.y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const mid = ridge.points[Math.floor(ridge.points.length / 2)]!;
+    const mc = worldToScreen(mid, vp);
+    ctx.fillStyle = selected ? "#7a2f1a" : "rgba(122,47,26,0.9)";
+    ctx.font = "11px Source Sans 3, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Ridge", mc.x, mc.y - 8);
+    if (selected) {
+      for (const p of ridge.points) {
+        const c = worldToScreen(p, vp);
+        ctx.fillStyle = "#fff";
+        ctx.strokeStyle = "#7a2f1a";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
 }
 
 export function drawFeature(

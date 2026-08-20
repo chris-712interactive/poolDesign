@@ -107,6 +107,13 @@ import {
   resolveHouseSidingId,
 } from "./house-finishes";
 import {
+  clampRoofOverhangMm,
+  clampRoofPitch12,
+  resolveRoofColor,
+  resolveRoofMaterialId,
+} from "./roof-finishes";
+import { isRoofStyle, normalizeRoofRidges } from "./building-roof";
+import {
   DINING_CHAIR_CLEARANCE_MM,
   diningSetCatalogId,
 } from "./object-library";
@@ -411,6 +418,24 @@ export function normalizeDesignDocument(
         exteriorSidingId,
         ...(exteriorColor ? { exteriorColor } : { exteriorColor: undefined }),
         ...(storyExteriors ? { storyExteriors } : { storyExteriors: undefined }),
+        roof: (() => {
+          const raw = b.roof;
+          if (!raw || typeof raw !== "object") return undefined;
+          const style = isRoofStyle(raw.style) ? raw.style : "flat";
+          const finishId = resolveRoofMaterialId(raw.finishId);
+          const color = raw.color
+            ? resolveRoofColor(finishId, raw.color)
+            : undefined;
+          const ridges = normalizeRoofRidges(raw.ridges);
+          return {
+            style,
+            pitch12: clampRoofPitch12(raw.pitch12),
+            overhangMm: clampRoofOverhangMm(raw.overhangMm),
+            finishId,
+            ...(color ? { color } : {}),
+            ...(ridges.length ? { ridges } : {}),
+          };
+        })(),
         openings: (b.openings ?? []).map((o) => {
           const kind =
             o.kind === "sliding_door" || o.kind === "window"

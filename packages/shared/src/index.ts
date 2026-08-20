@@ -23,6 +23,8 @@ export * from "./furniture-finishes";
 export * from "./person-options";
 export * from "./fence-finishes";
 export * from "./house-finishes";
+export * from "./roof-finishes";
+export * from "./building-roof";
 export * from "./site-grade";
 export * from "./cover-supports";
 export * from "./scene3d";

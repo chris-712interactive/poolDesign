@@ -45,6 +45,14 @@ import {
   defaultFenceHeightMm,
   DEFAULT_HOUSE_EXTERIOR_FINISH_ID,
   DEFAULT_HOUSE_SIDING_ID,
+  DEFAULT_ROOF_MATERIAL_ID,
+  ROOF_PITCH_PRESETS,
+  autoGableRidgePoints,
+  clampRoofOverhangMm,
+  clampRoofPitch12,
+  distToPolygonBoundaryMm,
+  withBuildingRoof,
+  type BuildingRoof,
   defaultGateSize,
   fenceBillableLengthMm,
   fenceKindLabel,
@@ -208,6 +216,7 @@ import { CadScene3DDynamic } from "@/components/CadScene3DDynamic";
 import type { CadScene3DHandle } from "@/lib/cad3d/cadScene3dHandle";
 import { FenceFinishPicker } from "@/components/FenceFinishPicker";
 import { HouseFinishPicker } from "@/components/HouseFinishPicker";
+import { RoofFinishPicker } from "@/components/RoofFinishPicker";
 import { FurnitureFinishPicker } from "@/components/FurnitureFinishPicker";
 import { PatioFinishPicker } from "@/components/PatioFinishPicker";
 import { WaterlineTilePicker } from "@/components/WaterlineTilePicker";
@@ -351,6 +360,12 @@ type DragState =
       coverId: string;
       id: string;
       last: PointMm;
+    }
+  | {
+      mode: "roofRidge";
+      buildingId: string;
+      ridgeId: string;
+      index: number;
     }
   | {
       mode: "rotate";
@@ -1278,6 +1293,8 @@ export function CadWorkspace({
           ? "#8a6a2f"
           : tool === "house_poly"
             ? "#7a6550"
+            : tool === "roof_ridge"
+              ? "#7a2f1a"
             : tool === "fence"
               ? "#2a2a2c"
               : tool === "property_line"
@@ -1288,7 +1305,8 @@ export function CadWorkspace({
         tool !== "plumbing" &&
           tool !== "fence" &&
           tool !== "property_line" &&
-          tool !== "easement",
+          tool !== "easement" &&
+          tool !== "roof_ridge",
         tool === "pool_poly" || tool === "patio" || tool === "house_poly",
       );
       if (
@@ -1716,6 +1734,51 @@ export function CadWorkspace({
     clearDraft();
   }
 
+  function buildingForRidge(point: PointMm): Building | undefined {
+    const buildings = design.buildings ?? [];
+    if (selection?.kind === "building") {
+      const selected = buildings.find((b) => b.id === selection.id);
+      if (selected) return selected;
+    }
+    const inside = buildings.find((b) => pointInPolygon(point, b.outline));
+    if (inside) return inside;
+    let best: { b: Building; d: number } | null = null;
+    for (const b of buildings) {
+      const d = distToPolygonBoundaryMm(point, b.outline);
+      if (!best || d < best.d) best = { b, d };
+    }
+    return best && best.d < 2800 ? best.b : undefined;
+  }
+
+  function commitRoofRidge(a: PointMm, b: PointMm) {
+    const building = buildingForRidge(a) ?? buildingForRidge(b);
+    if (!building) return;
+    if (segmentLengthMm(a, b) < 200) return;
+    const ridge = {
+      id: newId("ridge"),
+      points: [
+        { x: a.x, y: a.y },
+        { x: b.x, y: b.y },
+      ],
+    };
+    const nextRoof: BuildingRoof = {
+      ...(building.roof ?? {}),
+      style: "pitched",
+      pitch12: clampRoofPitch12(building.roof?.pitch12),
+      overhangMm: clampRoofOverhangMm(building.roof?.overhangMm),
+      finishId: building.roof?.finishId ?? DEFAULT_ROOF_MATERIAL_ID,
+      ridges: [...(building.roof?.ridges ?? []), ridge],
+    };
+    commitDesign({
+      ...design,
+      buildings: (design.buildings ?? []).map((b) =>
+        b.id === building.id ? { ...b, roof: nextRoof } : b,
+      ),
+    });
+    setSelection({ kind: "building", id: building.id });
+    clearDraft();
+  }
+
   function finishPolygon(kind: "pool" | "patio" | "house") {
     const outline = outlineFromDraft();
     if (!outline) return;
@@ -1840,12 +1903,31 @@ export function CadWorkspace({
     else if (tool === "pool_poly") finishPolygon("pool");
     else if (tool === "patio") finishPolygon("patio");
     else if (tool === "house_poly") finishPolygon("house");
+    else if (tool === "roof_ridge" && draftPoints.length >= 2) {
+      commitRoofRidge(draftPoints[0], draftPoints[draftPoints.length - 1]);
+    }
   }
 
   function commitTypedLength() {
     if (!lengthBuffer || draftPoints.length === 0 || !previewPoint) return;
     const mm = parseLengthToMm(lengthBuffer, unitSystem);
     if (mm == null || mm <= 0) return;
+
+    if (tool === "roof_ridge" && draftPoints.length >= 1 && previewPoint) {
+      const from = draftPoints[draftPoints.length - 1];
+      const toward = constrainPoint(from, previewPoint);
+      const point = {
+        x: snapMm(pointAtLength(from, toward, mm).x, unitSystem),
+        y: snapMm(pointAtLength(from, toward, mm).y, unitSystem),
+      };
+      if (draftPoints.length === 1) {
+        commitRoofRidge(draftPoints[0], point);
+      } else {
+        setDraftPoints((pts) => [...pts, point]);
+      }
+      setLengthBuffer("");
+      return;
+    }
 
     // Rect tools: after two corners of one side, typed length = box depth.
     if (
@@ -1951,6 +2033,25 @@ export function CadWorkspace({
     if (selection?.kind === "feature" && selectedFeature) {
       const hit = check("feature", selectedFeature.id, selectedFeature.outline);
       if (hit) return hit;
+    }
+    return null;
+  }
+
+  function hitRoofRidgeVertex(
+    point: PointMm,
+  ): { buildingId: string; ridgeId: string; index: number } | null {
+    if (selection?.kind !== "building" || !selectedBuilding) return null;
+    const tol = VERTEX_HIT_PX / vp.scale;
+    for (const ridge of selectedBuilding.roof?.ridges ?? []) {
+      for (let i = 0; i < ridge.points.length; i++) {
+        if (segmentLengthMm(point, ridge.points[i]) <= tol) {
+          return {
+            buildingId: selectedBuilding.id,
+            ridgeId: ridge.id,
+            index: i,
+          };
+        }
+      }
     }
     return null;
   }
@@ -2127,6 +2228,7 @@ export function CadWorkspace({
     if (drag?.mode === "edge") return edgePullCursor(drag.nx, drag.ny);
     if (drag?.mode === "bulge") return "pointer";
     if (tool === "select" && cursor && !drag) {
+      if (hitRoofRidgeVertex(cursor)) return "pointer";
       if (hitVertex(cursor)) return "pointer";
       if (hitBulge(cursor)) return "pointer";
       const edge = hitEdge(cursor);
@@ -2584,6 +2686,12 @@ export function CadWorkspace({
         setDrag({ mode: "depthStation", ...depthHit });
         return;
       }
+      const ridgeHit = hitRoofRidgeVertex(point);
+      if (ridgeHit) {
+        dragOriginRef.current = structuredClone(design);
+        setDrag({ mode: "roofRidge", ...ridgeHit });
+        return;
+      }
       const vertex = hitVertex(point);
       if (vertex) {
         dragOriginRef.current = structuredClone(design);
@@ -2671,6 +2779,22 @@ export function CadWorkspace({
 
     if (tool === "opening") {
       commitOpeningOnWall(point);
+      return;
+    }
+
+    if (tool === "roof_ridge") {
+      setShiftDown(e.shiftKey);
+      if (!draftPoints.length) {
+        setDraftPoints([point]);
+        return;
+      }
+      const from = draftPoints[draftPoints.length - 1];
+      const next = constrainPoint(from, point, ortho || e.shiftKey);
+      if (draftPoints.length === 1) {
+        commitRoofRidge(draftPoints[0], next);
+        return;
+      }
+      setDraftPoints((pts) => [...pts, next]);
       return;
     }
 
@@ -3025,6 +3149,33 @@ export function CadWorkspace({
       setDesign((d) => ({
         ...d,
         objects: rotatePlacedObject(d.objects, drag.id, snapped),
+      }));
+      return;
+    }
+
+    if (drag.mode === "roofRidge") {
+      const snapped = {
+        x: snapMm(raw.x, unitSystem),
+        y: snapMm(raw.y, unitSystem),
+      };
+      setDesign((d) => ({
+        ...d,
+        buildings: (d.buildings ?? []).map((b) => {
+          if (b.id !== drag.buildingId) return b;
+          const ridges = (b.roof?.ridges ?? []).map((ridge) =>
+            ridge.id === drag.ridgeId
+              ? {
+                  ...ridge,
+                  points: ridge.points.map((pt, i) =>
+                    i === drag.index
+                      ? { ...pt, x: snapped.x, y: snapped.y }
+                      : pt,
+                  ),
+                }
+              : ridge,
+          );
+          return { ...b, roof: { ...(b.roof ?? {}), ridges } };
+        }),
       }));
       return;
     }
@@ -3693,6 +3844,7 @@ export function CadWorkspace({
         tool === "pool_rect" ||
         tool === "house_poly" ||
         tool === "house_rect" ||
+        tool === "roof_ridge" ||
         tool === "cover_rect" ||
         tool === "survey_calibrate") &&
       !e.metaKey &&
@@ -3727,6 +3879,10 @@ export function CadWorkspace({
                 ? "the ground floor"
                 : `story ${openingStoryFromPlanFilter(planStoryFilter)}`
             }. Edit story/size in Properties; drag to slide along the wall.`
+        : tool === "roof_ridge"
+          ? draftPoints.length === 0
+            ? "Roof ridge: click the first peak, then the second. Run it to the walls for a gable, or stop short for a hip. Select the house first if you have more than one."
+            : "Click the other end of the ridge (Shift = 90°). Type length + Enter for an exact run."
           : tool === "cover_rect"
           ? draftPoints.length === 0
             ? coverKind === "roof"
@@ -5142,6 +5298,210 @@ export function CadWorkspace({
                         })
                       }
                     />
+                    <div className="field">
+                      <label htmlFor="bldg-roof-style">Roof</label>
+                      <select
+                        id="bldg-roof-style"
+                        value={selectedBuilding.roof?.style === "pitched" ? "pitched" : "flat"}
+                        onChange={(e) => {
+                          const style = e.target.value === "pitched" ? "pitched" : "flat";
+                          commitDesign({
+                            ...design,
+                            buildings: (design.buildings ?? []).map((b) => {
+                              if (b.id !== selectedBuilding.id) return b;
+                              const ridges =
+                                b.roof?.ridges && b.roof.ridges.length > 0
+                                  ? b.roof.ridges
+                                  : style === "pitched"
+                                    ? [
+                                        {
+                                          id: newId("ridge"),
+                                          points: autoGableRidgePoints(b.outline),
+                                        },
+                                      ]
+                                    : b.roof?.ridges;
+                              return withBuildingRoof(b, {
+                                style,
+                                pitch12: clampRoofPitch12(b.roof?.pitch12),
+                                overhangMm: clampRoofOverhangMm(b.roof?.overhangMm),
+                                finishId:
+                                  b.roof?.finishId ?? DEFAULT_ROOF_MATERIAL_ID,
+                                ridges,
+                              });
+                            }),
+                          });
+                        }}
+                      >
+                        <option value="flat">Flat</option>
+                        <option value="pitched">Pitched (gable / hip)</option>
+                      </select>
+                    </div>
+                    {selectedBuilding.roof?.style === "pitched" ? (
+                      <>
+                        <div className="field">
+                          <label htmlFor="bldg-roof-pitch">Pitch</label>
+                          <select
+                            id="bldg-roof-pitch"
+                            value={clampRoofPitch12(selectedBuilding.roof?.pitch12)}
+                            onChange={(e) => {
+                              const pitch12 = clampRoofPitch12(
+                                Number(e.target.value),
+                              );
+                              commitDesign({
+                                ...design,
+                                buildings: (design.buildings ?? []).map((b) =>
+                                  b.id === selectedBuilding.id
+                                    ? withBuildingRoof(b, { pitch12 })
+                                    : b,
+                                ),
+                              });
+                            }}
+                          >
+                            {ROOF_PITCH_PRESETS.map((n) => (
+                              <option key={n} value={n}>
+                                {n}/12
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="field">
+                          <label htmlFor="bldg-roof-overhang">Overhang</label>
+                          <input
+                            id="bldg-roof-overhang"
+                            key={`bldg-overhang-${selectedBuilding.id}-${selectedBuilding.roof?.overhangMm ?? "default"}`}
+                            defaultValue={formatLength(
+                              clampRoofOverhangMm(
+                                selectedBuilding.roof?.overhangMm,
+                              ),
+                              unitSystem,
+                            )}
+                            onBlur={(e) => {
+                              const mm = parseLengthToMm(
+                                e.target.value,
+                                unitSystem,
+                              );
+                              if (mm == null) return;
+                              commitDesign({
+                                ...design,
+                                buildings: (design.buildings ?? []).map((b) =>
+                                  b.id === selectedBuilding.id
+                                    ? withBuildingRoof(b, {
+                                        overhangMm: clampRoofOverhangMm(mm),
+                                      })
+                                    : b,
+                                ),
+                              });
+                            }}
+                          />
+                        </div>
+                        <RoofFinishPicker
+                          finishId={selectedBuilding.roof?.finishId}
+                          color={selectedBuilding.roof?.color}
+                          onChange={(next) =>
+                            commitDesign({
+                              ...design,
+                              buildings: (design.buildings ?? []).map((b) =>
+                                b.id === selectedBuilding.id
+                                  ? withBuildingRoof(b, {
+                                      finishId: next.finishId,
+                                      color: next.color,
+                                    })
+                                  : b,
+                              ),
+                            })
+                          }
+                        />
+                        <div className="row" style={{ gap: "0.4rem", flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            className="btn secondary"
+                            onClick={() => chooseTool("roof_ridge")}
+                          >
+                            Draw ridge
+                          </button>
+                          <button
+                            type="button"
+                            className="btn secondary"
+                            onClick={() => {
+                              commitDesign({
+                                ...design,
+                                buildings: (design.buildings ?? []).map((b) => {
+                                  if (b.id !== selectedBuilding.id) return b;
+                                  return withBuildingRoof(b, {
+                                    style: "pitched",
+                                    ridges: [
+                                      {
+                                        id: newId("ridge"),
+                                        points: autoGableRidgePoints(b.outline),
+                                      },
+                                    ],
+                                  });
+                                }),
+                              });
+                            }}
+                          >
+                            Auto gable ridge
+                          </button>
+                        </div>
+                        {(selectedBuilding.roof?.ridges ?? []).length > 0 ? (
+                          <div className="stack" style={{ gap: "0.25rem" }}>
+                            {(selectedBuilding.roof?.ridges ?? []).map((ridge, i) => (
+                              <div
+                                key={ridge.id}
+                                className="row"
+                                style={{
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <span style={{ fontSize: "0.82rem" }}>
+                                  Ridge {i + 1}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn secondary"
+                                  onClick={() =>
+                                    commitDesign({
+                                      ...design,
+                                      buildings: (design.buildings ?? []).map(
+                                        (b) =>
+                                          b.id === selectedBuilding.id
+                                            ? withBuildingRoof(b, {
+                                                ridges: (
+                                                  b.roof?.ridges ?? []
+                                                ).filter((r) => r.id !== ridge.id),
+                                              })
+                                            : b,
+                                      ),
+                                    })
+                                  }
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <RoofFinishPicker
+                        finishId={selectedBuilding.roof?.finishId}
+                        color={selectedBuilding.roof?.color}
+                        onChange={(next) =>
+                          commitDesign({
+                            ...design,
+                            buildings: (design.buildings ?? []).map((b) =>
+                              b.id === selectedBuilding.id
+                                ? withBuildingRoof(b, {
+                                    finishId: next.finishId,
+                                    color: next.color,
+                                  })
+                                : b,
+                            ),
+                          })
+                        }
+                      />
+                    )}
                     <p
                       className="muted"
                       style={{ margin: 0, fontSize: "0.78rem" }}
@@ -5149,7 +5509,8 @@ export function CadWorkspace({
                       Use 2+ for multi-story homes — floors and ceilings are
                       added between stories. Siding and paint can differ per
                       story. Default ceiling height is 8′ (adjust for taller
-                      rooms).
+                      rooms). Draw ridge lines on plan for a gable (ridge to
+                      the walls) or hip (ridge short of the ends).
                       {(selectedBuilding.openings ?? []).length > 0
                         ? ` ${(selectedBuilding.openings ?? []).length} opening(s) on walls — select an opening to edit size.`
                         : " Use the Door / window tool to click openings onto walls."}
@@ -8188,7 +8549,21 @@ function translateDesign(
     return {
       ...d,
       buildings: (d.buildings ?? []).map((b) =>
-        b.id === id ? { ...b, outline: b.outline.map(shift) } : b,
+        b.id === id
+          ? {
+              ...b,
+              outline: b.outline.map(shift),
+              roof: b.roof
+                ? {
+                    ...b.roof,
+                    ridges: (b.roof.ridges ?? []).map((ridge) => ({
+                      ...ridge,
+                      points: ridge.points.map(shift),
+                    })),
+                  }
+                : b.roof,
+            }
+          : b,
       ),
     };
   }

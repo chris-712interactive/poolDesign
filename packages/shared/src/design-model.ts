@@ -1,4 +1,5 @@
 import type { CatalogCategory, CatalogUnit } from "./catalog";
+import type { BuildingRoof } from "./building-roof";
 import type { DesignLevel } from "./design-level";
 import { objectPlanSizeMm } from "./object-library";
 import type { UnitSystem } from "./units";
@@ -403,6 +404,11 @@ export type Building = {
   storyExteriors?: BuildingStoryExterior[];
   /** Doors and windows on wall edges */
   openings?: BuildingOpening[];
+  /**
+   * Pitched or flat roof. Draw ridge / peak lines in 2D; 3D lifts a
+   * gable or hip from those lines. Color and material live here too.
+   */
+  roof?: BuildingRoof;
 };
 
 export type PlacedObject = {

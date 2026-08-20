@@ -583,7 +583,25 @@ export function CadToolPalette({
                           {toolMeta("house_poly").icon}
                           <ToolTooltip label="House polygon" />
                         </button>
+                        <button
+                          type="button"
+                          className={`tool-icon-btn ${tool === "roof_ridge" ? "active" : ""}`}
+                          title="Roof ridge / peak"
+                          aria-label="Roof ridge / peak"
+                          onClick={() => activateDraw("roof_ridge")}
+                        >
+                          {toolMeta("roof_ridge").icon}
+                          <ToolTooltip label="Roof ridge" />
+                        </button>
                       </div>
+                      <p
+                        className="muted"
+                        style={{ margin: 0, fontSize: "0.75rem" }}
+                      >
+                        Draw a ridge across the house for a gable; stop short of
+                        the ends for a hip. Edit pitch and shingles in
+                        Properties.
+                      </p>
                       <div className="field" style={{ margin: 0 }}>
                         <label htmlFor="house-stories-tool">Stories</label>
                         <input

@@ -85,6 +85,9 @@ import {
   POOL_GATE_GROUND_CLEARANCE_MM,
   type ResolvedSpaSpillover,
   type ResolvedInfinityEdge,
+  resolvedBuildingRoof,
+  tessellatePitchedRoof,
+  roofColorHex,
 } from "@pool-design/shared";
 import {
   openOutlineRing,
@@ -137,7 +140,8 @@ export type SceneMaterialKey =
   | "gate"
   | "gateSteel"
   | "gateLatch"
-  | "gateButton";
+  | "gateButton"
+  | "roof";
 
 /** Optional presentation toggles for the 3D preview. */
 export type SceneBuildOptions = {
@@ -174,6 +178,8 @@ export type ExtrudeDescriptor = {
   /** Exterior wall tint (corner fillers matching wall panels). */
   colorHex?: string;
   sidingId?: string;
+  /** House roof catalog id (when material === "roof"). */
+  roofFinishId?: string;
 } & Selectable;
 
 export type BoxDescriptor = {
@@ -429,6 +435,20 @@ export type GroundMarkDescriptor = {
   opacity?: number;
 };
 
+/** Triangle soup in world meters (pitched roofs, gable infill). */
+export type TriMeshDescriptor = {
+  kind: "triMesh";
+  id: string;
+  material: SceneMaterialKey;
+  positions: number[];
+  uvs?: number[];
+  indices: number[];
+  colorHex?: string;
+  sidingId?: string;
+  roofFinishId?: string;
+  opacity?: number;
+} & Selectable;
+
 export type MeshDescriptor =
   | ExtrudeDescriptor
   | BoxDescriptor
@@ -439,7 +459,8 @@ export type MeshDescriptor =
   | TerrainDescriptor
   | FencePanelDescriptor
   | WallPanelDescriptor
-  | GroundMarkDescriptor;
+  | GroundMarkDescriptor
+  | TriMeshDescriptor;
 
 export type SceneModel = {
   center: { x: number; z: number };
@@ -496,6 +517,45 @@ function planDirToWorldXZ(nx: number, ny: number): { x: number; z: number } {
   const z = -ny;
   const len = Math.hypot(x, z) || 1;
   return { x: x / len, z: z / len };
+}
+
+function flipTriWindingIfNeeded(
+  positions: number[],
+  indices: number[],
+  wantY: "up" | "out",
+  outX = 0,
+  outZ = 0,
+) {
+  if (indices.length < 3) return;
+  const ia = indices[0]!;
+  const ib = indices[1]!;
+  const ic = indices[2]!;
+  const ax = positions[ia * 3]!;
+  const ay = positions[ia * 3 + 1]!;
+  const az = positions[ia * 3 + 2]!;
+  const bx = positions[ib * 3]!;
+  const by = positions[ib * 3 + 1]!;
+  const bz = positions[ib * 3 + 2]!;
+  const cx = positions[ic * 3]!;
+  const cy = positions[ic * 3 + 1]!;
+  const cz = positions[ic * 3 + 2]!;
+  const abx = bx - ax;
+  const aby = by - ay;
+  const abz = bz - az;
+  const acx = cx - ax;
+  const acy = cy - ay;
+  const acz = cz - az;
+  const nx = aby * acz - abz * acy;
+  const ny = abz * acx - abx * acz;
+  const nz = abx * acy - aby * acx;
+  const bad =
+    wantY === "up" ? ny < 0 : nx * outX + nz * outZ < 0;
+  if (!bad) return;
+  for (let i = 0; i < indices.length; i += 3) {
+    const t = indices[i + 1]!;
+    indices[i + 1] = indices[i + 2]!;
+    indices[i + 2] = t;
+  }
 }
 
 function ringPoints(outline: PointMm[]): PointMm[] {
@@ -2769,33 +2829,120 @@ export function buildSceneModel(
         }
       }
 
-      // Flat roof deck + eaves overhang so the volume reads as a house, not a foam block.
-      const eavesMm = 280;
+      // Roof: flat slab, or a pitched surface from 2D ridge / peak lines.
+      const roof = resolvedBuildingRoof(b);
+      const eavesMm = roof.overhangMm;
       const roofSlab = 0.12;
       const fascia = 0.08;
       const roofOutline = closeOutline(
         offsetClosedOutline(b.outline, eavesMm),
       );
-      meshes.push({
-        kind: "extrude",
-        id: `building_roof_${b.id}`,
-        material: "cover",
-        outlineMm: roofOutline,
-        bottomY: h,
-        height: roofSlab,
-        select,
-      });
-      meshes.push({
-        kind: "extrude",
-        id: `building_fascia_${b.id}`,
-        material: "cover",
-        outlineMm: roofOutline,
-        holeOutlinesMm: [closeOutline(b.outline)],
-        bottomY: h - fascia,
-        height: fascia,
-        opacity: 1,
-        select,
-      });
+      const roofColor = roofColorHex(roof.color);
+      if (roof.style === "pitched" && roof.ridges.length > 0) {
+        const tess = tessellatePitchedRoof(
+          b.outline,
+          roof.ridges,
+          roof.pitch12,
+          eavesMm,
+        );
+        if (tess.indices.length >= 3) {
+          const positions: number[] = [];
+          const uvs: number[] = [];
+          for (const v of tess.vertices) {
+            const xz = planToWorldXZ(v);
+            positions.push(xz.x, h + mmToMeters(v.hMm), xz.z);
+            uvs.push(xz.x, xz.z);
+          }
+          const indices = tess.indices.slice();
+          flipTriWindingIfNeeded(positions, indices, "up");
+          meshes.push({
+            kind: "triMesh",
+            id: `building_roof_${b.id}`,
+            material: "roof",
+            positions,
+            uvs,
+            indices,
+            colorHex: roofColor,
+            roofFinishId: roof.finishId,
+            select,
+          });
+        }
+        if (tess.gables.length) {
+          const gPos: number[] = [];
+          const gUv: number[] = [];
+          const gIdx: number[] = [];
+          const look = storyLooks[stories - 1] ?? storyLooks[0];
+          for (const g of tess.gables) {
+            const a0 = planToWorldXZ(g.a);
+            const b0 = planToWorldXZ(g.b);
+            const ha = h + mmToMeters(g.haMm);
+            const hb = h + mmToMeters(g.hbMm);
+            const base = gPos.length / 3;
+            gPos.push(a0.x, h, a0.z, b0.x, h, b0.z, b0.x, hb, b0.z, a0.x, ha, a0.z);
+            const along = Math.hypot(b0.x - a0.x, b0.z - a0.z);
+            gUv.push(0, 0, along, 0, along, hb - h, 0, ha - h);
+            const n = edgeOutwardNormal(
+              g.b.x - g.a.x,
+              g.b.y - g.a.y,
+              wallArea,
+            );
+            const out = planDirToWorldXZ(n.x, n.y);
+            const tmpIdx = [0, 1, 2, 0, 2, 3];
+            const tmpPos = gPos.slice(base * 3);
+            flipTriWindingIfNeeded(tmpPos, tmpIdx, "out", out.x, out.z);
+            gIdx.push(...tmpIdx.map((i) => i + base));
+          }
+          meshes.push({
+            kind: "triMesh",
+            id: `building_gable_${b.id}`,
+            material: "building",
+            positions: gPos,
+            uvs: gUv,
+            indices: gIdx,
+            colorHex: look?.colorHex,
+            sidingId: look?.sidingId,
+            select,
+          });
+        }
+        meshes.push({
+          kind: "extrude",
+          id: `building_fascia_${b.id}`,
+          material: "roof",
+          outlineMm: roofOutline,
+          holeOutlinesMm: [closeOutline(b.outline)],
+          bottomY: h - fascia,
+          height: fascia,
+          opacity: 1,
+          colorHex: roofColor,
+          roofFinishId: roof.finishId,
+          select,
+        });
+      } else {
+        meshes.push({
+          kind: "extrude",
+          id: `building_roof_${b.id}`,
+          material: "roof",
+          outlineMm: roofOutline,
+          bottomY: h,
+          height: roofSlab,
+          colorHex: roofColor,
+          roofFinishId: roof.finishId,
+          select,
+        });
+        meshes.push({
+          kind: "extrude",
+          id: `building_fascia_${b.id}`,
+          material: "roof",
+          outlineMm: roofOutline,
+          holeOutlinesMm: [closeOutline(b.outline)],
+          bottomY: h - fascia,
+          height: fascia,
+          opacity: 1,
+          colorHex: roofColor,
+          roofFinishId: roof.finishId,
+          select,
+        });
+      }
 
       for (const opening of b.openings ?? []) {
         const geom = openingEndpoints(b.outline, opening);
