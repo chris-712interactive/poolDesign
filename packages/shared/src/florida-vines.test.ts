@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_VINE_ID,
   FLORIDA_VINES,
+  clampTrellisHeightMm,
+  defaultTrellisHeightMm,
   defaultVineId,
   getFloridaVine,
   isTrellisId,
@@ -33,6 +35,17 @@ describe("florida vines", () => {
     assert.equal(isTrellisId("planter"), false);
     assert.equal(defaultVineId("trellis"), DEFAULT_VINE_ID);
     assert.equal(defaultVineId("lounge_chair"), undefined);
+  });
+
+  it("clamps trellis height to a 3′–12′ range", () => {
+    assert.equal(defaultTrellisHeightMm("trellis"), 7 * 304.8);
+    assert.equal(defaultTrellisHeightMm("trellis_arbor"), 8 * 304.8);
+    assert.equal(clampTrellisHeightMm(undefined, "trellis"), 7 * 304.8);
+    assert.equal(clampTrellisHeightMm(2 * 304.8, "trellis"), 3 * 304.8);
+    assert.equal(clampTrellisHeightMm(20 * 304.8, "trellis_arbor"), 12 * 304.8);
+    assert.ok(
+      Math.abs(clampTrellisHeightMm(8 * 304.8, "trellis") - 8 * 304.8) < 1e-6,
+    );
   });
 
   it("picks a bloom shape that matches the vine", () => {

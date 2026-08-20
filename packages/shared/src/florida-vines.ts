@@ -656,6 +656,25 @@ export function isTrellisId(id: string | undefined | null): boolean {
   return id === "trellis" || id === "trellis_arbor";
 }
 
+const FT = 304.8;
+export const TRELLIS_HEIGHT_MIN_MM = 3 * FT;
+export const TRELLIS_HEIGHT_MAX_MM = 12 * FT;
+
+export function defaultTrellisHeightMm(catalogItemId?: string): number {
+  return catalogItemId === "trellis_arbor" ? 8 * FT : 7 * FT;
+}
+
+export function clampTrellisHeightMm(
+  heightMm: number | undefined | null,
+  catalogItemId?: string,
+): number {
+  const fallback = defaultTrellisHeightMm(catalogItemId);
+  if (heightMm == null || !Number.isFinite(heightMm) || heightMm <= 0) {
+    return fallback;
+  }
+  return Math.min(TRELLIS_HEIGHT_MAX_MM, Math.max(TRELLIS_HEIGHT_MIN_MM, heightMm));
+}
+
 export function defaultVineId(catalogItemId: string): string | undefined {
   return isTrellisId(catalogItemId) ? DEFAULT_VINE_ID : undefined;
 }

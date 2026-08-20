@@ -77,6 +77,7 @@ import {
   furnitureFinishRoles,
   defaultVineId,
   isTrellisId,
+  clampTrellisHeightMm,
   getPlaceableItem,
   isBubblerId,
   isDiningSetId,
@@ -6210,6 +6211,14 @@ export function CadWorkspace({
                         ),
                       })
                     }
+                    onHeight={(heightMm) =>
+                      commitDesign({
+                        ...design,
+                        objects: design.objects.map((o) =>
+                          o.id === selectedObject.id ? { ...o, heightMm } : o,
+                        ),
+                      })
+                    }
                     onFinishChange={(patch) =>
                       commitDesign({
                         ...design,
@@ -8097,6 +8106,7 @@ function FurnitureFields({
   unitSystem,
   onRotate,
   onDimensions,
+  onHeight,
   onFinishChange,
   onLedChange,
   onPersonChange,
@@ -8107,6 +8117,7 @@ function FurnitureFields({
   unitSystem: UnitSystem;
   onRotate: (deg: number) => void;
   onDimensions: (widthMm: number, depthMm: number) => void;
+  onHeight?: (heightMm: number) => void;
   onFinishChange?: (patch: {
     frameFinishId?: string;
     fabricFinishId?: string;
@@ -8140,8 +8151,8 @@ function FurnitureFields({
       <strong>{object.name}</strong>
       {isTrellisId(object.catalogItemId) && (
         <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
-          Place anywhere on the plan. R rotates 15°. Lattice frame finish and
-          Florida vine variety are below.
+          Place anywhere on the plan. R rotates 15°. Set height below; lattice
+          frame finish and Florida vine variety follow.
         </p>
       )}
       {isPerson && onPersonChange && (
@@ -8298,6 +8309,34 @@ function FurnitureFields({
                 }}
               />
             </div>
+            {isTrellisId(object.catalogItemId) && onHeight ? (
+              <div className="field">
+                <label htmlFor="furn-height">Height</label>
+                <input
+                  id="furn-height"
+                  defaultValue={formatLength(
+                    clampTrellisHeightMm(
+                      object.heightMm,
+                      object.catalogItemId,
+                    ),
+                    unitSystem,
+                  )}
+                  placeholder={
+                    unitSystem === "imperial" ? "e.g. 8′" : "e.g. 2.4m"
+                  }
+                  onBlur={(e) => {
+                    const mm = parseLengthToMm(e.target.value, unitSystem);
+                    if (mm == null || mm <= 0) return;
+                    onHeight(
+                      clampTrellisHeightMm(mm, object.catalogItemId),
+                    );
+                  }}
+                />
+                <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
+                  Lattice height in 3D. Typical 6′–8′; range 3′–12′.
+                </p>
+              </div>
+            ) : null}
             <div className="field">
               <label htmlFor="furn-depth">
                 {dining ? "Table depth" : "Depth / length"}

@@ -96,7 +96,7 @@ import {
   getFurnitureFinish,
   isFurnitureFinishId,
 } from "./furniture-finishes";
-import { defaultVineId, isTrellisId, resolveVineId } from "./florida-vines";
+import { defaultVineId, isTrellisId, resolveVineId, clampTrellisHeightMm } from "./florida-vines";
 import {
   isFenceFinishId,
   resolveFenceFinish,
@@ -336,6 +336,9 @@ export function normalizeDesignDocument(
         const foot = personFootprintMm(heightMm, personSex);
         nextWidth = foot.widthMm;
         nextDepth = foot.depthMm;
+      }
+      if (isTrellisId(catalogItemId)) {
+        heightMm = clampTrellisHeightMm(heightMm, catalogItemId);
       }
 
       return {
