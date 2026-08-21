@@ -344,10 +344,10 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     id: "sunshelf_chaise",
     name: "Sunshelf chaise",
     category: "furniture",
-    /** Typical in-pool tanning-ledge lounge (~28″ × 66″ × 16″). */
-    widthMm: 28 * IN,
-    depthMm: 66 * IN,
-    heightMm: 16 * IN,
+    /** Typical in-pool wave chaise (~26″ × 70″ × 26″ at the headrest). */
+    widthMm: 26 * IN,
+    depthMm: 70 * IN,
+    heightMm: 26 * IN,
     layerId: "furniture",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 38000,

@@ -1663,7 +1663,7 @@ function DiningSetMesh({
   );
 }
 
-/** In-pool tanning-ledge chaise: one-piece molded resin, not a deck lounge. */
+/** In-pool tanning-ledge chaise: one-piece S-curve resin, no arms or legs. */
 function SunshelfChaiseMesh({
   sx,
   sy,
@@ -1680,100 +1680,173 @@ function SunshelfChaiseMesh({
   groupProps: Record<string, unknown>;
 }) {
   const clippingPlanes = useContext(ClipPlanesContext);
-  const { body, arms } = useMemo(() => {
-    const L = Math.max(0.9, sz * 0.98);
-    const H = Math.max(0.28, sy * 0.96);
-    const bodyW = Math.max(0.32, sx * 0.72);
-    const y0 = -sy * 0.5 + 0.01;
-    const topPts = [
-      new THREE.Vector2(0, y0 + 0.048),
-      new THREE.Vector2(L * 0.1, y0 + 0.04),
-      new THREE.Vector2(L * 0.26, y0 + 0.055),
-      new THREE.Vector2(L * 0.42, y0 + 0.07),
-      new THREE.Vector2(L * 0.52, y0 + 0.062),
-      new THREE.Vector2(L * 0.62, y0 + 0.1),
-      new THREE.Vector2(L * 0.72, y0 + 0.2),
-      new THREE.Vector2(L * 0.82, y0 + H * 0.55),
-      new THREE.Vector2(L * 0.9, y0 + H * 0.82),
-      new THREE.Vector2(L * 0.96, y0 + H * 0.94),
-      new THREE.Vector2(L * 0.995, y0 + H * 0.78),
-      new THREE.Vector2(L, y0 + H * 0.58),
-    ];
-    const botPts = [
-      new THREE.Vector2(L * 0.97, y0 + H * 0.42),
-      new THREE.Vector2(L * 0.88, y0 + 0.08),
-      new THREE.Vector2(L * 0.72, y0 + 0.018),
-      new THREE.Vector2(L * 0.2, y0 + 0.016),
-      new THREE.Vector2(L * 0.04, y0 + 0.022),
-      new THREE.Vector2(0.01, y0 + 0.028),
-    ];
-    const top = new THREE.SplineCurve(topPts).getPoints(40);
-    const bot = new THREE.SplineCurve(botPts).getPoints(18);
-    const shape = new THREE.Shape();
-    shape.moveTo(top[0].x, top[0].y);
-    for (let i = 1; i < top.length; i++) shape.lineTo(top[i].x, top[i].y);
-    for (const p of bot) shape.lineTo(p.x, p.y);
-    shape.closePath();
-    const bodyGeo = new THREE.ExtrudeGeometry(shape, {
-      depth: bodyW,
-      bevelEnabled: true,
-      bevelThickness: Math.min(0.032, bodyW * 0.08),
-      bevelSize: Math.min(0.028, bodyW * 0.07),
-      bevelSegments: 3,
-      curveSegments: 8,
-    });
-    bodyGeo.rotateY(Math.PI / 2);
-    bodyGeo.translate(-bodyW / 2, 0, L / 2);
-    bodyGeo.computeVertexNormals();
-
-    const armR = Math.min(0.03, sx * 0.045);
-    const armX = sx * 0.38;
-    const makeArm = (side: number) => {
-      const curve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(side * armX * 0.92, y0 + 0.07, L * 0.18),
-        new THREE.Vector3(side * armX, y0 + 0.1, L * 0.02),
-        new THREE.Vector3(side * armX * 1.02, y0 + 0.16, -L * 0.12),
-        new THREE.Vector3(side * armX * 0.95, y0 + H * 0.42, -L * 0.28),
-        new THREE.Vector3(side * armX * 0.7, y0 + H * 0.55, -L * 0.38),
-      ]);
-      return new THREE.TubeGeometry(curve, 24, armR, 10, false);
-    };
-    return { body: bodyGeo, arms: [makeArm(-1), makeArm(1)] };
-  }, [sx, sy, sz]);
-
-  useLayoutEffect(
-    () => () => {
-      body.dispose();
-      arms.forEach((g) => g.dispose());
-    },
-    [body, arms],
+  const geometry = useMemo(
+    () => buildSunshelfChaiseGeometry(sx, sy, sz),
+    [sx, sy, sz],
   );
-
-  const resinProps = {
-    color,
-    roughness: 0.3,
-    metalness: 0.03,
-    clearcoat: 0.42,
-    clearcoatRoughness: 0.38,
-    envMapIntensity: 0.85,
-    emissive: selected ? "#1f8a70" : "#000000",
-    emissiveIntensity: selected ? 0.22 : 0,
-    clippingPlanes,
-    clipShadows: clippingPlanes.length > 0,
-  };
+  useLayoutEffect(() => () => geometry.dispose(), [geometry]);
 
   return (
     <group {...groupProps}>
-      <mesh geometry={body} castShadow receiveShadow>
-        <meshPhysicalMaterial {...resinProps} />
+      <mesh geometry={geometry} castShadow receiveShadow>
+        <meshPhysicalMaterial
+          color={color}
+          roughness={0.42}
+          metalness={0.02}
+          clearcoat={0.18}
+          clearcoatRoughness={0.55}
+          envMapIntensity={0.55}
+          emissive={selected ? "#1f8a70" : "#000000"}
+          emissiveIntensity={selected ? 0.22 : 0}
+          clippingPlanes={clippingPlanes}
+          clipShadows={clippingPlanes.length > 0}
+        />
       </mesh>
-      {arms.map((geo, i) => (
-        <mesh key={i} geometry={geo} castShadow>
-          <meshPhysicalMaterial {...resinProps} />
-        </mesh>
-      ))}
     </group>
   );
+}
+
+/**
+ * Sweep a slightly concave (body-cradle) ribbon along an S-curve:
+ * reclined back → seat on the shelf → knee hump → foot on the shelf.
+ */
+function buildSunshelfChaiseGeometry(
+  sx: number,
+  sy: number,
+  sz: number,
+): THREE.BufferGeometry {
+  const L = Math.max(1.1, sz * 0.98);
+  const H = Math.max(0.38, sy * 0.96);
+  const W = Math.max(0.4, sx * 0.94);
+  const thick = Math.min(0.068, Math.max(0.048, H * 0.1));
+  const cradle = Math.min(0.02, W * 0.032);
+  const yFloor = -sy * 0.5 + 0.004;
+  const yCl = (h: number) => yFloor + h;
+
+  const curve = new THREE.SplineCurve([
+    new THREE.Vector2(0, yCl(H * 0.98)),
+    new THREE.Vector2(L * 0.07, yCl(H * 0.84)),
+    new THREE.Vector2(L * 0.15, yCl(H * 0.52)),
+    new THREE.Vector2(L * 0.22, yCl(H * 0.18)),
+    new THREE.Vector2(L * 0.3, yCl(thick * 0.55)),
+    new THREE.Vector2(L * 0.36, yCl(thick * 0.55)),
+    new THREE.Vector2(L * 0.48, yCl(H * 0.36)),
+    new THREE.Vector2(L * 0.56, yCl(H * 0.44)),
+    new THREE.Vector2(L * 0.66, yCl(H * 0.28)),
+    new THREE.Vector2(L * 0.78, yCl(thick * 0.7)),
+    new THREE.Vector2(L * 0.9, yCl(thick * 0.55)),
+    new THREE.Vector2(L, yCl(thick * 0.55)),
+  ]);
+
+  const nAlong = 56;
+  const nAcross = 9;
+  const mid = curve.getPoints(nAlong);
+  const tangents: THREE.Vector2[] = [];
+  const normals: THREE.Vector2[] = [];
+  for (let i = 0; i < mid.length; i++) {
+    const a = mid[Math.max(0, i - 1)];
+    const b = mid[Math.min(mid.length - 1, i + 1)];
+    const t = new THREE.Vector2(b.x - a.x, b.y - a.y);
+    if (t.lengthSq() < 1e-12) t.set(1, 0);
+    t.normalize();
+    tangents.push(t);
+    // Rotate tangent CCW so the sitting face points "inside" the wave (up at the seat).
+    normals.push(new THREE.Vector2(-t.y, t.x));
+  }
+
+  const positions: number[] = [];
+  const normals3: number[] = [];
+  const uvs: number[] = [];
+  const pushV = (
+    along: number,
+    height: number,
+    width: number,
+    nx: number,
+    ny: number,
+    u: number,
+    v: number,
+  ) => {
+    positions.push(along, height, width);
+    normals3.push(nx, ny, 0);
+    uvs.push(u, v);
+  };
+
+  const idxOf = (i: number, j: number, layer: 0 | 1) =>
+    layer * (nAlong + 1) * nAcross + i * nAcross + j;
+
+  for (let layer = 0; layer < 2; layer++) {
+    const sit = layer === 0;
+    for (let i = 0; i <= nAlong; i++) {
+      const p = mid[i];
+      const n = normals[i];
+      for (let j = 0; j < nAcross; j++) {
+        const t = nAcross === 1 ? 0.5 : j / (nAcross - 1);
+        const width = (t - 0.5) * W;
+        const cradleDrop = sit
+          ? cradle * (1 - (2 * width / W) ** 2)
+          : 0;
+        const nOff = sit ? thick * 0.5 - cradleDrop : -thick * 0.5;
+        const x = p.x + n.x * nOff;
+        const y = p.y + n.y * nOff;
+        pushV(x, y, width, sit ? n.x : -n.x, sit ? n.y : -n.y, t, i / nAlong);
+      }
+    }
+  }
+
+  const indices: number[] = [];
+  const stitch = (
+    i0: number,
+    j0: number,
+    i1: number,
+    j1: number,
+    layer: 0 | 1,
+    flip: boolean,
+  ) => {
+    const a = idxOf(i0, j0, layer);
+    const b = idxOf(i1, j0, layer);
+    const c = idxOf(i1, j1, layer);
+    const d = idxOf(i0, j1, layer);
+    if (flip) indices.push(a, c, b, a, d, c);
+    else indices.push(a, b, c, a, c, d);
+  };
+  for (let i = 0; i < nAlong; i++) {
+    for (let j = 0; j < nAcross - 1; j++) {
+      stitch(i, j, i + 1, j + 1, 0, false);
+      stitch(i, j, i + 1, j + 1, 1, true);
+    }
+  }
+  // Side rails (width edges)
+  for (let i = 0; i < nAlong; i++) {
+    for (const j of [0, nAcross - 1] as const) {
+      const a = idxOf(i, j, 0);
+      const b = idxOf(i + 1, j, 0);
+      const c = idxOf(i + 1, j, 1);
+      const d = idxOf(i, j, 1);
+      if (j === 0) indices.push(a, d, c, a, c, b);
+      else indices.push(a, b, c, a, c, d);
+    }
+  }
+  // Head and foot caps
+  for (const i of [0, nAlong] as const) {
+    for (let j = 0; j < nAcross - 1; j++) {
+      const a = idxOf(i, j, 0);
+      const b = idxOf(i, j + 1, 0);
+      const c = idxOf(i, j + 1, 1);
+      const d = idxOf(i, j, 1);
+      if (i === 0) indices.push(a, b, c, a, c, d);
+      else indices.push(a, d, c, a, c, b);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals3, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.rotateY(-Math.PI / 2);
+  geo.translate(0, 0, -L / 2);
+  geo.computeVertexNormals();
+  return geo;
 }
 
 function OutdoorSofaMesh({
