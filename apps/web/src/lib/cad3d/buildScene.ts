@@ -372,6 +372,11 @@ export type WaterBodyDescriptor = {
   /** Open water-column sides that join these footprints (attached spa). */
   sideOpenAgainst?: PointMm[][];
   waterTopY: number;
+  /**
+   * Raised spa / constant basin: volume bottom at this world Y instead of
+   * −depth from the profile (which assumes a pool whose waterline is ~0).
+   */
+  basinFloorY?: number;
   opacity?: number;
   surfaceOpacity?: number;
 } & DepthProfileFields &
@@ -1843,24 +1848,24 @@ function pushWaterFill(
     });
   }
   const volumeH = Math.max(0.15, waterTop - floorTop - 0.01);
+  const bb = outlineBounds(opts.outlineMm);
+  const depthMm = Math.max(150, volumeH * 1000);
   meshes.push({
-    kind: "extrude",
-    id: `${opts.idPrefix}_volume`,
+    kind: "waterBody",
+    id: `${opts.idPrefix}_body`,
     material: opts.waterMaterial,
     outlineMm: outline,
-    bottomY: floorTop,
-    height: volumeH,
+    waterTopY: waterTop,
+    basinFloorY: floorTop,
+    depthStations: [
+      { t: 0, depthMm, transition: "smooth" as const },
+      { t: 1, depthMm, transition: "smooth" as const },
+    ],
+    depthAxis: { x: 1, y: 0 },
+    axisOriginMm: { x: bb.minX, y: bb.minY },
+    axisLengthMm: Math.max(1, bb.width),
     opacity: 0.22,
-    select: opts.select,
-  });
-  meshes.push({
-    kind: "extrude",
-    id: `${opts.idPrefix}_surface`,
-    material: opts.waterMaterial,
-    outlineMm: outline,
-    bottomY: waterTop - 0.012,
-    height: 0.012,
-    opacity: 0.56,
+    surfaceOpacity: 0.56,
     select: opts.select,
   });
 }
@@ -3824,20 +3829,19 @@ export function buildSceneModel(
           });
         }
 
-        // Shallow water filling each sunshelf (feature depth, typically ~9″).
+        // Same waterline film as the pool — a 9″ extruded column stacked
+        // darker than the deep end. Plaster of the ledge shows through.
         for (const f of design.features ?? []) {
           if (f.kind !== "sunshelf" || f.outline.length < 3) continue;
           if (f.poolBodyId && f.poolBodyId !== body.id) continue;
-          const shelfDepthM = mmToMeters(featureDepthMm("sunshelf", f.depthMm));
-          const shelfWaterH = Math.max(0.05, shelfDepthM - 0.012);
           meshes.push({
             kind: "extrude",
             id: `pool_${body.id}_shelfwater_${f.id}`,
             material: "poolWater",
             outlineMm: closeOutline(f.outline),
-            bottomY: waterTopY - shelfDepthM + 0.01,
-            height: shelfWaterH,
-            opacity: 0.7,
+            bottomY: waterTopY,
+            height: 0.008,
+            opacity: 0.4,
             waterShallow: true,
             select,
           });

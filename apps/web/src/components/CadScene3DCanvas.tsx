@@ -774,28 +774,22 @@ function ExtrudeMesh({
     const isWaterMat =
       desc.material === "poolWater" || desc.material === "spaWater";
     const isShallowWater = desc.waterShallow === true && isWaterMat;
-    // Thin water (spa surface, leftover films): a single tessellated face so
-    // ExtrudeGeometry's two-triangle top doesn't draw a diagonal bar.
-    // Sunshelf uses a real ~9″ column (height > 4cm) so plaster reads wet.
-    if (isShallowWater && desc.height <= 0.04) {
+    // Single tessellated face for any thin water slab. ExtrudeGeometry ear-clips
+    // a rectangle into two triangles — that diagonal is the line through spas.
+    if (isWaterMat && desc.height <= 0.04) {
       const geo = tessellatePlanarShape(new THREE.ShapeGeometry(shape), 0.28);
       geo.rotateX(-Math.PI / 2);
       geo.translate(0, desc.bottomY + Math.max(0.004, desc.height), 0);
       geo.computeVertexNormals();
-      applyWorldXzUvs(geo, 0.45);
+      applyWorldXzUvs(geo, isShallowWater ? 0.45 : 0.28);
       return geo;
     }
-    let geo: THREE.BufferGeometry = new THREE.ExtrudeGeometry(shape, {
+    const geo = new THREE.ExtrudeGeometry(shape, {
       depth: Math.max(0.01, desc.height),
       bevelEnabled: false,
     });
     geo.rotateX(-Math.PI / 2);
     geo.translate(0, desc.bottomY, 0);
-    if (isWaterMat) {
-      geo = tessellatePlanarShape(geo, 0.28);
-      geo.computeVertexNormals();
-      applyWorldXzUvs(geo, isShallowWater ? 0.45 : 0.28);
-    }
     if (desc.material === "ground") applyGrassWorldUVs(geo);
     return geo;
   }, [desc]);
@@ -1995,6 +1989,7 @@ function pushWaterSideRing(
   depthAtShape: (sx: number, sy: number) => number,
   floorClearance: number,
   openAgainst?: PointMm[][],
+  basinFloorY?: number,
 ) {
   const open = ringPts(ring);
   for (let i = 0; i < open.length; i++) {
@@ -2008,8 +2003,14 @@ function pushWaterSideRing(
       const y0 = mmToMeters(seg.a.y);
       const x1 = mmToMeters(-seg.b.x);
       const y1 = mmToMeters(seg.b.y);
-      const b0 = Math.min(waterTop - 0.12, -depthAtShape(x0, y0) + floorClearance);
-      const b1 = Math.min(waterTop - 0.12, -depthAtShape(x1, y1) + floorClearance);
+      const b0 =
+        basinFloorY != null
+          ? basinFloorY + floorClearance
+          : Math.min(waterTop - 0.12, -depthAtShape(x0, y0) + floorClearance);
+      const b1 =
+        basinFloorY != null
+          ? basinFloorY + floorClearance
+          : Math.min(waterTop - 0.12, -depthAtShape(x1, y1) + floorClearance);
       const r = verts.length / 3;
       verts.push(
         x0,
@@ -2052,6 +2053,10 @@ function WaterBodyMesh({
     // Clear of the structural floor to prevent z-fighting flicker.
     const floorClearance = 0.06;
     const surfaceY = waterTop + 0.004;
+    const bottomAt = (d: number) =>
+      desc.basinFloorY != null
+        ? desc.basinFloorY + floorClearance
+        : Math.min(waterTop - 0.12, -d + floorClearance);
 
     const surf = buildProfiledBasinSurface({
       outlineMm: desc.outlineMm,
@@ -2075,7 +2080,7 @@ function WaterBodyMesh({
       axisOriginMm: desc.axisOriginMm,
       depthAxis: desc.depthAxis,
       axisLengthMm: desc.axisLengthMm,
-      yAtDepth: (d) => Math.min(waterTop - 0.12, -d + floorClearance),
+      yAtDepth: bottomAt,
       uvScale: 0.55,
       holeOutlinesMm: desc.holeOutlinesMm,
       edgePadMm: 8,
@@ -2098,18 +2103,10 @@ function WaterBodyMesh({
       depthAtShape,
       floorClearance,
       desc.sideOpenAgainst,
+      desc.basinFloorY,
     );
-    for (const hole of desc.holeOutlinesMm ?? []) {
-      pushWaterSideRing(
-        volVerts,
-        volIdx,
-        hole,
-        waterTop,
-        depthAtShape,
-        floorClearance,
-        desc.sideOpenAgainst,
-      );
-    }
+    // Do not add vertical water faces around sunshelf holes — those walls
+    // cut through an attached spa when the ledge shares an edge.
 
     const surface = new THREE.BufferGeometry();
     surface.setAttribute(

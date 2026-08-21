@@ -54,15 +54,15 @@ export function WaterMaterial({
   const timeRef = useRef(0);
 
   // Clone maps so offset animation doesn't fight other water bodies.
-  // Shallow ledge skips albedo — the blue map multiplies and reads as deep navy.
+  // Shallow ledge: skip albedo — the blue map multiplies and reads as deep navy.
   const maps = useMemo(() => {
     if (!textures || layer !== "surface") return null;
-    const map = textures.albedo.clone();
+    const map = shallow ? null : textures.albedo.clone();
     const normalMap = textures.normalA.clone();
     const clearcoatNormalMap = textures.normalB.clone();
-    const rep = spa ? 3.4 : shallow ? 2.8 : 1.6;
-    const repB = spa ? 2.6 : shallow ? 2.2 : 1.25;
-    if (map) map.repeat.set(spa ? 1.8 : shallow ? 1.5 : 0.7, spa ? 1.8 : shallow ? 1.5 : 0.7);
+    const rep = spa ? 3.4 : shallow ? 2.4 : 1.6;
+    const repB = spa ? 2.6 : shallow ? 1.9 : 1.25;
+    if (map) map.repeat.set(spa ? 1.8 : 0.7, spa ? 1.8 : 0.7);
     normalMap.repeat.set(rep, rep);
     clearcoatNormalMap.repeat.set(repB, repB);
     return { map, normalMap, clearcoatNormalMap };
@@ -109,9 +109,9 @@ export function WaterMaterial({
   });
 
   // Chlorinated residential pool: turquoise body, deeper teal absorption.
-  // Shallow ledge: still reads as water — pale-white transmission looked dry.
-  const baseColor = spa ? "#1a96b4" : shallow ? "#4ebfd4" : "#1290b0";
-  const attenuation = spa ? "#0a6e88" : shallow ? "#2a8aa0" : "#055870";
+  // Shallow ledge: lighter than the deep end (less water over plaster).
+  const baseColor = spa ? "#1a96b4" : shallow ? "#8ee8f4" : "#1290b0";
+  const attenuation = spa ? "#0a6e88" : shallow ? "#7ec8d8" : "#055870";
 
   if (layer === "volume") {
     return (
@@ -157,18 +157,18 @@ export function WaterMaterial({
       // Transmission + attenuation = see the floor with depth tint.
       // Shallow: thinner film so ~9″ ledge looks lighter than deep end,
       // but still reads as water (not a dry plaster slab).
-      transmission={spa ? 0.42 : shallow ? 0.22 : 0.55}
-      thickness={spa ? 0.5 : shallow ? 0.22 : 1.6}
+      transmission={spa ? 0.42 : shallow ? 0.78 : 0.55}
+      thickness={spa ? 0.5 : shallow ? 0.05 : 1.6}
       ior={1.333}
       attenuationColor={attenuation}
-      attenuationDistance={spa ? 1.1 : shallow ? 1.6 : 2.2}
+      attenuationDistance={spa ? 1.1 : shallow ? 12 : 2.2}
       transparent
       opacity={
         shallow
-          ? Math.min(0.82, Math.max(0.55, opacity ?? 0.7))
+          ? Math.min(0.48, Math.max(0.28, opacity ?? 0.4))
           : Math.min(0.9, Math.max(0.7, opacity ?? 0.82))
       }
-      side={shallow ? THREE.DoubleSide : THREE.FrontSide}
+      side={THREE.FrontSide}
       depthWrite={false}
       polygonOffset
       polygonOffsetFactor={shallow ? -4 : -2}
