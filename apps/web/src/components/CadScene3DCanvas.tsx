@@ -23,6 +23,7 @@ import {
   openWallSegments,
   planToWorldXZ,
   pointInPolygon,
+  distToPolygonBoundaryMm,
   resolveHouseSidingId,
 } from "@pool-design/shared";
 import {
@@ -1951,7 +1952,22 @@ function FloorMesh({
       const segs = desc.omitPerimeterAgainst?.length
         ? openWallSegments(p0, p1, desc.omitPerimeterAgainst)
         : [{ a: p0, b: p1 }];
-      for (const seg of segs) emitFloorSide(seg.a, seg.b);
+      for (const seg of segs) {
+        const mid = {
+          x: (seg.a.x + seg.b.x) / 2,
+          y: (seg.a.y + seg.b.y) / 2,
+        };
+        if (
+          desc.omitPerimeterAgainst?.some(
+            (poly) =>
+              pointInPolygon(mid, poly) ||
+              distToPolygonBoundaryMm(mid, poly) <= 40,
+          )
+        ) {
+          continue;
+        }
+        emitFloorSide(seg.a, seg.b);
+      }
     }
 
     const geo = new THREE.BufferGeometry();
@@ -1999,6 +2015,18 @@ function pushWaterSideRing(
       ? openWallSegments(p0, p1, openAgainst)
       : [{ a: p0, b: p1 }];
     for (const seg of segs) {
+      const mid = {
+        x: (seg.a.x + seg.b.x) / 2,
+        y: (seg.a.y + seg.b.y) / 2,
+      };
+      if (
+        openAgainst?.some(
+          (poly) =>
+            pointInPolygon(mid, poly) || distToPolygonBoundaryMm(mid, poly) <= 40,
+        )
+      ) {
+        continue;
+      }
       const x0 = mmToMeters(-seg.a.x);
       const y0 = mmToMeters(seg.a.y);
       const x1 = mmToMeters(-seg.b.x);

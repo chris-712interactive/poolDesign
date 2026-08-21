@@ -200,6 +200,30 @@ describe("water-geometry", () => {
     );
   });
 
+  it("opens a pool outer wall that continues through an overlapping spa", () => {
+    // Pool 0–8000 × 0–5000, spa overlapping the right end at x=7000–11000.
+    // The pool's right outer wall at x=8000 cuts through the spa interior.
+    const spa = rect(7000, 2000, 11000, 6000);
+    const segs = openWallSegments(
+      { x: 8000, y: 0 },
+      { x: 8000, y: 5000 },
+      [spa],
+    );
+    assert.equal(segs.length, 1);
+    const y0 = Math.min(segs[0].a.y, segs[0].b.y);
+    const y1 = Math.max(segs[0].a.y, segs[0].b.y);
+    assert.ok(y0 < 100);
+    assert.ok(y1 <= 2120);
+    assert.equal(
+      shouldOmitPoolWallEdge(
+        { x: 8000, y: 2000 },
+        { x: 8000, y: 5000 },
+        spa,
+      ),
+      true,
+    );
+  });
+
   it("splits spa edges so only the pool join opens", () => {
     const pool = rect(0, 4000, 8000, 8000);
     // Spa straddles the pool's top edge

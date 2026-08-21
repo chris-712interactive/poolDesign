@@ -72,6 +72,47 @@ function boundsOverlap(a: OutlineBounds, b: OutlineBounds, pad = 1): boolean {
   );
 }
 
+/**
+ * Parametric interval (mm along a→b) of the segment that lies inside a padded
+ * AABB. Used so a pool outer wall that crosses a spa footprint is fully opened
+ * even when the edge is not colinear with a spa side.
+ */
+export function aabbCoverInterval(
+  a: PointMm,
+  b: PointMm,
+  bounds: OutlineBounds,
+  padMm = 0,
+): [number, number] | null {
+  const len = segmentLengthMm(a, b);
+  if (len < 1) return null;
+  const minX = bounds.minX - padMm;
+  const maxX = bounds.maxX + padMm;
+  const minY = bounds.minY - padMm;
+  const maxY = bounds.maxY + padMm;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let t0 = 0;
+  let t1 = 1;
+  const clip = (p: number, q: number): boolean => {
+    if (Math.abs(p) < 1e-12) return q >= 0;
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return false;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return false;
+      if (r < t1) t1 = r;
+    }
+    return true;
+  };
+  if (!clip(-dx, a.x - minX)) return null;
+  if (!clip(dx, maxX - a.x)) return null;
+  if (!clip(-dy, a.y - minY)) return null;
+  if (!clip(dy, maxY - a.y)) return null;
+  if (t1 - t0 < 1e-9) return null;
+  return [t0 * len, t1 * len];
+}
+
 function boundsIntersection(
   a: OutlineBounds,
   b: OutlineBounds,
@@ -691,7 +732,7 @@ export function shouldOmitPoolWallEdge(
   edgeA: PointMm,
   edgeB: PointMm,
   spaOutline: PointMm[],
-  tolMm = 60,
+  tolMm = 120,
 ): boolean {
   return openWallSegments(edgeA, edgeB, [spaOutline], tolMm).length === 0;
 }
@@ -740,7 +781,7 @@ export function openWallSegments(
   edgeA: PointMm,
   edgeB: PointMm,
   blockers: PointMm[][],
-  tolMm = 60,
+  tolMm = 120,
   minKeepMm = 40,
 ): { a: PointMm; b: PointMm }[] {
   const len = segmentLengthMm(edgeA, edgeB);
@@ -769,6 +810,8 @@ export function openWallSegments(
       );
       if (iv) add(iv[0], iv[1]);
     }
+    const boxHit = aabbCoverInterval(edgeA, edgeB, asBounds(ring), tolMm);
+    if (boxHit) add(boxHit[0], boxHit[1]);
     let runStart: number | null = null;
     const n = Math.max(8, Math.ceil(len / 80));
     for (let s = 0; s <= n; s++) {

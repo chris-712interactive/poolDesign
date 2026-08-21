@@ -882,6 +882,16 @@ function pushWallRing(
         x: mid.x + nx * (opts.thicknessMm / 2 + biasMm),
         y: mid.y + ny * (opts.thicknessMm / 2 + biasMm),
       };
+      if (
+        opts.openAgainst?.some(
+          (poly) =>
+            pointInPolygon(mid, poly) ||
+            pointInPolygon(centerPlan, poly) ||
+            distToPolygonBoundaryMm(mid, poly) <= 40,
+        )
+      ) {
+        continue;
+      }
       const xz = planToWorldXZ(centerPlan);
       meshes.push({
         kind: "box",
@@ -3663,15 +3673,19 @@ export function buildSceneModel(
         const maxDepth = Math.max(maxDepthMmFromProfile(body), 900);
         const depthM = mmToMeters(maxDepth);
         const lip = mmToMeters(POOL_LIP_THICKNESS_MM);
-        const attachedSpas = spas.filter(
-          (s) =>
-            waterBodiesConnected(body.outline, s.outline) ||
-            approximateIntersectionAreaMm2(body.outline, s.outline) > 5_000 ||
-            outlinesAabbTouch(body.outline, s.outline, 80),
-        );
-        const spaClippers = attachedSpas.map((s) =>
-          outlineBoundsRect(s.outline),
-        );
+        const spaClippers = spas
+          .filter(
+            (s) =>
+              s.outline.length >= 3 &&
+              (waterBodiesConnected(body.outline, s.outline) ||
+                approximateIntersectionAreaMm2(body.outline, s.outline) >
+                  5_000 ||
+                outlinesAabbTouch(body.outline, s.outline, 80)),
+          )
+          .map((s) => outlineBoundsRect(s.outline));
+        const spaBlockers = spas
+          .filter((s) => s.outline.length >= 3)
+          .flatMap((s) => [s.outline, outlineBoundsRect(s.outline)]);
         const outer = body.outline;
         const wallT = poolWallThicknessMm(body);
         // Keep the authorable pool outline for walls/coping. Wrapping into an L
@@ -3731,7 +3745,7 @@ export function buildSceneModel(
             select,
             idPrefix: `pool_wall_${body.id}_low`,
             inward: true,
-            openAgainst: spaClippers.length > 0 ? spaClippers : undefined,
+            openAgainst: spaBlockers.length > 0 ? spaBlockers : undefined,
             edgeOmits: infinityOmits,
             omitAgainst: weirFaces,
           });
@@ -3745,7 +3759,7 @@ export function buildSceneModel(
             select,
             idPrefix: `pool_wall_${body.id}_rim`,
             inward: true,
-            openAgainst: spaClippers.length > 0 ? spaClippers : undefined,
+            openAgainst: spaBlockers.length > 0 ? spaBlockers : undefined,
             edgeOmits: infinityOmits,
             omitAgainst: weirFaces,
           });
@@ -3760,7 +3774,7 @@ export function buildSceneModel(
             idPrefix: `pool_wall_${body.id}`,
             inward: true,
             // Drop pool walls on spa-facing edges; spa draws the spillover.
-            openAgainst: spaClippers.length > 0 ? spaClippers : undefined,
+            openAgainst: spaBlockers.length > 0 ? spaBlockers : undefined,
           });
         }
 
@@ -3791,7 +3805,7 @@ export function buildSceneModel(
           axisLengthMm: profileFields.axisLengthMm,
           thicknessM: BASIN_FLOOR_THICKNESS_M,
           omitPerimeterAgainst:
-            spaClippers.length > 0 ? spaClippers : undefined,
+            spaBlockers.length > 0 ? spaBlockers : undefined,
           select,
         });
 
@@ -3805,7 +3819,7 @@ export function buildSceneModel(
           select,
           idPrefix: `pool_coping_${body.id}`,
           inward: true,
-          openAgainst: spaClippers.length > 0 ? spaClippers : undefined,
+          openAgainst: spaBlockers.length > 0 ? spaBlockers : undefined,
           edgeOmits: infinityOmits,
           omitAgainst: weirFaces,
         });
@@ -3819,7 +3833,7 @@ export function buildSceneModel(
           waterlineTileId: body.waterlineTileId,
           select,
           idPrefix: `pool_tile_${body.id}`,
-          openAgainst: spaClippers.length > 0 ? spaClippers : undefined,
+          openAgainst: spaBlockers.length > 0 ? spaBlockers : undefined,
           edgeOmits: infinityOmits,
           omitAgainst: weirFaces,
         });
@@ -3854,7 +3868,7 @@ export function buildSceneModel(
             holeOutlinesMm: shelfHoles.length > 0 ? shelfHoles : undefined,
             sideOutlineMm: waterInner,
             sideOpenAgainst:
-              spaClippers.length > 0 ? spaClippers : undefined,
+              spaBlockers.length > 0 ? spaBlockers : undefined,
             profile: profileFields,
           });
         }
