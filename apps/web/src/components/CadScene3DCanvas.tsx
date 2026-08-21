@@ -21,6 +21,7 @@ import {
   houseExteriorColorFromHex,
   mmToMeters,
   openWallSegments,
+  outlineBounds,
   planToWorldXZ,
   pointInPolygon,
   distToPolygonBoundaryMm,
@@ -1714,11 +1715,13 @@ function buildProfiledBasinSurface(opts: {
   depthAxis: PointMm;
   axisLengthMm: number;
   /** y = -depth + yBias (floor) or water bottom with clearance */
-  yAtDepth: (depthM: number) => number;
+  yAtDepth: (depthM: number, plan: PointMm) => number;
   uvScale?: number;
   holeOutlinesMm?: PointMm[][];
   /** Extra mm outside the outline so edge cells still form. */
   edgePadMm?: number;
+  /** Local water depth (sunshelf) — volume bottom steps up, surface stays flat. */
+  shallowFootprints?: { outlineMm: PointMm[]; depthMm: number }[];
 }): {
   positions: number[];
   uvs: number[];
@@ -1746,13 +1749,51 @@ function buildProfiledBasinSurface(opts: {
   sMin -= pad;
   sMax += pad;
 
-  const tSamples = depthAxisTSamples(opts.depthStations, axisLen);
+  const tMarks = depthAxisTSamples(opts.depthStations, axisLen);
+  const sMarks: number[] = [];
   const sStep = Math.min(280, Math.max(120, (sMax - sMin) / 24));
   const sCount = Math.max(2, Math.ceil((sMax - sMin) / sStep) + 1);
-  const sSamples: number[] = [];
   for (let i = 0; i < sCount; i++) {
-    sSamples.push(sMin + ((sMax - sMin) * i) / (sCount - 1));
+    sMarks.push(sMin + ((sMax - sMin) * i) / (sCount - 1));
   }
+
+  const shelves = (opts.shallowFootprints ?? [])
+    .map((s) => ({
+      ring: ringPts(s.outlineMm),
+      depthMm: s.depthMm,
+    }))
+    .filter((s) => s.ring.length >= 3);
+  for (const shelf of shelves) {
+    const bb = outlineBounds(shelf.ring);
+    const corners = [
+      { x: bb.minX, y: bb.minY },
+      { x: bb.maxX, y: bb.minY },
+      { x: bb.maxX, y: bb.maxY },
+      { x: bb.minX, y: bb.maxY },
+    ];
+    for (const p of corners) {
+      const tt =
+        ((p.x - origin.x) * axis.x + (p.y - origin.y) * axis.y) / axisLen;
+      const ss = (p.x - origin.x) * perp.x + (p.y - origin.y) * perp.y;
+      if (tt > -0.02 && tt < 1.02) {
+        tMarks.push(Math.min(1, Math.max(0, tt - 0.002)));
+        tMarks.push(Math.min(1, Math.max(0, tt + 0.002)));
+      }
+      sMarks.push(ss - 8, ss + 8);
+    }
+  }
+  const uniqueSorted = (vals: number[]) => {
+    const s = [...vals].sort((a, b) => a - b);
+    const out: number[] = [];
+    for (const v of s) {
+      if (out.length === 0 || Math.abs(out[out.length - 1] - v) > 0.0008) {
+        out.push(v);
+      }
+    }
+    return out;
+  };
+  const tSamples = uniqueSorted(tMarks);
+  const sSamples = uniqueSorted(sMarks);
 
   const depthAt = depthSampler({
     depthStations: opts.depthStations,
@@ -1760,6 +1801,17 @@ function buildProfiledBasinSurface(opts: {
     depthAxis: opts.depthAxis,
     axisLengthMm: opts.axisLengthMm,
   });
+  const depthAtPlan = (plan: PointMm, sx: number, sy: number) => {
+    for (const shelf of shelves) {
+      if (
+        pointInPolygon(plan, shelf.ring) ||
+        distToPolygonBoundaryMm(plan, shelf.ring) <= 20
+      ) {
+        return mmToMeters(shelf.depthMm);
+      }
+    }
+    return depthAt(sx, sy);
+  };
   const uvScale = opts.uvScale ?? 0.45;
   const holes = (opts.holeOutlinesMm ?? [])
     .map((h) => ringPts(h))
@@ -1811,8 +1863,8 @@ function buildProfiledBasinSurface(opts: {
       inside[i] = inPoly;
       const sx = mmToMeters(-plan.x);
       const sy = mmToMeters(plan.y);
-      const d = depthAt(sx, sy);
-      const y = opts.yAtDepth(d);
+      const d = depthAtPlan(plan, sx, sy);
+      const y = opts.yAtDepth(d, plan);
       positions[i * 3] = sx;
       positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = -sy;
@@ -2094,10 +2146,18 @@ function WaterBodyMesh({
     // Clear of the structural floor to prevent z-fighting flicker.
     const floorClearance = 0.06;
     const surfaceY = waterTop + 0.004;
-    const bottomAt = (d: number) =>
-      desc.basinFloorY != null
-        ? desc.basinFloorY + floorClearance
-        : Math.min(waterTop - 0.12, -d + floorClearance);
+    const bottomAt = (d: number, plan: PointMm) => {
+      if (desc.basinFloorY != null) return desc.basinFloorY + floorClearance;
+      for (const shelf of desc.shallowFootprints ?? []) {
+        if (
+          pointInPolygon(plan, shelf.outlineMm) ||
+          distToPolygonBoundaryMm(plan, shelf.outlineMm) <= 20
+        ) {
+          return waterTop - mmToMeters(shelf.depthMm) + 0.02;
+        }
+      }
+      return Math.min(waterTop - 0.12, -d + floorClearance);
+    };
 
     const surf = buildProfiledBasinSurface({
       outlineMm: desc.outlineMm,
@@ -2109,12 +2169,13 @@ function WaterBodyMesh({
       uvScale: 0.28,
       holeOutlinesMm: desc.holeOutlinesMm,
       edgePadMm: 8,
+      shallowFootprints: desc.shallowFootprints,
     });
 
     const volVerts: number[] = [];
     const volIdx: number[] = [];
 
-    // Profiled basin bottom (follows depth breaks) + side walls
+    // Profiled basin bottom (follows depth breaks + sunshelf ledges)
     const bottom = buildProfiledBasinSurface({
       outlineMm: desc.outlineMm,
       depthStations: desc.depthStations,
@@ -2125,6 +2186,7 @@ function WaterBodyMesh({
       uvScale: 0.55,
       holeOutlinesMm: desc.holeOutlinesMm,
       edgePadMm: 8,
+      shallowFootprints: desc.shallowFootprints,
     });
     const bottomBase = volVerts.length / 3;
     volVerts.push(...bottom.positions);
@@ -2151,6 +2213,21 @@ function WaterBodyMesh({
     // Do not add vertical water faces around sunshelf / spa holes — those
     // walls cut through an attached spa when the ledge shares an edge.
 
+    const depthColor = (y: number): [number, number, number] => {
+      const depth = Math.max(0, waterTop - y);
+      const t = Math.min(1, Math.max(0, (depth - 0.18) / 1.35));
+      return [
+        0.42 * (1 - t) + 0.03 * t,
+        0.78 * (1 - t) + 0.22 * t,
+        0.88 * (1 - t) + 0.3 * t,
+      ];
+    };
+    const volColors: number[] = [];
+    for (let i = 0; i < volVerts.length; i += 3) {
+      const c = depthColor(volVerts[i + 1]);
+      volColors.push(c[0], c[1], c[2]);
+    }
+
     const surface = new THREE.BufferGeometry();
     surface.setAttribute(
       "position",
@@ -2165,6 +2242,12 @@ function WaterBodyMesh({
       "position",
       new THREE.Float32BufferAttribute(volVerts, 3),
     );
+    if (volColors.length === volVerts.length) {
+      volume.setAttribute(
+        "color",
+        new THREE.Float32BufferAttribute(volColors, 3),
+      );
+    }
     volume.setIndex(volIdx);
     volume.computeVertexNormals();
     return { volume, surface };

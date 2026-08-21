@@ -379,6 +379,11 @@ export type WaterBodyDescriptor = {
   sideOpenAgainst?: PointMm[][];
   /** Skip vertical water-column faces (they leak through an overlapping spa). */
   omitSides?: boolean;
+  /**
+   * Local shallow regions (sunshelf). Surface stays continuous; volume bottom
+   * steps up to this water depth instead of the basin profile.
+   */
+  shallowFootprints?: { outlineMm: PointMm[]; depthMm: number }[];
   waterTopY: number;
   /**
    * Raised spa / constant basin: volume bottom at this world Y instead of
@@ -1918,6 +1923,7 @@ function pushProfileWater(
     sideOutlineMm?: PointMm[];
     sideOpenAgainst?: PointMm[][];
     omitSides?: boolean;
+    shallowFootprints?: { outlineMm: PointMm[]; depthMm: number }[];
     profile: {
       stations: {
         t: number;
@@ -1940,6 +1946,7 @@ function pushProfileWater(
     sideOutlineMm: opts.sideOutlineMm,
     sideOpenAgainst: opts.sideOpenAgainst,
     omitSides: opts.omitSides,
+    shallowFootprints: opts.shallowFootprints,
     waterTopY: opts.waterTopY,
     depthStations: opts.profile.stations,
     depthAxis: opts.profile.axis,
@@ -3866,15 +3873,17 @@ export function buildSceneModel(
           select,
         });
 
-        // Solid sunshelves punch out of the deep water mass (filled with shell).
-        const shelfHoles = (design.features ?? [])
+        const shallowFootprints = (design.features ?? [])
           .filter(
             (f) =>
               f.kind === "sunshelf" &&
               f.outline.length >= 3 &&
               (!f.poolBodyId || f.poolBodyId === body.id),
           )
-          .map((f) => closeOutline(f.outline));
+          .map((f) => ({
+            outlineMm: closeOutline(f.outline),
+            depthMm: featureDepthMm(f.kind, f.depthMm),
+          }));
 
         if (waterOutline.length >= 3) {
           pushProfileWater(meshes, {
@@ -3883,35 +3892,12 @@ export function buildSceneModel(
             waterTopY,
             select,
             waterMaterial: "poolWater",
-            holeOutlinesMm: [
-              ...shelfHoles,
-              ...spaClippers,
-            ],
+            // Punch spa only — a sunshelf hole left a dry gap at the ledge.
+            holeOutlinesMm: spaClippers.length > 0 ? spaClippers : undefined,
             omitSides: spaClippers.length > 0,
+            shallowFootprints:
+              shallowFootprints.length > 0 ? shallowFootprints : undefined,
             profile: profileFields,
-          });
-        }
-
-        // Same waterline film as the pool — a 9″ extruded column stacked
-        // darker than the deep end. Plaster of the ledge shows through.
-        for (const f of design.features ?? []) {
-          if (f.kind !== "sunshelf" || f.outline.length < 3) continue;
-          if (f.poolBodyId && f.poolBodyId !== body.id) continue;
-          const shelfWaterOutline =
-            spaClippers.length > 0
-              ? clipOutlineByAabbs(f.outline, spaClippers)
-              : f.outline;
-          if (shelfWaterOutline.length < 3) continue;
-          meshes.push({
-            kind: "extrude",
-            id: `pool_${body.id}_shelfwater_${f.id}`,
-            material: "poolWater",
-            outlineMm: closeOutline(shelfWaterOutline),
-            bottomY: waterTopY,
-            height: 0.008,
-            opacity: 0.4,
-            waterShallow: true,
-            select,
           });
         }
       }

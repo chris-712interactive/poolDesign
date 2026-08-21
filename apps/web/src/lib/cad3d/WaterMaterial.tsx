@@ -117,7 +117,10 @@ export function WaterMaterial({
     return (
       <meshStandardMaterial
         ref={matRef as RefObject<THREE.MeshStandardMaterial>}
-        color={spa ? "#0e6f88" : shallow ? "#8fd4e8" : "#0a5f78"}
+        color={
+          spa ? "#0e6f88" : shallow ? "#8fd4e8" : "#ffffff"
+        }
+        vertexColors={!spa && !shallow}
         roughness={0.45}
         metalness={0}
         transparent
