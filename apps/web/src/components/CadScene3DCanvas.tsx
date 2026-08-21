@@ -1799,7 +1799,15 @@ function buildProfiledBasinSurface(opts: {
               },
               open,
             )));
-      if (inPoly && holes.some((h) => pointInPolygon(plan, h))) inPoly = false;
+      if (
+        inPoly &&
+        holes.some(
+          (h) =>
+            pointInPolygon(plan, h) || distToPolygonBoundaryMm(plan, h) <= 40,
+        )
+      ) {
+        inPoly = false;
+      }
       inside[i] = inPoly;
       const sx = mmToMeters(-plan.x);
       const sy = mmToMeters(plan.y);
@@ -1889,6 +1897,7 @@ function FloorMesh({
       axisLengthMm: desc.axisLengthMm,
       yAtDepth: (d) => -d,
       uvScale,
+      holeOutlinesMm: desc.holeOutlinesMm,
     });
 
     const verts: number[] = [...top.positions];
@@ -2127,18 +2136,20 @@ function WaterBodyMesh({
       volIdx.push(a, c, b);
     }
 
-    pushWaterSideRing(
-      volVerts,
-      volIdx,
-      desc.sideOutlineMm ?? desc.outlineMm,
-      waterTop,
-      depthAtShape,
-      floorClearance,
-      desc.sideOpenAgainst,
-      desc.basinFloorY,
-    );
-    // Do not add vertical water faces around sunshelf holes — those walls
-    // cut through an attached spa when the ledge shares an edge.
+    if (!desc.omitSides) {
+      pushWaterSideRing(
+        volVerts,
+        volIdx,
+        desc.sideOutlineMm ?? desc.outlineMm,
+        waterTop,
+        depthAtShape,
+        floorClearance,
+        desc.sideOpenAgainst,
+        desc.basinFloorY,
+      );
+    }
+    // Do not add vertical water faces around sunshelf / spa holes — those
+    // walls cut through an attached spa when the ledge shares an edge.
 
     const surface = new THREE.BufferGeometry();
     surface.setAttribute(

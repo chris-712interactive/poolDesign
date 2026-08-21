@@ -353,6 +353,8 @@ export type FloorDescriptor = {
   thicknessM?: number;
   /** Skip floor-slab side faces that open into these footprints (attached spa). */
   omitPerimeterAgainst?: PointMm[][];
+  /** Footprints punched from the floor tessellation (attached spa). */
+  holeOutlinesMm?: PointMm[][];
   opacity?: number;
 } & DepthProfileFields &
   Selectable;
@@ -375,6 +377,8 @@ export type WaterBodyDescriptor = {
   sideOutlineMm?: PointMm[];
   /** Open water-column sides that join these footprints (attached spa). */
   sideOpenAgainst?: PointMm[][];
+  /** Skip vertical water-column faces (they leak through an overlapping spa). */
+  omitSides?: boolean;
   waterTopY: number;
   /**
    * Raised spa / constant basin: volume bottom at this world Y instead of
@@ -1913,6 +1917,7 @@ function pushProfileWater(
     holeOutlinesMm?: PointMm[][];
     sideOutlineMm?: PointMm[];
     sideOpenAgainst?: PointMm[][];
+    omitSides?: boolean;
     profile: {
       stations: {
         t: number;
@@ -1934,6 +1939,7 @@ function pushProfileWater(
     holeOutlinesMm: opts.holeOutlinesMm,
     sideOutlineMm: opts.sideOutlineMm,
     sideOpenAgainst: opts.sideOpenAgainst,
+    omitSides: opts.omitSides,
     waterTopY: opts.waterTopY,
     depthStations: opts.profile.stations,
     depthAxis: opts.profile.axis,
@@ -2632,13 +2638,7 @@ export function buildSceneModel(
     }
   }
   for (const s of spas) {
-    if (s.outline.length < 3) continue;
-    const joinsPool = pools.some((p) =>
-      waterBodiesConnected(p.outline, s.outline),
-    );
-    if (spaNeedsDeckPit(s) || joinsPool) {
-      poolPitHoles.push(pitHoleOutline(s.outline));
-    }
+    if (s.outline.length >= 3) poolPitHoles.push(pitHoleOutline(s.outline));
   }
 
   const waterTopY = -mmToMeters(POOL_WATER_FREEBOARD_MM);
@@ -3265,17 +3265,23 @@ export function buildSceneModel(
               });
             }
           } else {
-            meshes.push({
-              kind: "extrude",
-              id: `fill_${p.id}`,
-              material: "fill",
-              outlineMm: closeOutline(p.outline),
-              holeOutlinesMm:
-                punchHoles.length > 0 ? punchHoles : undefined,
-              bottomY: -dropM,
-              height: dropM,
-              select,
-            });
+            const fillRegions = subtractAabbHoles(
+              asAabbRing(open),
+              holesAabb,
+            );
+            let fi = 0;
+            for (const region of fillRegions) {
+              if (region.length < 3 || isSliverOutline(region)) continue;
+              meshes.push({
+                kind: "extrude",
+                id: `fill_${p.id}_${fi++}`,
+                material: "fill",
+                outlineMm: closeOutline(region),
+                bottomY: -dropM,
+                height: dropM,
+                select,
+              });
+            }
           }
         }
 
@@ -3817,6 +3823,7 @@ export function buildSceneModel(
           thicknessM: BASIN_FLOOR_THICKNESS_M,
           omitPerimeterAgainst:
             spaBlockers.length > 0 ? spaBlockers : undefined,
+          holeOutlinesMm: spaClippers.length > 0 ? spaClippers : undefined,
           select,
         });
 
@@ -3876,12 +3883,11 @@ export function buildSceneModel(
             waterTopY,
             select,
             waterMaterial: "poolWater",
-            holeOutlinesMm: shelfHoles.length > 0 ? shelfHoles : undefined,
-            // Clipped water ring — the authorable inner ring still has the pool
-            // outer wall running through an overlapping spa.
-            sideOutlineMm: waterOutline,
-            sideOpenAgainst:
-              spaBlockers.length > 0 ? spaBlockers : undefined,
+            holeOutlinesMm: [
+              ...shelfHoles,
+              ...spaClippers,
+            ],
+            omitSides: spaClippers.length > 0,
             profile: profileFields,
           });
         }
@@ -3891,11 +3897,16 @@ export function buildSceneModel(
         for (const f of design.features ?? []) {
           if (f.kind !== "sunshelf" || f.outline.length < 3) continue;
           if (f.poolBodyId && f.poolBodyId !== body.id) continue;
+          const shelfWaterOutline =
+            spaClippers.length > 0
+              ? clipOutlineByAabbs(f.outline, spaClippers)
+              : f.outline;
+          if (shelfWaterOutline.length < 3) continue;
           meshes.push({
             kind: "extrude",
             id: `pool_${body.id}_shelfwater_${f.id}`,
             material: "poolWater",
-            outlineMm: closeOutline(f.outline),
+            outlineMm: closeOutline(shelfWaterOutline),
             bottomY: waterTopY,
             height: 0.008,
             opacity: 0.4,
@@ -3930,6 +3941,14 @@ export function buildSceneModel(
       if (f.kind === "sunshelf") {
         // Solid shell fill from pool floor up to the ledge — no hollow undercroft.
         const shelfTop = waterTopY - mmToMeters(depthMm);
+        const spaPunches = spas
+          .filter((s) => s.outline.length >= 3)
+          .map((s) => paddedAabbRing(s.outline, 40));
+        const shelfOutline =
+          spaPunches.length > 0
+            ? clipOutlineByAabbs(outline, spaPunches)
+            : outline;
+        if (shelfOutline.length < 3) continue;
         let floorY = waterTopY - 1.2;
         if (parent && waterBodyKind(parent) !== "spa") {
           const profile = depthProfileForBody(parent);
@@ -3947,7 +3966,7 @@ export function buildSceneModel(
           kind: "extrude",
           id: `feature_sunshelf_${f.id}`,
           material: "poolShell",
-          outlineMm: outline,
+          outlineMm: closeOutline(shelfOutline),
           bottomY: shelfTop - fillH,
           height: fillH,
           select,
@@ -3955,7 +3974,7 @@ export function buildSceneModel(
         // Flat nosing band on the shelf TOP (marks the edge — not a riser wrap).
         if (featureTilesOn) {
           pushShelfTopTileBands(meshes, {
-            outlineMm: outline,
+            outlineMm: closeOutline(shelfOutline),
             topY: shelfTop,
             bandWidthMm: nosingBandMm,
             waterlineTileId: featureTileId,
