@@ -1780,7 +1780,7 @@ function buildSunshelfChaiseGeometry(
       const p = mid[i];
       const n = normals[i];
       for (let j = 0; j < nAcross; j++) {
-        const t = nAcross === 1 ? 0.5 : j / (nAcross - 1);
+        const t = j / (nAcross - 1);
         const width = (t - 0.5) * W;
         const cradleDrop = sit
           ? cradle * (1 - (2 * width / W) ** 2)
