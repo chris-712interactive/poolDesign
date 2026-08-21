@@ -109,9 +109,9 @@ export function WaterMaterial({
   });
 
   // Chlorinated residential pool: turquoise body, deeper teal absorption.
-  // Shallow ledge: pale tint so the plaster reads through (less water = lighter).
-  const baseColor = spa ? "#1a96b4" : shallow ? "#d8f4fa" : "#1290b0";
-  const attenuation = spa ? "#0a6e88" : shallow ? "#8fd4e4" : "#055870";
+  // Shallow ledge: still reads as water — pale-white transmission looked dry.
+  const baseColor = spa ? "#1a96b4" : shallow ? "#4ebfd4" : "#1290b0";
+  const attenuation = spa ? "#0a6e88" : shallow ? "#2a8aa0" : "#055870";
 
   if (layer === "volume") {
     return (
@@ -157,18 +157,18 @@ export function WaterMaterial({
       // Transmission + attenuation = see the floor with depth tint.
       // Shallow: thinner film so ~9″ ledge looks lighter than deep end,
       // but still reads as water (not a dry plaster slab).
-      transmission={spa ? 0.42 : shallow ? 0.58 : 0.55}
-      thickness={spa ? 0.5 : shallow ? 0.12 : 1.6}
+      transmission={spa ? 0.42 : shallow ? 0.22 : 0.55}
+      thickness={spa ? 0.5 : shallow ? 0.22 : 1.6}
       ior={1.333}
       attenuationColor={attenuation}
-      attenuationDistance={spa ? 1.1 : shallow ? 4.5 : 2.2}
+      attenuationDistance={spa ? 1.1 : shallow ? 1.6 : 2.2}
       transparent
       opacity={
         shallow
-          ? Math.min(0.55, Math.max(0.28, opacity ?? 0.42))
+          ? Math.min(0.82, Math.max(0.55, opacity ?? 0.7))
           : Math.min(0.9, Math.max(0.7, opacity ?? 0.82))
       }
-      side={THREE.FrontSide}
+      side={shallow ? THREE.DoubleSide : THREE.FrontSide}
       depthWrite={false}
       polygonOffset
       polygonOffsetFactor={shallow ? -4 : -2}

@@ -3645,7 +3645,10 @@ export function buildSceneModel(
         const waterInner = insetClosedOutline(outer, wallT);
         // Floor extends under the wall thickness so the shell seals (no light leaks).
         const floorInner = insetClosedOutline(outer, wallT * 0.35);
-        const floorOutline = floorInner;
+        const floorOutline =
+          spaClippers.length > 0
+            ? clipOutlineByAabbs(floorInner, spaClippers)
+            : floorInner;
 
         const floorY = -depthM;
         const infinityEdges = resolveInfinityEdges(body);
@@ -3775,8 +3778,7 @@ export function buildSceneModel(
         // Waterline tile band on the wet face (inside waterline), not the
         // outer shell — old placement sat in the wall and flickered outside.
         pushWaterlineTileBand(meshes, {
-          waterlineOutlineMm:
-            waterOutline.length >= 3 ? waterOutline : waterInner,
+          waterlineOutlineMm: waterInner,
           wallThicknessMm: wallT,
           waterTopY,
           waterlineTileId: body.waterlineTileId,
@@ -3822,20 +3824,20 @@ export function buildSceneModel(
           });
         }
 
-        // Shallow water on top of each sunshelf (~feature depth).
-        // Thin surface film with waterShallow so ~9″ reads lighter than deep end
-        // (deep-pool transmission thickness was making this look navy).
+        // Shallow water filling each sunshelf (feature depth, typically ~9″).
         for (const f of design.features ?? []) {
           if (f.kind !== "sunshelf" || f.outline.length < 3) continue;
           if (f.poolBodyId && f.poolBodyId !== body.id) continue;
+          const shelfDepthM = mmToMeters(featureDepthMm("sunshelf", f.depthMm));
+          const shelfWaterH = Math.max(0.05, shelfDepthM - 0.012);
           meshes.push({
             kind: "extrude",
             id: `pool_${body.id}_shelfwater_${f.id}`,
             material: "poolWater",
             outlineMm: closeOutline(f.outline),
-            bottomY: waterTopY - 0.01,
-            height: 0.012,
-            opacity: 0.42,
+            bottomY: waterTopY - shelfDepthM + 0.01,
+            height: shelfWaterH,
+            opacity: 0.7,
             waterShallow: true,
             select,
           });

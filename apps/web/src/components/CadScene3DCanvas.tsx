@@ -771,24 +771,31 @@ function ExtrudeMesh({
         shape.holes.push(outlineToPath(hole, true));
       }
     }
-    const isShallowWater =
-      desc.waterShallow === true &&
-      (desc.material === "poolWater" || desc.material === "spaWater");
-    // Flat single-face film for sunshelf water — an extruded slab's top+bottom
-    // faces stack in transparency and read as dark navy over the ledge.
-    if (isShallowWater) {
-      const geo = tessellatePlanarShape(new THREE.ShapeGeometry(shape), 0.35);
+    const isWaterMat =
+      desc.material === "poolWater" || desc.material === "spaWater";
+    const isShallowWater = desc.waterShallow === true && isWaterMat;
+    // Thin water (spa surface, leftover films): a single tessellated face so
+    // ExtrudeGeometry's two-triangle top doesn't draw a diagonal bar.
+    // Sunshelf uses a real ~9″ column (height > 4cm) so plaster reads wet.
+    if (isShallowWater && desc.height <= 0.04) {
+      const geo = tessellatePlanarShape(new THREE.ShapeGeometry(shape), 0.28);
       geo.rotateX(-Math.PI / 2);
       geo.translate(0, desc.bottomY + Math.max(0.004, desc.height), 0);
+      geo.computeVertexNormals();
       applyWorldXzUvs(geo, 0.45);
       return geo;
     }
-    const geo = new THREE.ExtrudeGeometry(shape, {
+    let geo: THREE.BufferGeometry = new THREE.ExtrudeGeometry(shape, {
       depth: Math.max(0.01, desc.height),
       bevelEnabled: false,
     });
     geo.rotateX(-Math.PI / 2);
     geo.translate(0, desc.bottomY, 0);
+    if (isWaterMat) {
+      geo = tessellatePlanarShape(geo, 0.28);
+      geo.computeVertexNormals();
+      applyWorldXzUvs(geo, isShallowWater ? 0.45 : 0.28);
+    }
     if (desc.material === "ground") applyGrassWorldUVs(geo);
     return geo;
   }, [desc]);
@@ -2070,6 +2077,8 @@ function WaterBodyMesh({
       axisLengthMm: desc.axisLengthMm,
       yAtDepth: (d) => Math.min(waterTop - 0.12, -d + floorClearance),
       uvScale: 0.55,
+      holeOutlinesMm: desc.holeOutlinesMm,
+      edgePadMm: 8,
     });
     const bottomBase = volVerts.length / 3;
     volVerts.push(...bottom.positions);
@@ -2098,6 +2107,7 @@ function WaterBodyMesh({
         waterTop,
         depthAtShape,
         floorClearance,
+        desc.sideOpenAgainst,
       );
     }
 
