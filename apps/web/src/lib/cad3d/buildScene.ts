@@ -279,6 +279,18 @@ export type FencePanelDescriptor = {
   picketGapM?: number;
   /** Square post size at panel ends (m). Omit for glass / no posts. */
   postSizeM?: number;
+  /** Top/bottom rail height (m). Defaults to a thin aluminum-style rail. */
+  railHeightM?: number;
+  /** Rail depth through the fence (m). Defaults to thicknessM. */
+  railDepthM?: number;
+  /** Picket depth through the fence (m). Defaults to 75% of thicknessM. */
+  picketDepthM?: number;
+  /** How far pickets extend into each rail so they read as notched in. */
+  picketNotchM?: number;
+  /** Pack boards across the bay with tight grooves (vinyl privacy T&G). */
+  privacyBoards?: boolean;
+  /** Pyramid cap on end posts (typical vinyl). */
+  postCap?: boolean;
   /** Extra horizontal rail at mid-height (gate leaves). */
   midRail?: boolean;
   /** Skip end posts (gate leaf between existing jambs). */
@@ -3980,7 +3992,24 @@ export function buildSceneModel(
       let picketWidthM: number | undefined;
       let picketGapM: number | undefined;
       let postSizeM: number | undefined;
-      if (opts.kind === "wood" || opts.kind === "vinyl") {
+      let railHeightM: number | undefined;
+      let railDepthM: number | undefined;
+      let picketDepthM: number | undefined;
+      let picketNotchM: number | undefined;
+      let privacyBoards = false;
+      let postCap = false;
+      if (opts.kind === "vinyl") {
+        // 5×5 post, 2.5″ routed rails, 6″ T&G pickets notched into the rails.
+        postSizeM = 0.127;
+        picketWidthM = 0.152;
+        picketGapM = 0.003;
+        railHeightM = 0.064;
+        railDepthM = 0.09;
+        picketDepthM = 0.022;
+        picketNotchM = 0.028;
+        privacyBoards = true;
+        postCap = !opts.omitPosts;
+      } else if (opts.kind === "wood") {
         // Privacy: solid bay between posts (no board gaps).
         postSizeM = 0.115; // ~4.5″ post
       } else if (opts.kind === "chain_link") {
@@ -3995,7 +4024,7 @@ export function buildSceneModel(
         picketGapM = 0.085;
         postSizeM = 0.065;
       }
-      const privacy = opts.kind === "wood" || opts.kind === "vinyl";
+      const privacySlab = opts.kind === "wood";
       meshes.push({
         kind: "fencePanel",
         id,
@@ -4003,15 +4032,21 @@ export function buildSceneModel(
         a,
         b,
         heightM,
-        // Privacy slabs match post depth so you can't see past thin panels.
-        thicknessM: privacy
+        // Wood slabs match post depth so you can't see past thin panels.
+        thicknessM: privacySlab
           ? Math.max(opts.thicknessM, (postSizeM ?? 0.1) * 0.85)
-          : opts.thicknessM,
+          : (railDepthM ?? opts.thicknessM),
         colorHex: opts.colorHex,
         opacity: opts.opacity,
         picketWidthM,
         picketGapM,
         postSizeM,
+        railHeightM,
+        railDepthM,
+        picketDepthM,
+        picketNotchM,
+        privacyBoards,
+        postCap,
         midRail: opts.midRail,
         omitPosts: opts.omitPosts,
         brace: opts.brace,
@@ -4138,13 +4173,15 @@ export function buildSceneModel(
         const outward = gateOutwardNormal(geom.a, geom.b, waterCentroids);
         const leafColor = darkenHex(colorHex, 0.16);
         const postSizeM =
-          fence.kind === "wood" || fence.kind === "vinyl"
-            ? 0.115
-            : fence.kind === "chain_link"
-              ? 0.06
-              : fence.kind === "glass"
-                ? 0.05
-                : 0.065;
+          fence.kind === "vinyl"
+            ? 0.127
+            : fence.kind === "wood"
+              ? 0.115
+              : fence.kind === "chain_link"
+                ? 0.06
+                : fence.kind === "glass"
+                  ? 0.05
+                  : 0.065;
 
         const jamb = (p: PointMm, tag: string) => {
           const xz = planToWorldXZ(p);
@@ -4212,10 +4249,12 @@ export function buildSceneModel(
                 ];
 
         leaves.forEach((leaf, li) => {
-          const privacy = fence.kind === "wood" || fence.kind === "vinyl";
-          const leafThickM = privacy
-            ? Math.max(thickM * 0.95, postSizeM * 0.85)
-            : thickM * 0.95;
+          const leafThickM =
+            fence.kind === "wood"
+              ? Math.max(thickM * 0.95, postSizeM * 0.85)
+              : fence.kind === "vinyl"
+                ? 0.09
+                : thickM * 0.95;
           pushRackedPanel(
             `gate_${fence.id}_${gate.id}_leaf${li}`,
             leaf.a,

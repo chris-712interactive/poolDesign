@@ -1137,10 +1137,23 @@ function FencePanelMesh({
 
     type Post = { x: number; y: number; z: number; h: number; size: number };
     const postList: Post[] = [];
+    const postExtra = desc.postCap && postSize > 0 ? 0.045 : 0;
     if (postSize > 0) {
       postList.push(
-        { x: ax, y: ay + h / 2, z: az, h, size: postSize },
-        { x: bx, y: by + h / 2, z: bz, h, size: postSize },
+        {
+          x: ax,
+          y: ay + (h + postExtra) / 2,
+          z: az,
+          h: h + postExtra,
+          size: postSize,
+        },
+        {
+          x: bx,
+          y: by + (h + postExtra) / 2,
+          z: bz,
+          h: h + postExtra,
+          size: postSize,
+        },
       );
     }
 
@@ -1208,12 +1221,14 @@ function FencePanelMesh({
           y: number;
           z: number;
           h: number;
+          w: number;
         }[],
         posts: postList,
       };
     }
 
-    const railH = Math.min(0.05, h * 0.08);
+    const railH = desc.railHeightM ?? Math.min(0.05, h * 0.08);
+    const notch = Math.min(desc.picketNotchM ?? railH * 0.22, railH * 0.7);
     const pitch = Math.atan2(by - ay, len);
     // Rails run between post faces (not through post centers).
     const railInset = postSize > 0 ? postSize * 0.5 : 0;
@@ -1263,30 +1278,55 @@ function FencePanelMesh({
         : []),
     ];
 
-    // Pack pickets edge-to-edge across the clear bay (adjust gap to fill).
+    // Pack pickets across the clear bay. Privacy boards fill with tight T&G grooves;
+    // open styles keep a fixed picket width and absorb leftover as gap.
     const spanStart = railInset;
     const spanEnd = len - railInset;
     const spanLen = spanEnd - spanStart;
-    let count =
-      spanLen > 0
-        ? Math.max(1, Math.round((spanLen + picketGap) / (picketW + picketGap)))
-        : 0;
-    while (count > 1 && count * picketW > spanLen + 1e-6) count -= 1;
-    const gap =
-      count > 1 ? Math.max(0, (spanLen - count * picketW) / (count - 1)) : 0;
-    const picketList: { x: number; y: number; z: number; h: number }[] = [];
-    const picketH = Math.max(0.05, h - railH * 1.6);
+    let count = 0;
+    let gap = 0;
+    let boardW = picketW;
+    if (spanLen > 0) {
+      if (desc.privacyBoards) {
+        const groove = Math.max(0.002, picketGap);
+        count = Math.max(1, Math.round((spanLen + groove) / (picketW + groove)));
+        while (
+          count > 1 &&
+          count * Math.min(picketW * 0.55, 0.08) > spanLen + 1e-6
+        ) {
+          count -= 1;
+        }
+        gap = count > 1 ? groove : 0;
+        boardW = Math.max(
+          0.04,
+          (spanLen - gap * Math.max(0, count - 1)) / count,
+        );
+      } else {
+        count = Math.max(
+          1,
+          Math.round((spanLen + picketGap) / (picketW + picketGap)),
+        );
+        while (count > 1 && count * picketW > spanLen + 1e-6) count -= 1;
+        gap =
+          count > 1 ? Math.max(0, (spanLen - count * picketW) / (count - 1)) : 0;
+        boardW = picketW;
+      }
+    }
+    const picketList: { x: number; y: number; z: number; h: number; w: number }[] =
+      [];
+    const picketH = Math.max(0.05, h - 2 * railH + 2 * notch);
     for (let i = 0; i < count; i++) {
-      const d = spanStart + picketW / 2 + i * (picketW + gap);
+      const d = spanStart + boardW / 2 + i * (boardW + gap);
       const t = d / len;
       const x = ax + dx * t;
       const z = az + dz * t;
-      const yBase = ay + (by - ay) * t + railH * 0.85;
+      const yBase = ay + (by - ay) * t + (railH - notch);
       picketList.push({
         x,
         y: yBase + picketH / 2,
         z,
         h: picketH,
+        w: boardW,
       });
     }
 
@@ -1305,7 +1345,9 @@ function FencePanelMesh({
     };
   }, [geometry]);
 
-  const picketW = desc.picketWidthM ?? 0.045;
+  const railH = desc.railHeightM ?? Math.min(0.05, desc.heightM * 0.08);
+  const railDepth = desc.railDepthM ?? Math.max(0.02, desc.thicknessM);
+  const picketDepth = desc.picketDepthM ?? Math.max(0.02, desc.thicknessM * 0.75);
   const braceLen = Math.hypot(
     desc.b.x - desc.a.x,
     desc.b.z - desc.a.z,
@@ -1396,9 +1438,7 @@ function FencePanelMesh({
           rotation={[0, yaw, 0]}
         >
           <mesh rotation={[0, 0, rail.pitch]} castShadow receiveShadow>
-            <boxGeometry
-              args={[rail.len, Math.min(0.05, desc.heightM * 0.08), Math.max(0.02, desc.thicknessM)]}
-            />
+            <boxGeometry args={[rail.len, railH, railDepth]} />
             <SelectableMaterial
               material={desc.material}
               opacity={desc.opacity}
@@ -1416,9 +1456,7 @@ function FencePanelMesh({
           castShadow
           receiveShadow
         >
-          <boxGeometry
-            args={[picketW, p.h, Math.max(0.02, desc.thicknessM * 0.75)]}
-          />
+          <boxGeometry args={[p.w, p.h, picketDepth]} />
           <SelectableMaterial
             material={desc.material}
             opacity={desc.opacity}
@@ -1427,6 +1465,42 @@ function FencePanelMesh({
           />
         </mesh>
       ))}
+      {desc.postCap
+        ? posts.map((p, i) => {
+            const capH = Math.min(0.07, p.size * 0.55);
+            const topY = p.y + p.h / 2;
+            return (
+              <group
+                key={`cap-${i}`}
+                position={[p.x, topY, p.z]}
+                rotation={[0, yaw + Math.PI / 4, 0]}
+              >
+                <mesh
+                  position={[0, 0.012, 0]}
+                  rotation={[0, -Math.PI / 4, 0]}
+                  castShadow
+                >
+                  <boxGeometry args={[p.size * 1.12, 0.024, p.size * 1.12]} />
+                  <SelectableMaterial
+                    material={desc.material}
+                    opacity={desc.opacity}
+                    selected={selected}
+                    colorHex={desc.colorHex}
+                  />
+                </mesh>
+                <mesh position={[0, 0.024 + capH / 2, 0]} castShadow>
+                  <coneGeometry args={[p.size * 0.72, capH, 4]} />
+                  <SelectableMaterial
+                    material={desc.material}
+                    opacity={desc.opacity}
+                    selected={selected}
+                    colorHex={desc.colorHex}
+                  />
+                </mesh>
+              </group>
+            );
+          })
+        : null}
       {braceMesh}
     </group>
   );
