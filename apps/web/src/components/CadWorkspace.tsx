@@ -208,6 +208,8 @@ import {
   type PoolFeatureKind,
   type PlumbingRun,
   type PlanEntitlements,
+  type CoverSupport,
+  type SiteLine,
   type UnitSystem,
   type WaterBodyKind,
 } from "@pool-design/shared";
@@ -430,6 +432,49 @@ function newId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/** Offset for each pasted copy so it does not land on the original. */
+const PASTE_OFFSET_MM = 609.6; // 2′
+
+function offsetPointMm(p: PointMm, copies: number): PointMm {
+  const d = PASTE_OFFSET_MM * copies;
+  return { ...p, x: p.x + d, y: p.y + d };
+}
+
+function offsetPointsMm(pts: PointMm[], copies: number): PointMm[] {
+  return pts.map((p) => offsetPointMm(p, copies));
+}
+
+function copyName(name: string): string {
+  return name.endsWith(" copy") ? name : `${name} copy`;
+}
+
+function nudgeAlongEdge(t: number, copies = 1): number {
+  let next = t;
+  for (let i = 0; i < copies; i++) {
+    const stepped = next + 0.22;
+    next = stepped <= 0.88 ? stepped : Math.max(0.12, next - 0.22);
+  }
+  return next;
+}
+
+type DesignClipboard = {
+  pasteCount: number;
+  payload:
+    | { kind: "gradeSample"; sample: GradeSample }
+    | { kind: "object"; object: PlacedObject }
+    | { kind: "feature"; feature: PoolFeature }
+    | { kind: "pool"; body: PoolBody }
+    | { kind: "patio"; patio: PatioRegion }
+    | { kind: "building"; building: Building }
+    | { kind: "cover"; cover: PatioCover }
+    | { kind: "coverSupport"; coverId: string; support: CoverSupport }
+    | { kind: "run"; run: PlumbingRun }
+    | { kind: "fence"; fence: FenceRun }
+    | { kind: "siteLine"; line: SiteLine }
+    | { kind: "gate"; fenceId: string; gate: FenceGate }
+    | { kind: "opening"; buildingId: string; opening: BuildingOpening };
+};
+
 function formatArea(mm2: number, unitSystem: UnitSystem): string {
   if (unitSystem === "metric") return `${(mm2 / 1_000_000).toFixed(2)} m²`;
   return `${(mm2 / 92903.04).toFixed(1)} ft²`;
@@ -602,6 +647,11 @@ export function CadWorkspace({
   );
   const suppressDraftUntilRef = useRef(0);
   const deleteSelectionRef = useRef<() => void>(() => {});
+  const copySelectionRef = useRef<() => void>(() => {});
+  const pasteClipboardRef = useRef<() => void>(() => {});
+  const clipboardRef = useRef<DesignClipboard | null>(null);
+  const designModeRef = useRef(designMode);
+  designModeRef.current = designMode;
   selectionRef.current = selection;
   lengthBufferRef.current = lengthBuffer;
   draftPointsRef.current = draftPoints;
@@ -1394,7 +1444,7 @@ export function CadWorkspace({
     return () => window.removeEventListener("resize", onResize);
   }, [drawScene, designMode]);
 
-  // Window-level Delete/Backspace so it works when the 3D canvas has focus.
+  // Window-level Delete / Copy / Paste so shortcuts work without canvas focus.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -1407,9 +1457,24 @@ export function CadWorkspace({
       ) {
         return;
       }
+      if (lengthBufferRef.current || draftPointsRef.current.length > 0) return;
+      const key = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && key === "c") {
+        if (designModeRef.current !== "2d") return;
+        if (!selectionRef.current) return;
+        e.preventDefault();
+        copySelectionRef.current();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && key === "v") {
+        if (designModeRef.current !== "2d") return;
+        if (!clipboardRef.current) return;
+        e.preventDefault();
+        pasteClipboardRef.current();
+        return;
+      }
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       if (!selectionRef.current) return;
-      if (lengthBufferRef.current || draftPointsRef.current.length > 0) return;
       e.preventDefault();
       deleteSelectionRef.current();
     };
@@ -2606,6 +2671,315 @@ export function CadWorkspace({
     setSelection(null);
   }
   deleteSelectionRef.current = deleteSelection;
+
+  function copySelection() {
+    const sel = selectionRef.current;
+    if (!sel) return;
+    const d = designRef.current;
+    if (sel.kind === "gradeSample") {
+      const sample = (d.gradeSamples ?? []).find((s) => s.id === sel.id);
+      if (!sample) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "gradeSample", sample: structuredClone(sample) },
+      };
+    } else if (sel.kind === "object") {
+      const object = d.objects.find((o) => o.id === sel.id);
+      if (!object) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "object", object: structuredClone(object) },
+      };
+    } else if (sel.kind === "feature") {
+      const feature = (d.features ?? []).find((f) => f.id === sel.id);
+      if (!feature) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "feature", feature: structuredClone(feature) },
+      };
+    } else if (sel.kind === "pool") {
+      const body = d.poolBodies.find((p) => p.id === sel.id);
+      if (!body) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "pool", body: structuredClone(body) },
+      };
+    } else if (sel.kind === "patio") {
+      const patio = d.patios.find((p) => p.id === sel.id);
+      if (!patio) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "patio", patio: structuredClone(patio) },
+      };
+    } else if (sel.kind === "building") {
+      const building = (d.buildings ?? []).find((b) => b.id === sel.id);
+      if (!building) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "building", building: structuredClone(building) },
+      };
+    } else if (sel.kind === "cover") {
+      const cover = (d.patioCovers ?? []).find((c) => c.id === sel.id);
+      if (!cover) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "cover", cover: structuredClone(cover) },
+      };
+    } else if (sel.kind === "coverSupport") {
+      const cover = (d.patioCovers ?? []).find((c) => c.id === sel.coverId);
+      const support = cover?.supports?.find((s) => s.id === sel.id);
+      if (!cover || !support) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: {
+          kind: "coverSupport",
+          coverId: cover.id,
+          support: structuredClone(support),
+        },
+      };
+    } else if (sel.kind === "run") {
+      const run = d.plumbingRuns.find((r) => r.id === sel.id);
+      if (!run) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "run", run: structuredClone(run) },
+      };
+    } else if (sel.kind === "fence") {
+      const fence = (d.fences ?? []).find((f) => f.id === sel.id);
+      if (!fence) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "fence", fence: structuredClone(fence) },
+      };
+    } else if (sel.kind === "siteLine") {
+      const line = (d.siteLines ?? []).find((l) => l.id === sel.id);
+      if (!line) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "siteLine", line: structuredClone(line) },
+      };
+    } else if (sel.kind === "gate") {
+      const fence = (d.fences ?? []).find((f) => f.id === sel.fenceId);
+      const gate = fence?.gates?.find((g) => g.id === sel.id);
+      if (!fence || !gate) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: {
+          kind: "gate",
+          fenceId: fence.id,
+          gate: structuredClone(gate),
+        },
+      };
+    } else if (sel.kind === "opening") {
+      const building = (d.buildings ?? []).find((b) => b.id === sel.buildingId);
+      const opening = building?.openings?.find((o) => o.id === sel.id);
+      if (!building || !opening) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: {
+          kind: "opening",
+          buildingId: building.id,
+          opening: structuredClone(opening),
+        },
+      };
+    }
+  }
+  copySelectionRef.current = copySelection;
+
+  function pasteClipboard() {
+    const clip = clipboardRef.current;
+    if (!clip) return;
+    const d = designRef.current;
+    const n = clip.pasteCount + 1;
+    const payload = clip.payload;
+    let nextSel: Selection = null;
+    let next: DesignDocument = d;
+
+    if (payload.kind === "gradeSample") {
+      const sample: GradeSample = {
+        ...payload.sample,
+        id: newId("grade"),
+        position: offsetPointMm(payload.sample.position, n),
+      };
+      next = {
+        ...d,
+        gradeSamples: [...(d.gradeSamples ?? []), sample],
+      };
+      nextSel = { kind: "gradeSample", id: sample.id };
+    } else if (payload.kind === "object") {
+      const object: PlacedObject = {
+        ...payload.object,
+        id: newId("obj"),
+        name: copyName(payload.object.name),
+        position: offsetPointMm(payload.object.position, n),
+      };
+      next = { ...d, objects: [...d.objects, object] };
+      nextSel = { kind: "object", id: object.id };
+    } else if (payload.kind === "feature") {
+      const feature: PoolFeature = {
+        ...payload.feature,
+        id: newId(
+          payload.feature.kind === "sunshelf" ? "shelf" : payload.feature.kind,
+        ),
+        name: copyName(payload.feature.name),
+        outline: offsetPointsMm(payload.feature.outline, n),
+      };
+      next = { ...d, features: [...(d.features ?? []), feature] };
+      nextSel = { kind: "feature", id: feature.id };
+    } else if (payload.kind === "pool") {
+      const body: PoolBody = {
+        ...payload.body,
+        id: newId(waterBodyKind(payload.body) === "spa" ? "spa" : "pool"),
+        name: copyName(payload.body.name),
+        outline: offsetPointsMm(payload.body.outline, n),
+        depthStations: payload.body.depthStations?.map((s) => ({
+          ...s,
+          id: newId("ds"),
+        })),
+      };
+      next = { ...d, poolBodies: [...d.poolBodies, body] };
+      nextSel = { kind: "pool", id: body.id };
+    } else if (payload.kind === "patio") {
+      const patio: PatioRegion = {
+        ...payload.patio,
+        id: newId("patio"),
+        name: copyName(payload.patio.name),
+        outline: offsetPointsMm(payload.patio.outline, n),
+      };
+      next = { ...d, patios: [...d.patios, patio] };
+      nextSel = { kind: "patio", id: patio.id };
+    } else if (payload.kind === "building") {
+      const building: Building = {
+        ...payload.building,
+        id: newId("bldg"),
+        name: copyName(payload.building.name),
+        outline: offsetPointsMm(payload.building.outline, n),
+        openings: (payload.building.openings ?? []).map((o) => ({
+          ...o,
+          id: newId("open"),
+        })),
+      };
+      next = {
+        ...d,
+        buildings: [...(d.buildings ?? []), building],
+      };
+      nextSel = { kind: "building", id: building.id };
+    } else if (payload.kind === "cover") {
+      const cover: PatioCover = {
+        ...payload.cover,
+        id: newId("cover"),
+        name: copyName(payload.cover.name),
+        outline: offsetPointsMm(payload.cover.outline, n),
+        supports: (payload.cover.supports ?? []).map((s) => ({
+          ...s,
+          id: newId("post"),
+          position: offsetPointMm(s.position, n),
+        })),
+      };
+      next = {
+        ...d,
+        patioCovers: [...(d.patioCovers ?? []), cover],
+      };
+      nextSel = { kind: "cover", id: cover.id };
+    } else if (payload.kind === "coverSupport") {
+      const support: CoverSupport = {
+        ...payload.support,
+        id: newId("post"),
+        position: offsetPointMm(payload.support.position, n),
+      };
+      if (!(d.patioCovers ?? []).some((c) => c.id === payload.coverId)) return;
+      next = {
+        ...d,
+        patioCovers: (d.patioCovers ?? []).map((c) =>
+          c.id === payload.coverId
+            ? { ...c, supports: [...(c.supports ?? []), support] }
+            : c,
+        ),
+      };
+      nextSel = {
+        kind: "coverSupport",
+        coverId: payload.coverId,
+        id: support.id,
+      };
+    } else if (payload.kind === "run") {
+      const run: PlumbingRun = {
+        ...payload.run,
+        id: newId("run"),
+        name: copyName(payload.run.name),
+        points: offsetPointsMm(payload.run.points, n),
+      };
+      next = { ...d, plumbingRuns: [...d.plumbingRuns, run] };
+      nextSel = { kind: "run", id: run.id };
+    } else if (payload.kind === "fence") {
+      const fence: FenceRun = {
+        ...payload.fence,
+        id: newId("fence"),
+        name: copyName(payload.fence.name),
+        points: offsetPointsMm(payload.fence.points, n),
+        gates: (payload.fence.gates ?? []).map((g) => ({
+          ...g,
+          id: newId("gate"),
+        })),
+      };
+      next = { ...d, fences: [...(d.fences ?? []), fence] };
+      nextSel = { kind: "fence", id: fence.id };
+    } else if (payload.kind === "siteLine") {
+      const line: SiteLine = {
+        ...payload.line,
+        id: newId(payload.line.kind === "easement" ? "ease" : "lot"),
+        name: copyName(payload.line.name),
+        points: offsetPointsMm(payload.line.points, n),
+      };
+      next = { ...d, siteLines: [...(d.siteLines ?? []), line] };
+      nextSel = { kind: "siteLine", id: line.id };
+    } else if (payload.kind === "gate") {
+      const fence = (d.fences ?? []).find((f) => f.id === payload.fenceId);
+      if (!fence) return;
+      const gate: FenceGate = {
+        ...payload.gate,
+        id: newId("gate"),
+        t: nudgeAlongEdge(payload.gate.t, n),
+      };
+      next = {
+        ...d,
+        fences: (d.fences ?? []).map((f) =>
+          f.id === payload.fenceId
+            ? { ...f, gates: [...(f.gates ?? []), gate] }
+            : f,
+        ),
+      };
+      nextSel = { kind: "gate", fenceId: payload.fenceId, id: gate.id };
+    } else if (payload.kind === "opening") {
+      const building = (d.buildings ?? []).find(
+        (b) => b.id === payload.buildingId,
+      );
+      if (!building) return;
+      const opening: BuildingOpening = {
+        ...payload.opening,
+        id: newId("open"),
+        t: nudgeAlongEdge(payload.opening.t, n),
+      };
+      next = {
+        ...d,
+        buildings: (d.buildings ?? []).map((b) =>
+          b.id === payload.buildingId
+            ? { ...b, openings: [...(b.openings ?? []), opening] }
+            : b,
+        ),
+      };
+      nextSel = {
+        kind: "opening",
+        buildingId: payload.buildingId,
+        id: opening.id,
+      };
+    }
+
+    clip.pasteCount = n;
+    commitDesign(next);
+    selectionRef.current = nextSel;
+    setSelection(nextSel);
+  }
+  pasteClipboardRef.current = pasteClipboard;
 
   function addRectFeature(
     kind: Extract<PoolFeatureKind, "steps" | "bench" | "sunshelf">,
@@ -4306,6 +4680,7 @@ export function CadWorkspace({
                     <div>Shift — temporary 90° lines while drawing/editing</div>
                     <div>O — sticky Ortho · A — 15° snap</div>
                     <div>R / handle — rotate furniture</div>
+                    <div>⌘/Ctrl+C then ⌘/Ctrl+V — duplicate selection</div>
                     <div>Type length + Enter while drawing</div>
                   </div>
                 )}
