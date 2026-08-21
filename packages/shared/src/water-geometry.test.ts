@@ -12,8 +12,10 @@ import {
   spaBelowDeckMm,
   spaNeedsDeckPit,
   subtractAabbHoles,
+  unionTouchingAabbRings,
   waterBodiesConnected,
 } from "./water-geometry";
+import { outlineBounds } from "./spa-defaults";
 import type { PoolBody } from "./design-model";
 import { polygonAreaMm2 } from "./design-model";
 
@@ -107,6 +109,26 @@ describe("water-geometry", () => {
     const ring = aabbUnionRing(pool, spa);
     assert.ok(ring.length >= 6);
     assert.ok(polygonAreaMm2(ring) > polygonAreaMm2(pool));
+  });
+
+  it("unions overlapping patio slabs so the seam is filled", () => {
+    const a = rect(0, 0, 8000, 6000);
+    const b = rect(7900, 0, 16000, 6000);
+    const unions = unionTouchingAabbRings([a, b], 80);
+    assert.equal(unions.length, 1);
+    const bb = outlineBounds(unions[0]);
+    assert.equal(bb.minX, 0);
+    assert.equal(bb.maxX, 16000);
+    assert.equal(bb.minY, 0);
+    assert.equal(bb.maxY, 6000);
+  });
+
+  it("unions patio slabs that nearly touch but do not overlap", () => {
+    const a = rect(0, 0, 8000, 6000);
+    const b = rect(8100, 0, 16000, 6000);
+    const unions = unionTouchingAabbRings([a, b], 200);
+    assert.equal(unions.length, 1);
+    assert.equal(unionTouchingAabbRings([a, b], 50).length, 2);
   });
 
   it("subtracts multiple holes from a patio slab", () => {

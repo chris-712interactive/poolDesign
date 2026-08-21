@@ -489,6 +489,35 @@ export function aabbUnionRing(a: PointMm[], b: PointMm[]): PointMm[] {
   return buildAttachedL(A, B) ?? box;
 }
 
+/**
+ * Merge outlines whose AABBs overlap or nearly touch.
+ * Adjacent patio slabs become one ring so 3D doesn't leave a grass seam.
+ */
+export function unionTouchingAabbRings(
+  outlines: PointMm[][],
+  padMm = 80,
+): PointMm[][] {
+  const groups = outlines
+    .filter((o) => o.length >= 3)
+    .map((o) =>
+      isAxisAlignedRect(openRing(o)) ? openRing(o) : outlineBoundsRect(o),
+    );
+  let merged = true;
+  while (merged) {
+    merged = false;
+    outer: for (let i = 0; i < groups.length; i++) {
+      for (let j = i + 1; j < groups.length; j++) {
+        if (!outlinesAabbTouch(groups[i], groups[j], padMm)) continue;
+        groups[i] = aabbUnionRing(groups[i], groups[j]);
+        groups.splice(j, 1);
+        merged = true;
+        break outer;
+      }
+    }
+  }
+  return groups;
+}
+
 /** L-ring when two AABBs share / touch along one side. */
 function buildAttachedL(A: OutlineBounds, B: OutlineBounds): PointMm[] | null {
   const pool = A.width * A.height >= B.width * B.height ? A : B;

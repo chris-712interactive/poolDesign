@@ -60,6 +60,7 @@ import {
   spaShellParams,
   spaTotalDepthMm,
   subtractAabbHoles,
+  aabbUnionRing,
   resolveSpaSpillovers,
   spilloverOmitIntervals,
   wallSegmentsMinusIntervals,
@@ -1997,7 +1998,60 @@ function pitHoleOutline(outline: PointMm[]): PointMm[] {
 function isSliverOutline(outline: PointMm[], minSpanMm = 250): boolean {
   if (outline.length < 3) return true;
   const bb = outlineBounds(outline);
-  return Math.min(bb.width, bb.height) < minSpanMm;
+  // Drop specks only. A long thin remainder (shared patio seam) must stay.
+  return bb.width < minSpanMm && bb.height < minSpanMm;
+}
+
+/** Close grass seams between overlapping / nearly touching patio slabs. */
+const PATIO_SEAM_PAD_MM = 200;
+
+type PatioSlabCluster = {
+  id: string;
+  outline: PointMm[];
+  materialId?: string;
+};
+
+function clusterPatioSlabs(
+  patios: Array<{ id: string; outline: PointMm[]; materialId?: string }>,
+): PatioSlabCluster[] {
+  const clusters: PatioSlabCluster[] = patios
+    .filter((p) => p.outline.length >= 3)
+    .map((p) => ({
+      id: p.id,
+      outline: p.outline,
+      materialId: p.materialId,
+    }));
+  let merged = true;
+  while (merged) {
+    merged = false;
+    outer: for (let i = 0; i < clusters.length; i++) {
+      for (let j = i + 1; j < clusters.length; j++) {
+        if (
+          !outlinesAabbTouch(
+            clusters[i].outline,
+            clusters[j].outline,
+            PATIO_SEAM_PAD_MM,
+          )
+        ) {
+          continue;
+        }
+        const a = clusters[i];
+        const b = clusters[j];
+        const ba = outlineBounds(a.outline);
+        const bb = outlineBounds(b.outline);
+        const aLarger = ba.width * ba.height >= bb.width * bb.height;
+        clusters[i] = {
+          id: aLarger ? a.id : b.id,
+          outline: aabbUnionRing(a.outline, b.outline),
+          materialId: aLarger ? a.materialId : b.materialId,
+        };
+        clusters.splice(j, 1);
+        merged = true;
+        break outer;
+      }
+    }
+  }
+  return clusters;
 }
 
 function asAabbRing(outline: PointMm[]): PointMm[] {
@@ -2558,7 +2612,20 @@ export function buildSceneModel(
   // Prefer solid AABB slabs with pits subtracted (reliable). Fall back to
   // Extrude holes only when the outline isn't a rectangle.
   // Always punch pool/spa pits out of grade so basins stay clear.
-  const groundHoles = deckPunchHoles(poolPitHoles, infinityTroughCuts);
+  const hideDeck = Boolean(
+    options.hideDeck || !anyLayerVisible(design, "patio", "deck"),
+  );
+  const patioClusters = hideDeck
+    ? []
+    : clusterPatioSlabs(design.patios ?? []);
+  // Rect unions only — an L bbox would also punch the empty courtyard.
+  const patioGrassHoles = patioClusters
+    .map((c) => ringPoints(c.outline))
+    .filter((h) => h.length >= 3 && isAxisAlignedRect(h, 80));
+  const groundHoles = deckPunchHoles(
+    [...poolPitHoles, ...patioGrassHoles],
+    infinityTroughCuts,
+  );
   const groundRegions = subtractAabbHoles(groundOutline, groundHoles);
   if (!hasGradeSamples && groundRegions.length > 0) {
     let gi = 0;
@@ -3032,7 +3099,7 @@ export function buildSceneModel(
     !options.hideDeck &&
     anyLayerVisible(design, "patio", "deck")
   ) {
-    for (const p of design.patios ?? []) {
+    for (const p of patioClusters) {
       if (p.outline.length < 3) continue;
       const t = mmToMeters(PATIO_SLAB_THICKNESS_MM);
       const select: SceneSelection = { kind: "patio", id: p.id };
@@ -3081,15 +3148,26 @@ export function buildSceneModel(
           select,
         });
       }
+    }
 
-      // Fill / retaining from site grade samples.
-      if (hasGradeSamples) {
-        const strategy = resolveGradeStrategy(p.gradeStrategy);
-        const analysis = analyzePatioGrade(
-          p,
-          gradeSamples,
-          design.gradeOptions,
-        );
+    // Fill / retaining from site grade samples (per authored patio).
+    for (const p of design.patios ?? []) {
+      if (p.outline.length < 3 || !hasGradeSamples) continue;
+      const t = mmToMeters(PATIO_SLAB_THICKNESS_MM);
+      const select: SceneSelection = { kind: "patio", id: p.id };
+      const open = ringPoints(p.outline);
+      const punchHoles = patioPunchHoles(
+        poolPitHoles,
+        p.outline,
+        infinityEdgesAll,
+      );
+      const holesAabb = punchHoles.map(asAabbRing);
+      const strategy = resolveGradeStrategy(p.gradeStrategy);
+      const analysis = analyzePatioGrade(
+        p,
+        gradeSamples,
+        design.gradeOptions,
+      );
         // Max existing-grade drop under this patio (for a solid raised pad).
         let maxDropMm = 0;
         for (const corner of p.outline) {
@@ -3266,7 +3344,6 @@ export function buildSceneModel(
             }
           }
         }
-      }
     }
   }
 
