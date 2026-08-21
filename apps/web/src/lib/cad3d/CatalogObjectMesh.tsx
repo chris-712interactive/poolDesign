@@ -1785,23 +1785,29 @@ function OutdoorSofaMesh({
           </RoundedBox>
         </group>
       ))}
-      {([-1, 1] as const).map((side) => (
-        <RoundedBox
-          key={`pillow-${side}`}
-          args={[0.32, 0.2, 0.1]}
-          radius={0.04}
-          smoothness={4}
-          position={[
-            side * innerW * 0.28,
-            y0 + legH + deckT + seatH + 0.14,
-            -sz * 0.12,
-          ]}
-          rotation={[0.25, side * 0.35, side * 0.08]}
-          castShadow
-        >
-          <FabricMat fabric={cushionTex} selected={selected} />
-        </RoundedBox>
-      ))}
+      {([-1, 1] as const).map((side) => {
+        const pillowW = 0.1;
+        const pillowH = 0.24;
+        const pillowD = Math.min(0.34, seatD * 0.72);
+        const armInnerX = side * (sx * 0.5 - armW * 0.85);
+        return (
+          <RoundedBox
+            key={`pillow-${side}`}
+            args={[pillowW, pillowH, pillowD]}
+            radius={0.04}
+            smoothness={4}
+            position={[
+              armInnerX - side * (pillowW * 0.5 + 0.02),
+              y0 + legH + deckT + seatH + pillowH * 0.45,
+              sz * 0.06,
+            ]}
+            rotation={[0, 0, -side * 0.06]}
+            castShadow
+          >
+            <FabricMat fabric={cushionTex} selected={selected} />
+          </RoundedBox>
+        );
+      })}
     </group>
   );
 }
