@@ -20,6 +20,7 @@ import {
   flattenClosedOutline,
   houseExteriorColorFromHex,
   mmToMeters,
+  openWallSegments,
   planToWorldXZ,
   pointInPolygon,
   resolveHouseSidingId,
@@ -366,6 +367,17 @@ function outlineToPath(outlineMm: PointMm[], clockwise = true): THREE.Path {
  * maps then pick mip levels from each triangle's screen-space UV derivatives,
  * which draws a hard diagonal of sharp vs muddy texture across the pool.
  */
+function applyWorldXzUvs(geo: THREE.BufferGeometry, scale = 0.35) {
+  const pos = geo.attributes.position;
+  if (!pos) return;
+  const uvs = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    uvs[i * 2] = pos.getX(i) * scale;
+    uvs[i * 2 + 1] = pos.getZ(i) * scale;
+  }
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+}
+
 function tessellatePlanarShape(
   geo: THREE.BufferGeometry,
   maxEdgeM: number,
@@ -765,10 +777,10 @@ function ExtrudeMesh({
     // Flat single-face film for sunshelf water — an extruded slab's top+bottom
     // faces stack in transparency and read as dark navy over the ledge.
     if (isShallowWater) {
-      const geo = tessellatePlanarShape(new THREE.ShapeGeometry(shape), 0.4);
+      const geo = tessellatePlanarShape(new THREE.ShapeGeometry(shape), 0.35);
       geo.rotateX(-Math.PI / 2);
       geo.translate(0, desc.bottomY + Math.max(0.004, desc.height), 0);
-      if (desc.material === "ground") applyGrassWorldUVs(geo);
+      applyWorldXzUvs(geo, 0.45);
       return geo;
     }
     const geo = new THREE.ExtrudeGeometry(shape, {
@@ -819,6 +831,9 @@ function ExtrudeMesh({
           yOffset={Math.max(0.008, desc.height * 0.92)}
           opacity={0.3}
         />
+      ) : null}
+      {isWater && waterLayer === "surface" ? (
+        <WaterCausticOverlay geometry={geometry} />
       ) : null}
     </group>
   );
@@ -1895,13 +1910,11 @@ function FloorMesh({
     }
 
     // Perimeter walls between top and bottom
-    for (let i = 0; i < open.length; i++) {
-      const p0 = open[i];
-      const p1 = open[(i + 1) % open.length];
-      const x0 = mmToMeters(-p0.x);
-      const y0 = mmToMeters(p0.y);
-      const x1 = mmToMeters(-p1.x);
-      const y1 = mmToMeters(p1.y);
+    const emitFloorSide = (a: PointMm, b: PointMm) => {
+      const x0 = mmToMeters(-a.x);
+      const y0 = mmToMeters(a.y);
+      const x1 = mmToMeters(-b.x);
+      const y1 = mmToMeters(b.y);
       const d0 = depthAtShape(x0, y0);
       const d1 = depthAtShape(x1, y1);
       const r = verts.length / 3;
@@ -1930,6 +1943,14 @@ function FloorMesh({
         y0 * uvScale,
       );
       indices.push(r, r + 1, r + 2, r, r + 2, r + 3);
+    };
+    for (let i = 0; i < open.length; i++) {
+      const p0 = open[i];
+      const p1 = open[(i + 1) % open.length];
+      const segs = desc.omitPerimeterAgainst?.length
+        ? openWallSegments(p0, p1, desc.omitPerimeterAgainst)
+        : [{ a: p0, b: p1 }];
+      for (const seg of segs) emitFloorSide(seg.a, seg.b);
     }
 
     const geo = new THREE.BufferGeometry();
@@ -1966,33 +1987,39 @@ function pushWaterSideRing(
   waterTop: number,
   depthAtShape: (sx: number, sy: number) => number,
   floorClearance: number,
+  openAgainst?: PointMm[][],
 ) {
   const open = ringPts(ring);
   for (let i = 0; i < open.length; i++) {
     const p0 = open[i];
     const p1 = open[(i + 1) % open.length];
-    const x0 = mmToMeters(-p0.x);
-    const y0 = mmToMeters(p0.y);
-    const x1 = mmToMeters(-p1.x);
-    const y1 = mmToMeters(p1.y);
-    const b0 = Math.min(waterTop - 0.12, -depthAtShape(x0, y0) + floorClearance);
-    const b1 = Math.min(waterTop - 0.12, -depthAtShape(x1, y1) + floorClearance);
-    const r = verts.length / 3;
-    verts.push(
-      x0,
-      waterTop,
-      -y0,
-      x1,
-      waterTop,
-      -y1,
-      x1,
-      b1,
-      -y1,
-      x0,
-      b0,
-      -y0,
-    );
-    indices.push(r, r + 1, r + 2, r, r + 2, r + 3);
+    const segs = openAgainst?.length
+      ? openWallSegments(p0, p1, openAgainst)
+      : [{ a: p0, b: p1 }];
+    for (const seg of segs) {
+      const x0 = mmToMeters(-seg.a.x);
+      const y0 = mmToMeters(seg.a.y);
+      const x1 = mmToMeters(-seg.b.x);
+      const y1 = mmToMeters(seg.b.y);
+      const b0 = Math.min(waterTop - 0.12, -depthAtShape(x0, y0) + floorClearance);
+      const b1 = Math.min(waterTop - 0.12, -depthAtShape(x1, y1) + floorClearance);
+      const r = verts.length / 3;
+      verts.push(
+        x0,
+        waterTop,
+        -y0,
+        x1,
+        waterTop,
+        -y1,
+        x1,
+        b1,
+        -y1,
+        x0,
+        b0,
+        -y0,
+      );
+      indices.push(r, r + 1, r + 2, r, r + 2, r + 3);
+    }
   }
 }
 
@@ -2057,10 +2084,11 @@ function WaterBodyMesh({
     pushWaterSideRing(
       volVerts,
       volIdx,
-      desc.outlineMm,
+      desc.sideOutlineMm ?? desc.outlineMm,
       waterTop,
       depthAtShape,
       floorClearance,
+      desc.sideOpenAgainst,
     );
     for (const hole of desc.holeOutlinesMm ?? []) {
       pushWaterSideRing(

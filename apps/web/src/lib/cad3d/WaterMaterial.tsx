@@ -57,12 +57,12 @@ export function WaterMaterial({
   // Shallow ledge skips albedo — the blue map multiplies and reads as deep navy.
   const maps = useMemo(() => {
     if (!textures || layer !== "surface") return null;
-    const map = shallow ? null : textures.albedo.clone();
+    const map = textures.albedo.clone();
     const normalMap = textures.normalA.clone();
     const clearcoatNormalMap = textures.normalB.clone();
-    const rep = spa ? 3.4 : shallow ? 2.4 : 1.6;
-    const repB = spa ? 2.6 : shallow ? 1.9 : 1.25;
-    if (map) map.repeat.set(spa ? 1.8 : 0.7, spa ? 1.8 : 0.7);
+    const rep = spa ? 3.4 : shallow ? 2.8 : 1.6;
+    const repB = spa ? 2.6 : shallow ? 2.2 : 1.25;
+    if (map) map.repeat.set(spa ? 1.8 : shallow ? 1.5 : 0.7, spa ? 1.8 : shallow ? 1.5 : 0.7);
     normalMap.repeat.set(rep, rep);
     clearcoatNormalMap.repeat.set(repB, repB);
     return { map, normalMap, clearcoatNormalMap };
@@ -110,8 +110,8 @@ export function WaterMaterial({
 
   // Chlorinated residential pool: turquoise body, deeper teal absorption.
   // Shallow ledge: pale tint so the plaster reads through (less water = lighter).
-  const baseColor = spa ? "#1a96b4" : shallow ? "#c5eef8" : "#1290b0";
-  const attenuation = spa ? "#0a6e88" : shallow ? "#b8e8f4" : "#055870";
+  const baseColor = spa ? "#1a96b4" : shallow ? "#d8f4fa" : "#1290b0";
+  const attenuation = spa ? "#0a6e88" : shallow ? "#8fd4e4" : "#055870";
 
   if (layer === "volume") {
     return (
@@ -145,26 +145,27 @@ export function WaterMaterial({
       color={baseColor}
       map={maps?.map ?? undefined}
       normalMap={maps?.normalMap ?? undefined}
-      normalScale={spa ? [1.25, 1.25] : shallow ? [0.35, 0.35] : [0.7, 0.7]}
+      normalScale={spa ? [1.25, 1.25] : shallow ? [0.85, 0.85] : [0.7, 0.7]}
       clearcoatNormalMap={maps?.clearcoatNormalMap ?? undefined}
       clearcoatNormalScale={
-        spa ? [1.05, 1.05] : shallow ? [0.28, 0.28] : [0.55, 0.55]
+        spa ? [1.05, 1.05] : shallow ? [0.7, 0.7] : [0.55, 0.55]
       }
-      roughness={spa ? 0.14 : shallow ? 0.12 : 0.045}
+      roughness={spa ? 0.14 : shallow ? 0.1 : 0.045}
       metalness={0}
-      clearcoat={spa ? 0.85 : shallow ? 0.65 : 1}
-      clearcoatRoughness={spa ? 0.28 : shallow ? 0.2 : 0.08}
+      clearcoat={spa ? 0.85 : shallow ? 0.85 : 1}
+      clearcoatRoughness={spa ? 0.28 : shallow ? 0.16 : 0.08}
       // Transmission + attenuation = see the floor with depth tint.
-      // Shallow: near-clear film so ~9″ ledge looks lighter than deep water.
-      transmission={spa ? 0.42 : shallow ? 0.92 : 0.55}
-      thickness={spa ? 0.5 : shallow ? 0.04 : 1.6}
+      // Shallow: thinner film so ~9″ ledge looks lighter than deep end,
+      // but still reads as water (not a dry plaster slab).
+      transmission={spa ? 0.42 : shallow ? 0.58 : 0.55}
+      thickness={spa ? 0.5 : shallow ? 0.12 : 1.6}
       ior={1.333}
       attenuationColor={attenuation}
-      attenuationDistance={spa ? 1.1 : shallow ? 12 : 2.2}
+      attenuationDistance={spa ? 1.1 : shallow ? 4.5 : 2.2}
       transparent
       opacity={
         shallow
-          ? Math.min(0.32, Math.max(0.12, opacity ?? 0.22))
+          ? Math.min(0.55, Math.max(0.28, opacity ?? 0.42))
           : Math.min(0.9, Math.max(0.7, opacity ?? 0.82))
       }
       side={THREE.FrontSide}

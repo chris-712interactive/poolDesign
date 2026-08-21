@@ -1,5 +1,6 @@
 import {
   approximateIntersectionAreaMm2,
+  distToPolygonBoundaryMm,
   pointInPolygon,
   segmentColinearOverlapMm,
   segmentLengthMm,
@@ -744,7 +745,9 @@ export function openWallSegments(
     for (let s = 0; s <= n; s++) {
       const t = (s / n) * len;
       const p = { x: edgeA.x + ux * t, y: edgeA.y + uy * t };
-      if (pointInPolygon(p, ring)) {
+      const inBlocker =
+        pointInPolygon(p, ring) || distToPolygonBoundaryMm(p, ring) <= tolMm;
+      if (inBlocker) {
         if (runStart === null) runStart = Math.max(0, t - len / n);
       } else if (runStart !== null) {
         add(runStart, t);

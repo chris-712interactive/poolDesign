@@ -347,6 +347,8 @@ export type FloorDescriptor = {
   depthDeepMm: number;
   /** Structural slab thickness (m). */
   thicknessM?: number;
+  /** Skip floor-slab side faces that open into these footprints (attached spa). */
+  omitPerimeterAgainst?: PointMm[][];
   opacity?: number;
 } & DepthProfileFields &
   Selectable;
@@ -361,6 +363,13 @@ export type WaterBodyDescriptor = {
   outlineMm: PointMm[];
   /** Footprints punched from the water (e.g. solid sunshelf fill). */
   holeOutlinesMm?: PointMm[][];
+  /**
+   * Perimeter for vertical water-column sides. Defaults to outlineMm.
+   * Use the unclipped pool inner ring so spa punches don't grow interior walls.
+   */
+  sideOutlineMm?: PointMm[];
+  /** Open water-column sides that join these footprints (attached spa). */
+  sideOpenAgainst?: PointMm[][];
   waterTopY: number;
   opacity?: number;
   surfaceOpacity?: number;
@@ -1865,6 +1874,8 @@ function pushProfileWater(
     select: SceneSelection;
     waterMaterial: SceneMaterialKey;
     holeOutlinesMm?: PointMm[][];
+    sideOutlineMm?: PointMm[];
+    sideOpenAgainst?: PointMm[][];
     profile: {
       stations: {
         t: number;
@@ -1884,6 +1895,8 @@ function pushProfileWater(
     material: opts.waterMaterial,
     outlineMm: closeOutline(opts.outlineMm),
     holeOutlinesMm: opts.holeOutlinesMm,
+    sideOutlineMm: opts.sideOutlineMm,
+    sideOpenAgainst: opts.sideOpenAgainst,
     waterTopY: opts.waterTopY,
     depthStations: opts.profile.stations,
     depthAxis: opts.profile.axis,
@@ -3555,10 +3568,7 @@ export function buildSceneModel(
         const waterInner = insetClosedOutline(outer, wallT);
         // Floor extends under the wall thickness so the shell seals (no light leaks).
         const floorInner = insetClosedOutline(outer, wallT * 0.35);
-        const floorOutline =
-          spaClippers.length > 0
-            ? clipOutlineByAabbs(floorInner, spaClippers)
-            : floorInner;
+        const floorOutline = floorInner;
 
         const floorY = -depthM;
         const infinityEdges = resolveInfinityEdges(body);
@@ -3665,6 +3675,8 @@ export function buildSceneModel(
           axisOriginMm: profileFields.originMm,
           axisLengthMm: profileFields.axisLengthMm,
           thicknessM: BASIN_FLOOR_THICKNESS_M,
+          omitPerimeterAgainst:
+            spaClippers.length > 0 ? spaClippers : undefined,
           select,
         });
 
@@ -3726,6 +3738,9 @@ export function buildSceneModel(
             select,
             waterMaterial: "poolWater",
             holeOutlinesMm: shelfHoles.length > 0 ? shelfHoles : undefined,
+            sideOutlineMm: waterInner,
+            sideOpenAgainst:
+              spaClippers.length > 0 ? spaClippers : undefined,
             profile: profileFields,
           });
         }
@@ -3742,8 +3757,8 @@ export function buildSceneModel(
             material: "poolWater",
             outlineMm: closeOutline(f.outline),
             bottomY: waterTopY - 0.01,
-            height: 0.01,
-            opacity: 0.2,
+            height: 0.012,
+            opacity: 0.42,
             waterShallow: true,
             select,
           });
