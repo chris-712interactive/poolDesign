@@ -113,6 +113,28 @@ export function aabbCoverInterval(
   return [t0 * len, t1 * len];
 }
 
+/** Axis-aligned ring expanded by `padMm` — used to clip pool water/floor past a spa. */
+export function paddedAabbRing(outline: PointMm[], padMm: number): PointMm[] {
+  const b = asBounds(outline);
+  return [
+    { x: b.minX - padMm, y: b.minY - padMm },
+    { x: b.maxX + padMm, y: b.minY - padMm },
+    { x: b.maxX + padMm, y: b.maxY + padMm },
+    { x: b.minX - padMm, y: b.maxY + padMm },
+  ];
+}
+
+/** True when any part of a→b lies inside the footprint's padded AABB. */
+export function segmentHitsFootprint(
+  a: PointMm,
+  b: PointMm,
+  footprint: PointMm[],
+  padMm = 80,
+): boolean {
+  const iv = aabbCoverInterval(a, b, asBounds(footprint), padMm);
+  return iv != null && iv[1] - iv[0] > 15;
+}
+
 function boundsIntersection(
   a: OutlineBounds,
   b: OutlineBounds,

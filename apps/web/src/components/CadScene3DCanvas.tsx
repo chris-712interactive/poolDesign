@@ -24,6 +24,7 @@ import {
   planToWorldXZ,
   pointInPolygon,
   distToPolygonBoundaryMm,
+  segmentHitsFootprint,
   resolveHouseSidingId,
 } from "@pool-design/shared";
 import {
@@ -1961,7 +1962,8 @@ function FloorMesh({
           desc.omitPerimeterAgainst?.some(
             (poly) =>
               pointInPolygon(mid, poly) ||
-              distToPolygonBoundaryMm(mid, poly) <= 40,
+              distToPolygonBoundaryMm(mid, poly) <= 40 ||
+              segmentHitsFootprint(seg.a, seg.b, poly, 0),
           )
         ) {
           continue;
@@ -2022,7 +2024,9 @@ function pushWaterSideRing(
       if (
         openAgainst?.some(
           (poly) =>
-            pointInPolygon(mid, poly) || distToPolygonBoundaryMm(mid, poly) <= 40,
+            pointInPolygon(mid, poly) ||
+            distToPolygonBoundaryMm(mid, poly) <= 40 ||
+            segmentHitsFootprint(seg.a, seg.b, poly, 0),
         )
       ) {
         continue;

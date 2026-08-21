@@ -53,6 +53,8 @@ import {
   outlineBounds,
   openWallSegments,
   outlineBoundsRect,
+  paddedAabbRing,
+  segmentHitsFootprint,
   planToWorldXZ,
   pointInPolygon,
   rectangleFrame,
@@ -367,7 +369,8 @@ export type WaterBodyDescriptor = {
   holeOutlinesMm?: PointMm[][];
   /**
    * Perimeter for vertical water-column sides. Defaults to outlineMm.
-   * Use the unclipped pool inner ring so spa punches don't grow interior walls.
+   * Use the spa-clipped pool ring so the authorable inner wall cannot
+   * continue through an overlapping spa.
    */
   sideOutlineMm?: PointMm[];
   /** Open water-column sides that join these footprints (attached spa). */
@@ -862,6 +865,14 @@ function pushWallRing(
           }),
         );
       }
+    }
+    if (opts.openAgainst?.length) {
+      segments = segments.filter(
+        (s) =>
+          !opts.openAgainst!.some((poly) =>
+            segmentHitsFootprint(s.a, s.b, poly, 0),
+          ),
+      );
     }
     for (const seg of segments) {
       const edgeLen = Math.hypot(seg.b.x - seg.a.x, seg.b.y - seg.a.y);
@@ -3682,7 +3693,7 @@ export function buildSceneModel(
                   5_000 ||
                 outlinesAabbTouch(body.outline, s.outline, 80)),
           )
-          .map((s) => outlineBoundsRect(s.outline));
+          .map((s) => paddedAabbRing(s.outline, 40));
         const spaBlockers = spas
           .filter((s) => s.outline.length >= 3)
           .flatMap((s) => [s.outline, outlineBoundsRect(s.outline)]);
@@ -3866,7 +3877,9 @@ export function buildSceneModel(
             select,
             waterMaterial: "poolWater",
             holeOutlinesMm: shelfHoles.length > 0 ? shelfHoles : undefined,
-            sideOutlineMm: waterInner,
+            // Clipped water ring — the authorable inner ring still has the pool
+            // outer wall running through an overlapping spa.
+            sideOutlineMm: waterOutline,
             sideOpenAgainst:
               spaBlockers.length > 0 ? spaBlockers : undefined,
             profile: profileFields,
@@ -4629,6 +4642,30 @@ export function buildSceneModel(
         : {}),
       select: { kind: "object", id: obj.id },
     });
+  }
+
+  // Drop pool wall/coping/tile boxes whose center still sits inside a spa —
+  // leftover from an outer pool edge that continues through the overlap.
+  const spaOutlines = spas.map((s) => s.outline).filter((o) => o.length >= 3);
+  if (spaOutlines.length > 0) {
+    const kept: MeshDescriptor[] = [];
+    for (const m of meshes) {
+      if (
+        m.kind === "box" &&
+        (m.id.startsWith("pool_wall") ||
+          m.id.startsWith("pool_coping") ||
+          m.id.startsWith("pool_tile"))
+      ) {
+        const plan = {
+          x: -m.position.x * 1000,
+          y: -m.position.z * 1000,
+        };
+        if (spaOutlines.some((s) => pointInPolygon(plan, s))) continue;
+      }
+      kept.push(m);
+    }
+    meshes.length = 0;
+    meshes.push(...kept);
   }
 
   return { center, groundSize, ground, meshes };

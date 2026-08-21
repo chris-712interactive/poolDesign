@@ -9,6 +9,7 @@ import {
   mergePitHoles,
   openWallSegments,
   shouldOmitPoolWallEdge,
+  segmentHitsFootprint,
   spaBelowDeckMm,
   spaNeedsDeckPit,
   subtractAabbHoles,
@@ -196,6 +197,30 @@ describe("water-geometry", () => {
     // Bottom edge only partially colinear — keep it
     assert.equal(
       shouldOmitPoolWallEdge({ x: 0, y: 0 }, { x: 8000, y: 0 }, spa),
+      false,
+    );
+  });
+
+  it("detects a pool outer wall that only partly crosses a spa", () => {
+    const spa = rect(7000, 0, 11000, 8000);
+    // Full pool long edge: midpoint is still outside the spa.
+    assert.equal(
+      segmentHitsFootprint(
+        { x: 0, y: 2000 },
+        { x: 8000, y: 2000 },
+        spa,
+        0,
+      ),
+      true,
+    );
+    // Leftover west of the spa only touches the spa AABB at an endpoint.
+    assert.equal(
+      segmentHitsFootprint(
+        { x: 0, y: 2000 },
+        { x: 7000, y: 2000 },
+        spa,
+        0,
+      ),
       false,
     );
   });
