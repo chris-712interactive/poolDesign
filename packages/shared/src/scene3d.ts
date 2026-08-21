@@ -404,6 +404,8 @@ export function stepsTreadOutline(
   outline: PointMm[],
   stepIndex: number,
   stepCount: number,
+  /** +1 = frame run axis; −1 = reverse so treads descend into the pool. */
+  runSign: 1 | -1 = 1,
 ): PointMm[] {
   const n = Math.max(1, stepCount);
   const s = Math.min(n - 1, Math.max(0, stepIndex));
@@ -414,7 +416,8 @@ export function stepsTreadOutline(
   const acrossMm = runIsWidth ? frame.lengthMm : frame.widthMm;
   const runMm = runIsWidth ? frame.widthMm : frame.lengthMm;
   const u = runIsWidth ? frame.axisLength : frame.axisWidth;
-  const v = runIsWidth ? frame.axisWidth : frame.axisLength;
+  const v0 = runIsWidth ? frame.axisWidth : frame.axisLength;
+  const v = { x: v0.x * runSign, y: v0.y * runSign };
   const t0 = s / n;
   const t1 = (s + 1) / n;
   const along0 = -runMm / 2 + runMm * t0;
@@ -427,6 +430,42 @@ export function stepsTreadOutline(
     { x: c.x + u.x * hw + v.x * along1, y: c.y + u.y * hw + v.y * along1 },
     { x: c.x + u.x * -hw + v.x * along1, y: c.y + u.y * -hw + v.y * along1 },
   ];
+}
+
+function treadCentroid(pts: PointMm[]): PointMm {
+  let x = 0;
+  let y = 0;
+  for (const p of pts) {
+    x += p.x;
+    y += p.y;
+  }
+  const n = Math.max(1, pts.length);
+  return { x: x / n, y: y / n };
+}
+
+/**
+ * +1 / −1 so the lowest tread sits toward the pool interior (walk down
+ * from the wall, not into it).
+ */
+export function stepsRunSignTowardPool(
+  outline: PointMm[],
+  stepCount: number,
+  poolOutline: PointMm[],
+): 1 | -1 {
+  if (poolOutline.length < 3) return 1;
+  const n = Math.max(1, stepCount);
+  const t0 = stepsTreadOutline(outline, 0, n, 1);
+  const tLast = stepsTreadOutline(outline, n - 1, n, 1);
+  if (t0.length < 3 || tLast.length < 3) return 1;
+  const poolB = outlineBounds(poolOutline);
+  const poolC = { x: poolB.cx, y: poolB.cy };
+  const c0 = treadCentroid(t0);
+  const cLast = treadCentroid(tLast);
+  const d0 = Math.hypot(c0.x - poolC.x, c0.y - poolC.y);
+  const dLast = Math.hypot(cLast.x - poolC.x, cLast.y - poolC.y);
+  // Last (lowest) tread should be closer to the water. If the first strip
+  // already is, the frame axis points the wrong way.
+  return d0 + 80 < dLast ? -1 : 1;
 }
 
 function openPlanRing(outline: PointMm[]): PointMm[] {

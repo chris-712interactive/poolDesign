@@ -6,6 +6,7 @@ import {
   STANDARD_STEP_TREAD_MM,
   stepsRunMm,
   stepsTreadOutline,
+  stepsRunSignTowardPool,
 } from "./scene3d";
 import { rectangleFrame } from "./spa-defaults";
 
@@ -25,6 +26,40 @@ describe("steps footprint", () => {
     assert.ok(
       Math.abs(Math.min(frame.widthMm, frame.lengthMm) - run) < 1,
     );
+  });
+
+  it("orients the lowest tread toward the pool interior", () => {
+    const steps = applyStepsStandardFootprint(
+      [
+        { x: 0, y: 0 },
+        { x: 2000, y: 0 },
+        { x: 2000, y: 1200 },
+        { x: 0, y: 1200 },
+      ],
+      3,
+    );
+    const pool = [
+      { x: 4000, y: -2000 },
+      { x: 12000, y: -2000 },
+      { x: 12000, y: 4000 },
+      { x: 4000, y: 4000 },
+    ];
+    const n = 3;
+    const sign = stepsRunSignTowardPool(steps, n, pool);
+    const top = stepsTreadOutline(steps, 0, n, sign);
+    const bottom = stepsTreadOutline(steps, n - 1, n, sign);
+    const cTop = {
+      x: top.reduce((s, p) => s + p.x, 0) / 4,
+      y: top.reduce((s, p) => s + p.y, 0) / 4,
+    };
+    const cBot = {
+      x: bottom.reduce((s, p) => s + p.x, 0) / 4,
+      y: bottom.reduce((s, p) => s + p.y, 0) / 4,
+    };
+    const poolC = { x: 8000, y: 1000 };
+    const dTop = Math.hypot(cTop.x - poolC.x, cTop.y - poolC.y);
+    const dBot = Math.hypot(cBot.x - poolC.x, cBot.y - poolC.y);
+    assert.ok(dBot < dTop, `bottom ${dBot} should be closer to pool than top ${dTop}`);
   });
 
   it("splits into one tread strip per riser", () => {

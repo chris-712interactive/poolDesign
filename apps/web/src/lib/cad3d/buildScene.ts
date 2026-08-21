@@ -46,6 +46,7 @@ import {
   STANDARD_STEP_RISER_MM,
   stepsRiserCount,
   stepsTreadOutline,
+  stepsRunSignTowardPool,
   DEFAULT_WATERLINE_TILE_ID,
   waterlineNosingBandMm,
   objectHeightMm,
@@ -782,6 +783,8 @@ function pushWallRing(
      * from edge start). Used for spa spillover weir notches.
      */
     edgeOmits?: { edgeIndex: number; intervals: [number, number][] }[];
+    /** If set, only emit these outline edge indexes. */
+    onlyEdgeIndexes?: number[];
     /**
      * Also omit any wall segment that is colinear with these weir openings
      * (indexes don't have to match — used for infinity edges / inset rings).
@@ -798,15 +801,22 @@ function pushWallRing(
   },
 ) {
   const pts = ringPoints(
-    opts.edgeOmits?.length || opts.omitAgainst?.length
+    opts.edgeOmits?.length ||
+      opts.omitAgainst?.length ||
+      opts.onlyEdgeIndexes?.length
       ? opts.outlineMm
       : flattenClosedOutline(opts.outlineMm),
   );
   if (pts.length < 3) return;
   const thickM = mmToMeters(opts.thicknessMm);
   const biasMm = opts.normalBiasMm ?? 0;
+  const only =
+    opts.onlyEdgeIndexes && opts.onlyEdgeIndexes.length > 0
+      ? new Set(opts.onlyEdgeIndexes)
+      : null;
   let segIndex = 0;
   for (let i = 0; i < pts.length; i++) {
+    if (only && !only.has(i)) continue;
     const a = pts[i];
     const b = pts[(i + 1) % pts.length];
     let segments =
@@ -3554,7 +3564,26 @@ export function buildSceneModel(
             });
             return;
           }
-          // Lower course up to weir crest (solid, including shared wall sill).
+          // Only the weir edge is split at crest height. Splitting every wall
+          // left a dark horizontal seam through the spa shell.
+          const spillIdx = edgeOmits.map((e) => e.edgeIndex);
+          const nEdge = pts.length;
+          const otherIdx = Array.from({ length: nEdge }, (_, i) => i).filter(
+            (i) => !spillIdx.includes(i),
+          );
+          if (otherIdx.length) {
+            pushWallRing(meshes, {
+              outlineMm: outer,
+              bottomY,
+              height: h,
+              thicknessMm: wallT,
+              material: "spaShell",
+              select,
+              idPrefix: `spa_wall_${body.id}`,
+              inward: true,
+              onlyEdgeIndexes: otherIdx,
+            });
+          }
           const lowerH = Math.max(0.02, crestY - bottomY);
           pushWallRing(meshes, {
             outlineMm: outer,
@@ -3565,8 +3594,8 @@ export function buildSceneModel(
             select,
             idPrefix: `spa_wall_${body.id}_sill`,
             inward: true,
+            onlyEdgeIndexes: spillIdx,
           });
-          // Upper course notched at spillover openings.
           const upperH = Math.max(0.015, topY - crestY);
           pushWallRing(meshes, {
             outlineMm: outer,
@@ -3577,6 +3606,7 @@ export function buildSceneModel(
             select,
             idPrefix: `spa_wall_${body.id}_rim`,
             inward: true,
+            onlyEdgeIndexes: spillIdx,
             edgeOmits,
           });
         };
@@ -3919,28 +3949,44 @@ export function buildSceneModel(
           select,
         });
       } else if (f.kind === "steps") {
-        // Stepped treads: one strip per riser, descending into the pool.
-        // Overlap + slight plan nest so riser/tread joints stay sealed.
+        // Solid treads from the basin floor up, descending into the pool.
         const risers = stepsRiserCount(f.riserCount);
         const riserM = mmToMeters(STANDARD_STEP_RISER_MM);
-        const treadH = riserM * 1.22;
+        const runSign = stepsRunSignTowardPool(
+          f.outline,
+          risers,
+          parent?.outline ?? [],
+        );
+        let floorY = waterTopY - 1.2;
+        if (parent && waterBodyKind(parent) !== "spa") {
+          const profile = depthProfileForBody(parent);
+          const bb = outlineBounds(f.outline);
+          const t = depthTAtPlanPoint(
+            { x: bb.cx, y: bb.cy },
+            profile.originMm,
+            profile.axis,
+            profile.axisLengthMm,
+          );
+          floorY = -mmToMeters(depthMmAtT(profile.stations, t));
+        }
         for (let s = 0; s < risers; s++) {
-          const tread = stepsTreadOutline(f.outline, s, risers);
+          const tread = stepsTreadOutline(f.outline, s, risers, runSign);
           if (tread.length < 3) continue;
-          // s=0 is the top/entry tread (nearest waterline)
+          // s=0 is the top/entry tread (nearest waterline / wall)
           const top = waterTopY - riserM * (s + 1);
+          const height = Math.max(riserM * 1.08, top - floorY);
           meshes.push({
             kind: "extrude",
             id: `feature_steps_${f.id}_${s}`,
             material: "poolShell",
             outlineMm: closeOutline(tread),
-            bottomY: top - treadH,
-            height: treadH,
+            bottomY: top - height,
+            height,
             select,
           });
-          // Small tile band on the tread TOP at the deep nosing edge only.
+          // Tile band on the tread TOP at the deep nosing (into the pool).
           if (featureTilesOn && tread.length >= 4) {
-            // stepsTreadOutline: [0],[1] = shallow edge; [2],[3] = deep edge.
+            // stepsTreadOutline: [0],[1] = wall-side edge; [2],[3] = pool nosing.
             const deepA = tread[3];
             const deepB = tread[2];
             let cx = 0;
