@@ -361,6 +361,89 @@ function outlineToPath(outlineMm: PointMm[], clockwise = true): THREE.Path {
   return path;
 }
 
+/**
+ * ShapeGeometry ear-clips a rectangle into two triangles. Repeating water
+ * maps then pick mip levels from each triangle's screen-space UV derivatives,
+ * which draws a hard diagonal of sharp vs muddy texture across the pool.
+ */
+function tessellatePlanarShape(
+  geo: THREE.BufferGeometry,
+  maxEdgeM: number,
+): THREE.BufferGeometry {
+  const src = geo.attributes.position;
+  if (!src || src.count < 3) return geo;
+  const verts: number[] = [];
+  for (let i = 0; i < src.count; i++) {
+    verts.push(src.getX(i), src.getY(i), src.getZ(i));
+  }
+  let tris: number[] = [];
+  const idx = geo.index;
+  if (idx) {
+    for (let i = 0; i < idx.count; i++) tris.push(idx.getX(i));
+  } else {
+    for (let i = 0; i < src.count; i++) tris.push(i);
+  }
+
+  const key = (a: number, b: number) => (a < b ? `${a}_${b}` : `${b}_${a}`);
+  const dist = (a: number, b: number) =>
+    Math.hypot(
+      verts[a * 3] - verts[b * 3],
+      verts[a * 3 + 1] - verts[b * 3 + 1],
+      verts[a * 3 + 2] - verts[b * 3 + 2],
+    );
+
+  for (let pass = 0; pass < 16; pass++) {
+    const mids = new Map<string, number>();
+    const midpoint = (a: number, b: number) => {
+      const k = key(a, b);
+      const hit = mids.get(k);
+      if (hit != null) return hit;
+      const i = verts.length / 3;
+      verts.push(
+        (verts[a * 3] + verts[b * 3]) * 0.5,
+        (verts[a * 3 + 1] + verts[b * 3 + 1]) * 0.5,
+        (verts[a * 3 + 2] + verts[b * 3 + 2]) * 0.5,
+      );
+      mids.set(k, i);
+      return i;
+    };
+    let split = false;
+    const next: number[] = [];
+    for (let t = 0; t < tris.length; t += 3) {
+      const a = tris[t];
+      const b = tris[t + 1];
+      const c = tris[t + 2];
+      const ab = dist(a, b);
+      const bc = dist(b, c);
+      const ca = dist(c, a);
+      const longest = Math.max(ab, bc, ca);
+      if (longest <= maxEdgeM) {
+        next.push(a, b, c);
+        continue;
+      }
+      split = true;
+      if (ab >= bc && ab >= ca) {
+        const m = midpoint(a, b);
+        next.push(a, m, c, m, b, c);
+      } else if (bc >= ca) {
+        const m = midpoint(b, c);
+        next.push(a, b, m, a, m, c);
+      } else {
+        const m = midpoint(c, a);
+        next.push(a, b, m, b, c, m);
+      }
+    }
+    tris = next;
+    if (!split) break;
+  }
+
+  const out = new THREE.BufferGeometry();
+  out.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+  out.setIndex(tris);
+  geo.dispose();
+  return out;
+}
+
 function useSelectHandlers(
   select: SceneSelection | undefined,
   onSelect?: (sel: SceneSelection | null) => void,
@@ -682,7 +765,7 @@ function ExtrudeMesh({
     // Flat single-face film for sunshelf water — an extruded slab's top+bottom
     // faces stack in transparency and read as dark navy over the ledge.
     if (isShallowWater) {
-      const geo = new THREE.ShapeGeometry(shape);
+      const geo = tessellatePlanarShape(new THREE.ShapeGeometry(shape), 0.4);
       geo.rotateX(-Math.PI / 2);
       geo.translate(0, desc.bottomY + Math.max(0.004, desc.height), 0);
       if (desc.material === "ground") applyGrassWorldUVs(geo);
@@ -1930,7 +2013,7 @@ function WaterBodyMesh({
     for (const hole of desc.holeOutlinesMm ?? []) {
       if (hole.length >= 3) shape.holes.push(outlineToPath(hole, true));
     }
-    const shapeGeo = new THREE.ShapeGeometry(shape);
+    const shapeGeo = tessellatePlanarShape(new THREE.ShapeGeometry(shape), 0.4);
     const src = shapeGeo.attributes.position;
     const srcIndex = shapeGeo.index;
     const n = src.count;
