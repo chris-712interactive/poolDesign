@@ -202,13 +202,15 @@ export function furnitureFinishRoles(catalogItemId: string): {
 } {
   if (
     catalogItemId === "lounge_chair" ||
-    catalogItemId === "sunshelf_chaise" ||
     catalogItemId === "sofa_outdoor" ||
     catalogItemId === "dining_table_set" ||
     catalogItemId === "dining_table_rect" ||
     catalogItemId === "dining_table_round"
   ) {
     return { frame: true, fabric: true, canopy: false };
+  }
+  if (catalogItemId === "sunshelf_chaise") {
+    return { frame: false, fabric: true, canopy: false };
   }
   if (catalogItemId === "sunshelf_table" || catalogItemId === "cover_fan") {
     return { frame: true, fabric: false, canopy: false };
@@ -234,6 +236,7 @@ export function defaultFrameFinishId(catalogItemId: string): string | undefined 
 export function defaultFabricFinishId(
   catalogItemId: string,
 ): string | undefined {
+  if (catalogItemId === "sunshelf_chaise") return "fabric_white";
   const roles = furnitureFinishRoles(catalogItemId);
   if (roles.fabric) return DEFAULT_FURNITURE_FABRIC_FINISH_ID;
   if (roles.canopy) return DEFAULT_FURNITURE_CANOPY_FINISH_ID;

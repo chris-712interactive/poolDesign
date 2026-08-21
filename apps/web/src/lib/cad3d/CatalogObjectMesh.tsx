@@ -12,6 +12,8 @@ import {
   DINING_CHAIR_CLEARANCE_MM,
   diningChairSlotsMm,
   diningTableShape,
+  furnitureFinishCssColor,
+  getFurnitureFinish,
   isDiningSetId,
   PATIO_SLAB_THICKNESS_MM,
   getFloridaVine,
@@ -1661,6 +1663,119 @@ function DiningSetMesh({
   );
 }
 
+/** In-pool tanning-ledge chaise: one-piece molded resin, not a deck lounge. */
+function SunshelfChaiseMesh({
+  sx,
+  sy,
+  sz,
+  selected,
+  color,
+  groupProps,
+}: {
+  sx: number;
+  sy: number;
+  sz: number;
+  selected: boolean;
+  color: string;
+  groupProps: Record<string, unknown>;
+}) {
+  const clippingPlanes = useContext(ClipPlanesContext);
+  const { body, arms } = useMemo(() => {
+    const L = Math.max(0.9, sz * 0.98);
+    const H = Math.max(0.28, sy * 0.96);
+    const bodyW = Math.max(0.32, sx * 0.72);
+    const y0 = -sy * 0.5 + 0.01;
+    const topPts = [
+      new THREE.Vector2(0, y0 + 0.048),
+      new THREE.Vector2(L * 0.1, y0 + 0.04),
+      new THREE.Vector2(L * 0.26, y0 + 0.055),
+      new THREE.Vector2(L * 0.42, y0 + 0.07),
+      new THREE.Vector2(L * 0.52, y0 + 0.062),
+      new THREE.Vector2(L * 0.62, y0 + 0.1),
+      new THREE.Vector2(L * 0.72, y0 + 0.2),
+      new THREE.Vector2(L * 0.82, y0 + H * 0.55),
+      new THREE.Vector2(L * 0.9, y0 + H * 0.82),
+      new THREE.Vector2(L * 0.96, y0 + H * 0.94),
+      new THREE.Vector2(L * 0.995, y0 + H * 0.78),
+      new THREE.Vector2(L, y0 + H * 0.58),
+    ];
+    const botPts = [
+      new THREE.Vector2(L * 0.97, y0 + H * 0.42),
+      new THREE.Vector2(L * 0.88, y0 + 0.08),
+      new THREE.Vector2(L * 0.72, y0 + 0.018),
+      new THREE.Vector2(L * 0.2, y0 + 0.016),
+      new THREE.Vector2(L * 0.04, y0 + 0.022),
+      new THREE.Vector2(0.01, y0 + 0.028),
+    ];
+    const top = new THREE.SplineCurve(topPts).getPoints(40);
+    const bot = new THREE.SplineCurve(botPts).getPoints(18);
+    const shape = new THREE.Shape();
+    shape.moveTo(top[0].x, top[0].y);
+    for (let i = 1; i < top.length; i++) shape.lineTo(top[i].x, top[i].y);
+    for (const p of bot) shape.lineTo(p.x, p.y);
+    shape.closePath();
+    const bodyGeo = new THREE.ExtrudeGeometry(shape, {
+      depth: bodyW,
+      bevelEnabled: true,
+      bevelThickness: Math.min(0.032, bodyW * 0.08),
+      bevelSize: Math.min(0.028, bodyW * 0.07),
+      bevelSegments: 3,
+      curveSegments: 8,
+    });
+    bodyGeo.rotateY(Math.PI / 2);
+    bodyGeo.translate(-bodyW / 2, 0, L / 2);
+    bodyGeo.computeVertexNormals();
+
+    const armR = Math.min(0.03, sx * 0.045);
+    const armX = sx * 0.38;
+    const makeArm = (side: number) => {
+      const curve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(side * armX * 0.92, y0 + 0.07, L * 0.18),
+        new THREE.Vector3(side * armX, y0 + 0.1, L * 0.02),
+        new THREE.Vector3(side * armX * 1.02, y0 + 0.16, -L * 0.12),
+        new THREE.Vector3(side * armX * 0.95, y0 + H * 0.42, -L * 0.28),
+        new THREE.Vector3(side * armX * 0.7, y0 + H * 0.55, -L * 0.38),
+      ]);
+      return new THREE.TubeGeometry(curve, 24, armR, 10, false);
+    };
+    return { body: bodyGeo, arms: [makeArm(-1), makeArm(1)] };
+  }, [sx, sy, sz]);
+
+  useLayoutEffect(
+    () => () => {
+      body.dispose();
+      arms.forEach((g) => g.dispose());
+    },
+    [body, arms],
+  );
+
+  const resinProps = {
+    color,
+    roughness: 0.3,
+    metalness: 0.03,
+    clearcoat: 0.42,
+    clearcoatRoughness: 0.38,
+    envMapIntensity: 0.85,
+    emissive: selected ? "#1f8a70" : "#000000",
+    emissiveIntensity: selected ? 0.22 : 0,
+    clippingPlanes,
+    clipShadows: clippingPlanes.length > 0,
+  };
+
+  return (
+    <group {...groupProps}>
+      <mesh geometry={body} castShadow receiveShadow>
+        <meshPhysicalMaterial {...resinProps} />
+      </mesh>
+      {arms.map((geo, i) => (
+        <mesh key={i} geometry={geo} castShadow>
+          <meshPhysicalMaterial {...resinProps} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function OutdoorSofaMesh({
   sx,
   sy,
@@ -1875,7 +1990,23 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
     );
   }
 
-  if (catalogId === "lounge_chair" || catalogId === "sunshelf_chaise") {
+  if (catalogId === "sunshelf_chaise") {
+    const finish = getFurnitureFinish(
+      desc.fabricFinishId ?? DEFAULT_FURNITURE_FABRIC_FINISH_ID,
+    );
+    return (
+      <SunshelfChaiseMesh
+        sx={sx}
+        sy={sy}
+        sz={sz}
+        selected={selected}
+        color={furnitureFinishCssColor(finish.color)}
+        groupProps={groupProps}
+      />
+    );
+  }
+
+  if (catalogId === "lounge_chair") {
     const frame = furnTex?.frame;
     const fabric = furnTex?.fabric;
     return (

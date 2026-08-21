@@ -21,7 +21,7 @@ describe("furniture finishes", () => {
       canopy: false,
     });
     assert.deepEqual(furnitureFinishRoles("sunshelf_chaise"), {
-      frame: true,
+      frame: false,
       fabric: true,
       canopy: false,
     });
@@ -53,5 +53,6 @@ describe("furniture finishes", () => {
     assert.equal(getFurnitureFinish("fabric_navy").kind, "fabric");
     assert.equal(defaultFrameFinishId("sofa_outdoor"), "wood_teak");
     assert.equal(defaultFabricFinishId("umbrella"), "canvas_sand");
+    assert.equal(defaultFabricFinishId("sunshelf_chaise"), "fabric_white");
   });
 });

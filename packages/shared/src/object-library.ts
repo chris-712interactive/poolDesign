@@ -344,15 +344,15 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     id: "sunshelf_chaise",
     name: "Sunshelf chaise",
     category: "furniture",
-    /** Low in-water chaise — typical tanning-ledge lounge. */
-    widthMm: 2 * FT,
-    depthMm: 5.5 * FT,
-    heightMm: 14 * IN,
+    /** Typical in-pool tanning-ledge lounge (~28″ × 66″ × 16″). */
+    widthMm: 28 * IN,
+    depthMm: 66 * IN,
+    heightMm: 16 * IN,
     layerId: "furniture",
     levels: ["residential", "commercial", "water_park"],
     unitPriceCents: 38000,
     description:
-      "Low-profile chaise for a tanning ledge. Sits on the sunshelf, not the deck.",
+      "Low-profile molded chaise for a tanning ledge. Sits on the sunshelf, not the deck.",
   },
   {
     id: "sunshelf_table",
