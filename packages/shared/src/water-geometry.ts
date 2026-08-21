@@ -115,35 +115,38 @@ export function aabbDifferenceRing(
 ): PointMm[] | null {
   const sub = openRing(subject);
   const clip = openRing(clipper);
-  if (!isAxisAlignedRect(sub) || !isAxisAlignedRect(clip)) {
-    return sub;
-  }
-  const S = asBounds(sub);
+  const subB = asBounds(sub);
+  // Clip by the spa's AABB even when the drawing is a few mm off-square;
+  // a strict rect check used to skip the punch and leave pool walls through the spa.
   const C = asBounds(clip);
-  const I = boundsIntersection(S, C);
-  if (!I) return rectRing(S);
+  if (!boundsOverlap(subB, C, 1)) return sub;
+
+  const S = isAxisAlignedRect(sub, 40) ? subB : null;
   if (
-    I.minX <= S.minX + 1 &&
-    I.maxX >= S.maxX - 1 &&
-    I.minY <= S.minY + 1 &&
-    I.maxY >= S.maxY - 1
+    S &&
+    C.minX <= S.minX + 1 &&
+    C.maxX >= S.maxX - 1 &&
+    C.minY <= S.minY + 1 &&
+    C.maxY >= S.maxY - 1
   ) {
     return null;
   }
 
   const xs = uniqueSorted([
-    S.minX,
-    S.maxX,
-    Math.max(S.minX, Math.min(S.maxX, C.minX)),
-    Math.max(S.minX, Math.min(S.maxX, C.maxX)),
+    subB.minX,
+    subB.maxX,
+    ...sub.map((p) => p.x),
+    Math.max(subB.minX, Math.min(subB.maxX, C.minX)),
+    Math.max(subB.minX, Math.min(subB.maxX, C.maxX)),
   ]);
   const ys = uniqueSorted([
-    S.minY,
-    S.maxY,
-    Math.max(S.minY, Math.min(S.maxY, C.minY)),
-    Math.max(S.minY, Math.min(S.maxY, C.maxY)),
+    subB.minY,
+    subB.maxY,
+    ...sub.map((p) => p.y),
+    Math.max(subB.minY, Math.min(subB.maxY, C.minY)),
+    Math.max(subB.minY, Math.min(subB.maxY, C.maxY)),
   ]);
-  if (xs.length < 2 || ys.length < 2) return rectRing(S);
+  if (xs.length < 2 || ys.length < 2) return sub;
 
   const nx = xs.length - 1;
   const ny = ys.length - 1;
@@ -155,11 +158,12 @@ export function aabbDifferenceRing(
     for (let j = 0; j < ny; j++) {
       const cx = (xs[i] + xs[i + 1]) / 2;
       const cy = (ys[j] + ys[j + 1]) / 2;
-      const inS =
-        cx >= S.minX - 1e-6 &&
-        cx <= S.maxX + 1e-6 &&
-        cy >= S.minY - 1e-6 &&
-        cy <= S.maxY + 1e-6;
+      const inS = S
+        ? cx >= S.minX - 1e-6 &&
+          cx <= S.maxX + 1e-6 &&
+          cy >= S.minY - 1e-6 &&
+          cy <= S.maxY + 1e-6
+        : pointInPolygon({ x: cx, y: cy }, sub);
       const inC =
         cx >= C.minX + 1e-6 &&
         cx <= C.maxX - 1e-6 &&
@@ -172,7 +176,16 @@ export function aabbDifferenceRing(
   if (!any) return null;
 
   const ring = traceOrthogonalBoundary(xs, ys, filled);
-  return ring.length >= 3 ? ring : rectRing(S);
+  return ring.length >= 3 ? ring : sub;
+}
+
+/** True when two outlines' bounding boxes overlap or nearly touch. */
+export function outlinesAabbTouch(
+  a: PointMm[],
+  b: PointMm[],
+  padMm = 80,
+): boolean {
+  return boundsOverlap(asBounds(a), asBounds(b), padMm);
 }
 
 function uniqueSorted(vals: number[], eps = 0.5): number[] {

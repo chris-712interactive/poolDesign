@@ -70,9 +70,23 @@ describe("water-geometry", () => {
     const area = polygonAreaMm2(ring!);
     const expected = 32_000_000 - 2500 * 1500; // overlap 2500×1500
     assert.ok(Math.abs(area - expected) < 1e5, `area ${area} vs ${expected}`);
-    // Single continuous clip helper
     const clipped = clipOutlineByAabbs(pool, [spa]);
     assert.equal(clipped.length, ring!.length);
+  });
+
+  it("clips a slightly skewed pool so a spa still punches through", () => {
+    const pool = [
+      { x: 0, y: 2 },
+      { x: 8000, y: 0 },
+      { x: 8000, y: 4002 },
+      { x: 2, y: 4000 },
+    ];
+    const spa = rect(5500, 2500, 9000, 5000);
+    const ring = aabbDifferenceRing(pool, spa);
+    assert.ok(ring);
+    assert.ok(ring!.length >= 6, `expected notched polygon, got ${ring!.length}`);
+    const area = polygonAreaMm2(ring!);
+    assert.ok(area < polygonAreaMm2(pool) * 0.95);
   });
 
   it("merges overlapping pit holes into one AABB ring", () => {

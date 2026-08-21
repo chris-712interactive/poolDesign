@@ -62,7 +62,7 @@ export function WaterMaterial({
     const clearcoatNormalMap = textures.normalB.clone();
     const rep = spa ? 3.4 : shallow ? 2.4 : 1.6;
     const repB = spa ? 2.6 : shallow ? 1.9 : 1.25;
-    if (map) map.repeat.set(spa ? 2.2 : 1.2, spa ? 2.2 : 1.2);
+    if (map) map.repeat.set(spa ? 1.8 : 0.7, spa ? 1.8 : 0.7);
     normalMap.repeat.set(rep, rep);
     clearcoatNormalMap.repeat.set(repB, repB);
     return { map, normalMap, clearcoatNormalMap };
@@ -371,7 +371,7 @@ export function WaterCausticOverlay({
   geometry: THREE.BufferGeometry;
 }) {
   const clippingPlanes = useContext(ClipPlanesContext);
-  const map = useScrollingCausticMap(3.6);
+  const map = useScrollingCausticMap(1.8);
   if (!map) return null;
 
   return (
@@ -383,9 +383,9 @@ export function WaterCausticOverlay({
     >
       <meshBasicMaterial
         map={map}
-        color="#9fe8ff"
+        color="#b8eefc"
         transparent
-        opacity={0.22}
+        opacity={0.12}
         blending={THREE.AdditiveBlending}
         depthWrite={false}
         side={THREE.FrontSide}

@@ -1698,6 +1698,9 @@ function buildProfiledBasinSurface(opts: {
   /** y = -depth + yBias (floor) or water bottom with clearance */
   yAtDepth: (depthM: number) => number;
   uvScale?: number;
+  holeOutlinesMm?: PointMm[][];
+  /** Extra mm outside the outline so edge cells still form. */
+  edgePadMm?: number;
 }): {
   positions: number[];
   uvs: number[];
@@ -1740,6 +1743,10 @@ function buildProfiledBasinSurface(opts: {
     axisLengthMm: opts.axisLengthMm,
   });
   const uvScale = opts.uvScale ?? 0.45;
+  const holes = (opts.holeOutlinesMm ?? [])
+    .map((h) => ringPts(h))
+    .filter((h) => h.length >= 3);
+  const edgePad = opts.edgePadMm ?? 40;
 
   const nt = tSamples.length;
   const ns = sSamples.length;
@@ -1757,23 +1764,25 @@ function buildProfiledBasinSurface(opts: {
         y: origin.y + axis.y * axisLen * t + perp.y * s,
       };
       const i = idxOf(ti, si);
-      // Keep a thin band outside so edge cells still form; depth still valid.
-      inside[i] =
+      let inPoly =
         pointInPolygon(plan, open) ||
-        pointInPolygon(
-          {
-            x: plan.x + perp.x * 30,
-            y: plan.y + perp.y * 30,
-          },
-          open,
-        ) ||
-        pointInPolygon(
-          {
-            x: plan.x - perp.x * 30,
-            y: plan.y - perp.y * 30,
-          },
-          open,
-        );
+        (edgePad > 0 &&
+          (pointInPolygon(
+            {
+              x: plan.x + perp.x * Math.min(30, edgePad),
+              y: plan.y + perp.y * Math.min(30, edgePad),
+            },
+            open,
+          ) ||
+            pointInPolygon(
+              {
+                x: plan.x - perp.x * Math.min(30, edgePad),
+                y: plan.y - perp.y * Math.min(30, edgePad),
+              },
+              open,
+            )));
+      if (inPoly && holes.some((h) => pointInPolygon(plan, h))) inPoly = false;
+      inside[i] = inPoly;
       const sx = mmToMeters(-plan.x);
       const sy = mmToMeters(plan.y);
       const d = depthAt(sx, sy);
@@ -2008,35 +2017,22 @@ function WaterBodyMesh({
     const waterTop = desc.waterTopY;
     // Clear of the structural floor to prevent z-fighting flicker.
     const floorClearance = 0.06;
+    const surfaceY = waterTop + 0.004;
 
-    const shape = outlineToShape(desc.outlineMm, false);
-    for (const hole of desc.holeOutlinesMm ?? []) {
-      if (hole.length >= 3) shape.holes.push(outlineToPath(hole, true));
-    }
-    const shapeGeo = tessellatePlanarShape(new THREE.ShapeGeometry(shape), 0.4);
-    const src = shapeGeo.attributes.position;
-    const srcIndex = shapeGeo.index;
-    const n = src.count;
+    const surf = buildProfiledBasinSurface({
+      outlineMm: desc.outlineMm,
+      depthStations: desc.depthStations,
+      axisOriginMm: desc.axisOriginMm,
+      depthAxis: desc.depthAxis,
+      axisLengthMm: desc.axisLengthMm,
+      yAtDepth: () => surfaceY,
+      uvScale: 0.28,
+      holeOutlinesMm: desc.holeOutlinesMm,
+      edgePadMm: 8,
+    });
 
-    const surfVerts: number[] = [];
-    const surfIdx: number[] = [];
     const volVerts: number[] = [];
     const volIdx: number[] = [];
-
-    // Surface: top face only (slightly above volume top to avoid coplanar fight)
-    const surfaceY = waterTop + 0.004;
-    for (let i = 0; i < n; i++) {
-      surfVerts.push(src.getX(i), surfaceY, -src.getY(i));
-    }
-    if (srcIndex) {
-      for (let i = 0; i < srcIndex.count; i += 3) {
-        surfIdx.push(
-          srcIndex.getX(i),
-          srcIndex.getX(i + 1),
-          srcIndex.getX(i + 2),
-        );
-      }
-    }
 
     // Profiled basin bottom (follows depth breaks) + side walls
     const bottom = buildProfiledBasinSurface({
@@ -2080,16 +2076,11 @@ function WaterBodyMesh({
     const surface = new THREE.BufferGeometry();
     surface.setAttribute(
       "position",
-      new THREE.Float32BufferAttribute(surfVerts, 3),
+      new THREE.Float32BufferAttribute(surf.positions, 3),
     );
-    surface.setIndex(surfIdx);
+    surface.setAttribute("uv", new THREE.Float32BufferAttribute(surf.uvs, 2));
+    surface.setIndex(surf.indices);
     surface.computeVertexNormals();
-    // Planar UVs — meters → texture space for caustics / ripple normals
-    const uvs: number[] = [];
-    for (let i = 0; i < n; i++) {
-      uvs.push(src.getX(i) * 0.55, src.getY(i) * 0.55);
-    }
-    surface.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
 
     const volume = new THREE.BufferGeometry();
     volume.setAttribute(
@@ -2098,7 +2089,6 @@ function WaterBodyMesh({
     );
     volume.setIndex(volIdx);
     volume.computeVertexNormals();
-    shapeGeo.dispose();
     return { volume, surface };
   }, [desc]);
 

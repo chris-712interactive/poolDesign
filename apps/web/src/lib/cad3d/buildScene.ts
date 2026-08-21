@@ -64,6 +64,7 @@ import {
   spilloverOmitIntervals,
   wallSegmentsMinusIntervals,
   waterBodiesConnected,
+  outlinesAabbTouch,
   waterBodyKind,
   ensurePadManifoldPlumbing,
   repairAutoPlumbingIfNeeded,
@@ -3540,22 +3541,23 @@ export function buildSceneModel(
         const attachedSpas = spas.filter(
           (s) =>
             waterBodiesConnected(body.outline, s.outline) ||
-            approximateIntersectionAreaMm2(body.outline, s.outline) > 5_000,
+            approximateIntersectionAreaMm2(body.outline, s.outline) > 5_000 ||
+            outlinesAabbTouch(body.outline, s.outline, 80),
         );
-        const spaOutlines = attachedSpas.map((s) => s.outline);
+        const spaClippers = attachedSpas.map((s) =>
+          outlineBoundsRect(s.outline),
+        );
         const outer = body.outline;
         const wallT = poolWallThicknessMm(body);
-        // Pool shell wraps the spa (L/U); spa owns the shared spillover wall.
-        const wallOutline =
-          spaOutlines.length > 0
-            ? clipOutlineByAabbs(outer, spaOutlines)
-            : outer;
+        // Keep the authorable pool outline for walls/coping. Wrapping into an L
+        // drew pool walls through the spa overlap; spa owns that shell.
+        const wallOutline = outer;
         const waterInner = insetClosedOutline(outer, wallT);
         // Floor extends under the wall thickness so the shell seals (no light leaks).
         const floorInner = insetClosedOutline(outer, wallT * 0.35);
         const floorOutline =
-          spaOutlines.length > 0
-            ? clipOutlineByAabbs(floorInner, spaOutlines)
+          spaClippers.length > 0
+            ? clipOutlineByAabbs(floorInner, spaClippers)
             : floorInner;
 
         const floorY = -depthM;
@@ -3564,8 +3566,8 @@ export function buildSceneModel(
         // Snap the vanishing edge out to the weir so wall inset does not leave
         // a dry cap across the spill.
         const waterOutline = snapOutlineToWeirFaces(
-          spaOutlines.length > 0
-            ? clipOutlineByAabbs(waterInner, spaOutlines)
+          spaClippers.length > 0
+            ? clipOutlineByAabbs(waterInner, spaClippers)
             : waterInner,
           infinityEdges,
         );
@@ -3604,7 +3606,7 @@ export function buildSceneModel(
             select,
             idPrefix: `pool_wall_${body.id}_low`,
             inward: true,
-            openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
+            openAgainst: spaClippers.length > 0 ? spaClippers : undefined,
             edgeOmits: infinityOmits,
             omitAgainst: weirFaces,
           });
@@ -3618,7 +3620,7 @@ export function buildSceneModel(
             select,
             idPrefix: `pool_wall_${body.id}_rim`,
             inward: true,
-            openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
+            openAgainst: spaClippers.length > 0 ? spaClippers : undefined,
             edgeOmits: infinityOmits,
             omitAgainst: weirFaces,
           });
@@ -3633,7 +3635,7 @@ export function buildSceneModel(
             idPrefix: `pool_wall_${body.id}`,
             inward: true,
             // Drop pool walls on spa-facing edges; spa draws the spillover.
-            openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
+            openAgainst: spaClippers.length > 0 ? spaClippers : undefined,
           });
         }
 
@@ -3676,7 +3678,7 @@ export function buildSceneModel(
           select,
           idPrefix: `pool_coping_${body.id}`,
           inward: true,
-          openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
+          openAgainst: spaClippers.length > 0 ? spaClippers : undefined,
           edgeOmits: infinityOmits,
           omitAgainst: weirFaces,
         });
@@ -3691,7 +3693,7 @@ export function buildSceneModel(
           waterlineTileId: body.waterlineTileId,
           select,
           idPrefix: `pool_tile_${body.id}`,
-          openAgainst: spaOutlines.length > 0 ? spaOutlines : undefined,
+          openAgainst: spaClippers.length > 0 ? spaClippers : undefined,
           edgeOmits: infinityOmits,
           omitAgainst: weirFaces,
         });
