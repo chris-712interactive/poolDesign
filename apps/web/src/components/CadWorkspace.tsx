@@ -240,6 +240,7 @@ import {
   pointAtLength,
   screenToWorld,
   viewportToFitWorld,
+  worldToScreen,
   zoomAt,
   type Viewport,
 } from "@/lib/cad/math";
@@ -287,6 +288,7 @@ type Selection =
   | { kind: "object"; id: string }
   | { kind: "feature"; id: string }
   | { kind: "gradeSample"; id: string }
+  | { kind: "gradeSamples"; ids: string[] }
   | null;
 
 type DragState =
@@ -349,7 +351,17 @@ type DragState =
         | "feature"
         | "gradeSample";
       id: string;
+      /** When moving several grade points, every id in the group. */
+      ids?: string[];
       last: PointMm;
+    }
+  | {
+      mode: "marquee";
+      start: PointMm;
+      current: PointMm;
+      startX: number;
+      startY: number;
+      additive: boolean;
     }
   | {
       mode: "opening";
@@ -457,10 +469,37 @@ function nudgeAlongEdge(t: number, copies = 1): number {
   return next;
 }
 
+const MARQUEE_MIN_PX = 8;
+
+function selectedGradeIds(sel: Selection): string[] {
+  if (!sel) return [];
+  if (sel.kind === "gradeSample") return [sel.id];
+  if (sel.kind === "gradeSamples") return sel.ids;
+  return [];
+}
+
+function gradeSelectionFromIds(ids: string[]): Selection {
+  const unique: string[] = [];
+  for (const id of ids) {
+    if (!unique.includes(id)) unique.push(id);
+  }
+  if (unique.length === 0) return null;
+  if (unique.length === 1) return { kind: "gradeSample", id: unique[0] };
+  return { kind: "gradeSamples", ids: unique };
+}
+
+function pointInWorldRect(p: PointMm, a: PointMm, b: PointMm): boolean {
+  const minX = Math.min(a.x, b.x);
+  const maxX = Math.max(a.x, b.x);
+  const minY = Math.min(a.y, b.y);
+  const maxY = Math.max(a.y, b.y);
+  return p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY;
+}
+
 type DesignClipboard = {
   pasteCount: number;
   payload:
-    | { kind: "gradeSample"; sample: GradeSample }
+    | { kind: "gradeSamples"; samples: GradeSample[] }
     | { kind: "object"; object: PlacedObject }
     | { kind: "feature"; feature: PoolFeature }
     | { kind: "pool"; body: PoolBody }
@@ -541,6 +580,7 @@ function selectionOnVisibleLayer(
       return obj ? objectLayerVisible(design, obj) : false;
     }
     case "gradeSample":
+    case "gradeSamples":
       return true;
     default:
       return true;
@@ -801,6 +841,12 @@ export function CadWorkspace({
         : null,
     [design.gradeSamples, selection],
   );
+  const selectedGradeGroup = useMemo(() => {
+    if (selection?.kind !== "gradeSamples") return null;
+    const ids = new Set(selection.ids);
+    const samples = (design.gradeSamples ?? []).filter((s) => ids.has(s.id));
+    return samples.length > 1 ? samples : null;
+  }, [design.gradeSamples, selection]);
   const guideSteps = useMemo(() => designGuideSteps(design), [design]);
 
   useEffect(() => {
@@ -1081,12 +1127,14 @@ export function CadWorkspace({
     }
 
     for (const sample of design.gradeSamples ?? []) {
+      const selected = selectedGradeIds(selection).includes(sample.id);
       drawGradeSample(
         ctx,
         vp,
         sample,
-        selection?.kind === "gradeSample" && selection.id === sample.id,
+        selected,
         unitSystem,
+        selected && selection?.kind === "gradeSample",
       );
     }
 
@@ -1396,9 +1444,27 @@ export function CadWorkspace({
     }
 
     drawNorthArrow(ctx, rect.width, design.northDeg ?? 0);
+
+    if (drag?.mode === "marquee") {
+      const a = worldToScreen(drag.start, vp);
+      const b = worldToScreen(drag.current, vp);
+      const x = Math.min(a.x, b.x);
+      const y = Math.min(a.y, b.y);
+      const w = Math.abs(b.x - a.x);
+      const h = Math.abs(b.y - a.y);
+      ctx.save();
+      ctx.fillStyle = "rgba(31,107,138,0.12)";
+      ctx.strokeStyle = "#1f6b8a";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 3]);
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x, y, w, h);
+      ctx.restore();
+    }
   }, [
     coverKind,
     design,
+    drag,
     draftPoints,
     measurePoints,
     calibratePoints,
@@ -2294,6 +2360,7 @@ export function CadWorkspace({
   function canvasCursor(): string {
     if (designMode === "3d") return "default";
     if (spaceDown || drag?.mode === "pan") return "grab";
+    if (drag?.mode === "marquee") return "crosshair";
     if (drag?.mode === "edge") return edgePullCursor(drag.nx, drag.ny);
     if (drag?.mode === "bulge") return "pointer";
     if (tool === "select" && cursor && !drag) {
@@ -2661,10 +2728,11 @@ export function CadWorkspace({
         ...d,
         features: (d.features ?? []).filter((f) => f.id !== sel.id),
       });
-    } else if (sel.kind === "gradeSample") {
+    } else if (sel.kind === "gradeSample" || sel.kind === "gradeSamples") {
+      const ids = new Set(selectedGradeIds(sel));
       commitDesign({
         ...d,
-        gradeSamples: (d.gradeSamples ?? []).filter((s) => s.id !== sel.id),
+        gradeSamples: (d.gradeSamples ?? []).filter((s) => !ids.has(s.id)),
       });
     }
     selectionRef.current = null;
@@ -2676,12 +2744,13 @@ export function CadWorkspace({
     const sel = selectionRef.current;
     if (!sel) return;
     const d = designRef.current;
-    if (sel.kind === "gradeSample") {
-      const sample = (d.gradeSamples ?? []).find((s) => s.id === sel.id);
-      if (!sample) return;
+    if (sel.kind === "gradeSample" || sel.kind === "gradeSamples") {
+      const ids = new Set(selectedGradeIds(sel));
+      const samples = (d.gradeSamples ?? []).filter((s) => ids.has(s.id));
+      if (!samples.length) return;
       clipboardRef.current = {
         pasteCount: 0,
-        payload: { kind: "gradeSample", sample: structuredClone(sample) },
+        payload: { kind: "gradeSamples", samples: structuredClone(samples) },
       };
     } else if (sel.kind === "object") {
       const object = d.objects.find((o) => o.id === sel.id);
@@ -2795,17 +2864,17 @@ export function CadWorkspace({
     let nextSel: Selection = null;
     let next: DesignDocument = d;
 
-    if (payload.kind === "gradeSample") {
-      const sample: GradeSample = {
-        ...payload.sample,
+    if (payload.kind === "gradeSamples") {
+      const copies: GradeSample[] = payload.samples.map((sample) => ({
+        ...sample,
         id: newId("grade"),
-        position: offsetPointMm(payload.sample.position, n),
-      };
+        position: offsetPointMm(sample.position, n),
+      }));
       next = {
         ...d,
-        gradeSamples: [...(d.gradeSamples ?? []), sample],
+        gradeSamples: [...(d.gradeSamples ?? []), ...copies],
       };
-      nextSel = { kind: "gradeSample", id: sample.id };
+      nextSel = gradeSelectionFromIds(copies.map((s) => s.id));
     } else if (payload.kind === "object") {
       const object: PlacedObject = {
         ...payload.object,
@@ -3104,6 +3173,31 @@ export function CadWorkspace({
         return;
       }
       const hit = hitTest(point);
+      if (hit?.kind === "gradeSample") {
+        const existing = selectedGradeIds(selection);
+        let ids: string[];
+        if (e.shiftKey) {
+          ids = existing.includes(hit.id)
+            ? existing.filter((id) => id !== hit.id)
+            : [...existing, hit.id];
+        } else if (existing.includes(hit.id) && existing.length > 1) {
+          ids = existing;
+        } else {
+          ids = [hit.id];
+        }
+        setSelection(gradeSelectionFromIds(ids));
+        if (ids.includes(hit.id)) {
+          dragOriginRef.current = structuredClone(design);
+          setDrag({
+            mode: "move",
+            kind: "gradeSample",
+            id: hit.id,
+            ids,
+            last: point,
+          });
+        }
+        return;
+      }
       setSelection(hit);
       if (hit?.kind === "opening") {
         dragOriginRef.current = structuredClone(design);
@@ -3137,20 +3231,31 @@ export function CadWorkspace({
           hit.kind === "fence" ||
           hit.kind === "siteLine" ||
           hit.kind === "object" ||
-          hit.kind === "feature" ||
-          hit.kind === "gradeSample")
+          hit.kind === "feature")
       ) {
         dragOriginRef.current = structuredClone(design);
         setDrag({ mode: "move", kind: hit.kind, id: hit.id, last: point });
-      } else if (
-        !hit &&
-        design.surveyUnderlay &&
-        !design.surveyUnderlay.locked &&
-        layerVisible(design, "survey") &&
-        pointInSurveyUnderlay(design.surveyUnderlay, point)
-      ) {
-        dragOriginRef.current = structuredClone(design);
-        setDrag({ mode: "survey", last: worldFromEvent(e, false) });
+      } else if (!hit) {
+        const additive = e.shiftKey;
+        const onUnlockedSurvey =
+          !!design.surveyUnderlay &&
+          !design.surveyUnderlay.locked &&
+          layerVisible(design, "survey") &&
+          pointInSurveyUnderlay(design.surveyUnderlay, point);
+        if (onUnlockedSurvey && !additive) {
+          dragOriginRef.current = structuredClone(design);
+          setDrag({ mode: "survey", last: worldFromEvent(e, false) });
+        } else {
+          if (!additive) setSelection(null);
+          setDrag({
+            mode: "marquee",
+            start: point,
+            current: point,
+            startX: local.x,
+            startY: local.y,
+            additive,
+          });
+        }
       }
       return;
     }
@@ -3385,6 +3490,11 @@ export function CadWorkspace({
         panX: drag.originPanX + (local.x - drag.startX),
         panY: drag.originPanY + (local.y - drag.startY),
       }));
+      return;
+    }
+
+    if (drag.mode === "marquee") {
+      setDrag({ ...drag, current: raw });
       return;
     }
 
@@ -4022,12 +4132,40 @@ export function CadWorkspace({
       const dx = point.x - drag.last.x;
       const dy = point.y - drag.last.y;
       if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return;
-      setDesign((d) => translateDesign(d, drag.kind, drag.id, dx, dy, unitSystem));
+      setDesign((d) =>
+        translateDesign(
+          d,
+          drag.kind,
+          drag.id,
+          dx,
+          dy,
+          unitSystem,
+          drag.kind === "gradeSample" ? drag.ids : undefined,
+        ),
+      );
       setDrag({ ...drag, last: point });
     }
   }
 
-  function onPointerUp() {
+  function onPointerUp(e?: React.PointerEvent<HTMLCanvasElement>) {
+    if (drag?.mode === "marquee") {
+      const local = e ? canvasLocal(e) : { x: drag.startX, y: drag.startY };
+      const dx = local.x - drag.startX;
+      const dy = local.y - drag.startY;
+      if (Math.hypot(dx, dy) >= MARQUEE_MIN_PX) {
+        const boxed = (designRef.current.gradeSamples ?? [])
+          .filter((s) => pointInWorldRect(s.position, drag.start, drag.current))
+          .map((s) => s.id);
+        const ids = drag.additive
+          ? [...selectedGradeIds(selectionRef.current), ...boxed]
+          : boxed;
+        setSelection(gradeSelectionFromIds(ids));
+      } else if (!drag.additive) {
+        setSelection(null);
+      }
+      setDrag(null);
+      return;
+    }
     if (
       drag?.mode === "vertex" ||
       drag?.mode === "edge" ||
@@ -4448,6 +4586,7 @@ export function CadWorkspace({
                   exportHandleRef={scene3dHandleRef}
                   selection={
                     selection?.kind === "gradeSample" ||
+                    selection?.kind === "gradeSamples" ||
                     selection?.kind === "siteLine"
                       ? null
                       : selection
@@ -4681,6 +4820,7 @@ export function CadWorkspace({
                     <div>O — sticky Ortho · A — 15° snap</div>
                     <div>R / handle — rotate furniture</div>
                     <div>⌘/Ctrl+C then ⌘/Ctrl+V — duplicate selection</div>
+                    <div>Shift-click or drag a box to select several grade points</div>
                     <div>Type length + Enter while drawing</div>
                   </div>
                 )}
@@ -5302,7 +5442,27 @@ export function CadWorkspace({
                     </button>
                   </div>
                 )}
-                {(tool === "grade_point" || selectedGradeSample) && (
+                {selectedGradeGroup && (
+                  <div className="stack">
+                    <strong>
+                      {selectedGradeGroup.length} grade points
+                    </strong>
+                    <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>
+                      Drag moves the group. Copy/paste duplicates the whole
+                      row.
+                    </p>
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+                {(tool === "grade_point" ||
+                  selectedGradeSample ||
+                  selectedGradeGroup) && (
                   <div
                     className="stack"
                     style={{
@@ -5319,6 +5479,7 @@ export function CadWorkspace({
                       onDesignChange={commitDesign}
                       defaultOrigin={
                         selectedGradeSample?.position ??
+                        selectedGradeGroup?.[0]?.position ??
                         design.buildings[0]?.outline[0] ??
                         null
                       }
@@ -8948,6 +9109,7 @@ function translateDesign(
   dx: number,
   dy: number,
   unitSystem: UnitSystem,
+  extraIds?: string[],
 ): DesignDocument {
   const shift = (p: PointMm): PointMm => ({
     ...p,
@@ -9051,10 +9213,11 @@ function translateDesign(
     };
   }
   if (kind === "gradeSample") {
+    const ids = extraIds?.length ? extraIds : [id];
     return {
       ...d,
       gradeSamples: (d.gradeSamples ?? []).map((s) =>
-        s.id === id ? { ...s, position: shift(s.position) } : s,
+        ids.includes(s.id) ? { ...s, position: shift(s.position) } : s,
       ),
     };
   }

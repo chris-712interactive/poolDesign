@@ -1231,6 +1231,7 @@ export function drawGradeSample(
   sample: GradeSample,
   selected: boolean,
   unitSystem: UnitSystem,
+  showRotateHandle = selected,
 ) {
   const c = worldToScreen(sample.position, vp);
   const r = selected ? 7 : 5.5;
@@ -1268,7 +1269,7 @@ export function drawGradeSample(
   ctx.font = "11px Source Sans 3, sans-serif";
   ctx.fillText(label, c.x + 10, c.y + 4);
 
-  if (selected) {
+  if (showRotateHandle) {
     const dist = 600 * vp.scale;
     const handle = {
       x: c.x + heading.x * dist,
