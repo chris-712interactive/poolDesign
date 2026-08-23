@@ -141,6 +141,23 @@ describe("water-geometry", () => {
     assert.ok(Math.abs(area - (96_000_000 - 24_000_000)) < 1e5);
   });
 
+  it("punches a house out of a wrapping deck so the interior stays empty", () => {
+    const deck = rect(0, 0, 20000, 12000);
+    const house = rect(4000, 2500, 16000, 9500);
+    const regions = subtractAabbHoles(deck, [house]);
+    const deckArea = 20000 * 12000;
+    const houseArea = 12000 * 7000;
+    const area = regions.reduce((s, r) => s + polygonAreaMm2(r), 0);
+    assert.ok(Math.abs(area - (deckArea - houseArea)) < 1e5);
+    const inside = { x: 10000, y: 6000 };
+    for (const r of regions) {
+      const { minX, maxX, minY, maxY } = outlineBounds(r);
+      const inRect =
+        inside.x > minX && inside.x < maxX && inside.y > minY && inside.y < maxY;
+      assert.equal(inRect, false);
+    }
+  });
+
   it("punches skewed patio outlines via bounding box", () => {
     // Hand-drawn deck: left edge not perfectly vertical (fails isAxisAlignedRect).
     const skewed = [

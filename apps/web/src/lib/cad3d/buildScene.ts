@@ -87,6 +87,7 @@ import {
   poolGateHingeHeightsMm,
   poolGateLatchSpec,
   polygonCentroid,
+  polygonAreaMm2,
   POOL_GATE_GROUND_CLEARANCE_MM,
   type ResolvedSpaSpillover,
   type ResolvedInfinityEdge,
@@ -2086,12 +2087,18 @@ function clusterPatioSlabs(
         }
         const a = clusters[i];
         const b = clusters[j];
+        const union = aabbUnionRing(a.outline, b.outline);
+        // Two pads wrapping a house share a big AABB. The bbox union would
+        // fill the interior with deck. Keep them separate in that case.
+        if (aabbUnionFillsCourtyard(a.outline, b.outline, union)) {
+          continue;
+        }
         const ba = outlineBounds(a.outline);
         const bb = outlineBounds(b.outline);
         const aLarger = ba.width * ba.height >= bb.width * bb.height;
         clusters[i] = {
           id: aLarger ? a.id : b.id,
-          outline: aabbUnionRing(a.outline, b.outline),
+          outline: union,
           materialId: aLarger ? a.materialId : b.materialId,
         };
         clusters.splice(j, 1);
@@ -2101,6 +2108,21 @@ function clusterPatioSlabs(
     }
   }
   return clusters;
+}
+
+/** True when the AABB/L union covers a void neither patio occupies (house). */
+function aabbUnionFillsCourtyard(
+  a: PointMm[],
+  b: PointMm[],
+  union: PointMm[],
+): boolean {
+  const unionArea = polygonAreaMm2(union);
+  const expected =
+    polygonAreaMm2(a) +
+    polygonAreaMm2(b) -
+    approximateIntersectionAreaMm2(a, b);
+  // ~4 m² of extra fill, or 12% larger than the authored pads.
+  return unionArea > expected * 1.12 + 4_000_000;
 }
 
 function asAabbRing(outline: PointMm[]): PointMm[] {
@@ -2143,9 +2165,14 @@ function patioPunchHoles(
   poolPits: PointMm[][],
   patioOutline: PointMm[],
   edges: ResolvedInfinityEdge[],
+  buildingOutlines: PointMm[][] = [],
 ): PointMm[][] {
   const pits = poolPits.filter((h) => h.length >= 3).map(asAabbRing);
-  if (!edges.length) return pits;
+  const buildingHoles = buildingOutlines.filter((h) => {
+    if (h.length < 3) return false;
+    return approximateIntersectionAreaMm2(patioOutline, h) > 10_000;
+  });
+  if (!edges.length) return [...pits, ...buildingHoles];
 
   const bb = outlineBounds(patioOutline);
   const corners = [
@@ -2185,7 +2212,7 @@ function patioPunchHoles(
   for (let i = 0; i < pits.length; i++) {
     if (!used.has(i)) holes.push(pits[i]);
   }
-  return holes.filter((h) => h.length >= 3);
+  return [...holes, ...buildingHoles].filter((h) => h.length >= 3);
 }
 
 function regionOnVanishingSide(
@@ -2661,6 +2688,9 @@ export function buildSceneModel(
   const patioClusters = hideDeck
     ? []
     : clusterPatioSlabs(design.patios ?? []);
+  const buildingPunchOutlines = (design.buildings ?? [])
+    .filter((b) => b.outline.length >= 3)
+    .map((b) => ringPoints(b.outline));
   // Rect unions only — an L bbox would also punch the empty courtyard.
   const patioGrassHoles = patioClusters
     .map((c) => ringPoints(c.outline))
@@ -3151,6 +3181,7 @@ export function buildSceneModel(
         poolPitHoles,
         p.outline,
         infinityEdgesAll,
+        buildingPunchOutlines,
       );
       const punchAabb = asAabbRing(open);
       const holesAabb = punchHoles.map(asAabbRing);
@@ -3203,6 +3234,7 @@ export function buildSceneModel(
         poolPitHoles,
         p.outline,
         infinityEdgesAll,
+        buildingPunchOutlines,
       );
       const holesAabb = punchHoles.map(asAabbRing);
       const strategy = resolveGradeStrategy(p.gradeStrategy);
