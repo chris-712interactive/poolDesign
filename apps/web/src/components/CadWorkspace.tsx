@@ -215,6 +215,7 @@ import {
 } from "@pool-design/shared";
 import { EstimatePanel } from "@/components/EstimatePanel";
 import { MeasurementsPanel } from "@/components/MeasurementsPanel";
+import { LayoutPlanPanel } from "@/components/LayoutPlanPanel";
 import { GradeWalkPanel } from "@/components/GradeWalkPanel";
 import { ProjectToolbar } from "@/components/ProjectToolbar";
 import { CadScene3DDynamic } from "@/components/CadScene3DDynamic";
@@ -270,7 +271,7 @@ import { SurveyUnderlayPanel } from "@/components/SurveyUnderlayPanel";
 import { ImportSurveyPrompt } from "@/components/ImportSurveyPrompt";
 import { detectSurveyImageSkew } from "@/lib/cad/surveyDeskew";
 
-type WorkspaceView = "design" | "estimate" | "measurements";
+type WorkspaceView = "design" | "estimate" | "measurements" | "layout";
 type DesignMode = "2d" | "3d";
 type SideTab = "tools" | "properties" | "layers";
 type Tool = ToolId;
@@ -4508,6 +4509,13 @@ export function CadWorkspace({
       ) : view === "measurements" ? (
         <MeasurementsPanel
           projectId={projectId}
+          design={design}
+          unitSystem={unitSystem}
+        />
+      ) : view === "layout" ? (
+        <LayoutPlanPanel
+          projectId={projectId}
+          projectName={projectName}
           design={design}
           unitSystem={unitSystem}
         />

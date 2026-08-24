@@ -63,6 +63,7 @@ import {
   spaShellParams,
   spaTotalDepthMm,
   subtractAabbHoles,
+  subtractPolygonAabbHoles,
   aabbUnionRing,
   resolveSpaSpillovers,
   spilloverOmitIntervals,
@@ -2065,7 +2066,7 @@ function clusterPatioSlabs(
   patios: Array<{ id: string; outline: PointMm[]; materialId?: string }>,
 ): PatioSlabCluster[] {
   const clusters: PatioSlabCluster[] = patios
-    .filter((p) => p.outline.length >= 3)
+    .filter((p) => (p.outline?.length ?? 0) >= 3)
     .map((p) => ({
       id: p.id,
       outline: p.outline,
@@ -2167,7 +2168,9 @@ function patioPunchHoles(
   edges: ResolvedInfinityEdge[],
   buildingOutlines: PointMm[][] = [],
 ): PointMm[][] {
-  const pits = poolPits.filter((h) => h.length >= 3).map(asAabbRing);
+  const pits = poolPits
+    .filter((h) => h.length >= 3)
+    .map((h) => paddedAabbRing(asAabbRing(h), 80));
   const buildingHoles = buildingOutlines.filter((h) => {
     if (h.length < 3) return false;
     return approximateIntersectionAreaMm2(patioOutline, h) > 10_000;
@@ -2237,14 +2240,6 @@ function regionOnVanishingSide(
     if (minD > WEIR_RETAIN_STOP_MM) return true;
   }
   return false;
-}
-
-function canAabbPunch(subject: PointMm[], holes: PointMm[][]): boolean {
-  if (!isAxisAlignedRect(subject, 80)) return false;
-  return holes.every((h) => {
-    const open = ringPoints(h);
-    return open.length >= 3 && isAxisAlignedRect(open, 80);
-  });
 }
 
 /**
@@ -3183,40 +3178,26 @@ export function buildSceneModel(
         infinityEdgesAll,
         buildingPunchOutlines,
       );
-      const punchAabb = asAabbRing(open);
       const holesAabb = punchHoles.map(asAabbRing);
-      const forceAabb =
-        infinityEdgesAll.length > 0 || canAabbPunch(open, punchHoles);
-      if (forceAabb) {
-        const subject = canAabbPunch(open, holesAabb) ? open : punchAabb;
-        const regions =
-          holesAabb.length > 0
-            ? subtractAabbHoles(subject, holesAabb)
-            : [subject];
-        let pi = 0;
-        for (const region of regions) {
-          if (isSliverOutline(region)) continue;
-          if (regionOnVanishingSide(region, infinityEdgesAll)) continue;
-          meshes.push({
-            kind: "extrude",
-            id: `patio_${p.id}_${pi++}`,
-            material: "patio",
-            patioFinishId: p.materialId,
-            outlineMm: closeOutline(region),
-            bottomY: 0,
-            height: t,
-            select,
-          });
-        }
-      } else {
-        // L / rotated / irregular: keep the true patio outline and punch pits.
+      // Always cover with AABB-subtracted regions. ExtrudeGeometry + Earcut
+      // holes leave a paver sidewall through spas / attached pools.
+      let regions: PointMm[][] = [];
+      try {
+        regions = subtractPolygonAabbHoles(open, holesAabb);
+      } catch (err) {
+        console.warn("patio punch failed", p.id, err);
+        regions = subtractAabbHoles(open, holesAabb);
+      }
+      let pi = 0;
+      for (const region of regions) {
+        if (isSliverOutline(region)) continue;
+        if (regionOnVanishingSide(region, infinityEdgesAll)) continue;
         meshes.push({
           kind: "extrude",
-          id: `patio_${p.id}`,
+          id: `patio_${p.id}_${pi++}`,
           material: "patio",
           patioFinishId: p.materialId,
-          outlineMm: closeOutline(p.outline),
-          holeOutlinesMm: punchHoles.length > 0 ? punchHoles : undefined,
+          outlineMm: closeOutline(region),
           bottomY: 0,
           height: t,
           select,
@@ -3263,64 +3244,27 @@ export function buildSceneModel(
           maxDropMm > PATIO_SLAB_THICKNESS_MM + 40
         ) {
           const dropM = mmToMeters(maxDropMm);
-          // Continuous fill pad: existing grade → slab underside (y = 0).
-          // Punch pool + vanishing slot as one AABB so fill cannot wall off
-          // the weir or wrap the trough (ExtrudeGeometry holes leave wedges).
-          if (infinityEdgesAll.length > 0) {
-            const fillRegions = subtractAabbHoles(asAabbRing(open), holesAabb);
-            let fi = 0;
-            for (const region of fillRegions) {
-              if (region.length < 3 || isSliverOutline(region)) continue;
-              if (regionOnVanishingSide(region, infinityEdgesAll)) continue;
-              meshes.push({
-                kind: "extrude",
-                id: `fill_${p.id}_${fi++}`,
-                material: "fill",
-                outlineMm: closeOutline(region),
-                bottomY: -dropM,
-                height: dropM,
-                select,
-              });
-            }
-          } else if (
-            isAxisAlignedRect(open, 80) &&
-            canAabbPunch(open, punchHoles)
-          ) {
-            const fillRegions =
-              punchHoles.length > 0
-                ? subtractAabbHoles(open, punchHoles)
-                : [open];
-            let fi = 0;
-            for (const region of fillRegions) {
-              if (region.length < 3 || isSliverOutline(region)) continue;
-              meshes.push({
-                kind: "extrude",
-                id: `fill_${p.id}_${fi++}`,
-                material: "fill",
-                outlineMm: closeOutline(region),
-                bottomY: -dropM,
-                height: dropM,
-                select,
-              });
-            }
-          } else {
-            const fillRegions = subtractAabbHoles(
-              asAabbRing(open),
-              holesAabb,
-            );
-            let fi = 0;
-            for (const region of fillRegions) {
-              if (region.length < 3 || isSliverOutline(region)) continue;
-              meshes.push({
-                kind: "extrude",
-                id: `fill_${p.id}_${fi++}`,
-                material: "fill",
-                outlineMm: closeOutline(region),
-                bottomY: -dropM,
-                height: dropM,
-                select,
-              });
-            }
+          // Cover with AABB-subtracted regions so fill cannot wall through a spa.
+          let fillRegions: PointMm[][] = [];
+          try {
+            fillRegions = subtractPolygonAabbHoles(open, holesAabb);
+          } catch (err) {
+            console.warn("fill punch failed", p.id, err);
+            fillRegions = subtractAabbHoles(open, holesAabb);
+          }
+          let fi = 0;
+          for (const region of fillRegions) {
+            if (region.length < 3 || isSliverOutline(region)) continue;
+            if (regionOnVanishingSide(region, infinityEdgesAll)) continue;
+            meshes.push({
+              kind: "extrude",
+              id: `fill_${p.id}_${fi++}`,
+              material: "fill",
+              outlineMm: closeOutline(region),
+              bottomY: -dropM,
+              height: dropM,
+              select,
+            });
           }
         }
 

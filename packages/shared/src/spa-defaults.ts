@@ -85,8 +85,10 @@ function rect(
 
 /** True when outline is (nearly) an axis-aligned rectangle. */
 export function isAxisAlignedRect(outline: PointMm[], tolMm = 2): boolean {
-  if (outline.length !== 4) return false;
-  const b = outlineBounds(outline);
+  if (!outline || outline.length < 4) return false;
+  const ring = openOutline(outline);
+  if (ring.length !== 4) return false;
+  const b = outlineBounds(ring);
   if (b.width < tolMm || b.height < tolMm) return false;
   const cornerKey = (p: PointMm) => {
     const onMinX = Math.abs(p.x - b.minX) <= tolMm;
@@ -97,7 +99,7 @@ export function isAxisAlignedRect(outline: PointMm[], tolMm = 2): boolean {
     return `${onMinX ? "0" : "1"},${onMinY ? "0" : "1"}`;
   };
   const keys = new Set<string>();
-  for (const p of outline) {
+  for (const p of ring) {
     const key = cornerKey(p);
     if (!key) return false;
     keys.add(key);

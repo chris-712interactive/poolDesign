@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { emptyDesignDocument, type DesignDocument } from "./design-model";
 import {
+  buildLayoutPlanHtml,
+  buildLayoutPlanSvg,
   buildPermitPacket,
   buildPermitPacketHtml,
   buildPlanOutlineSvg,
@@ -171,5 +173,53 @@ describe("permit packet site plan", () => {
     assert.match(html, /NOT FOR PERMIT/);
     assert.match(html, /Kendig Pools/);
     assert.match(html, /Property lines and utilities are not in this model/);
+  });
+
+  it("layout plan is a clean sheet with pavers, sizes, and house-to-pad", () => {
+    const design = houseAndPool();
+    design.poolBodies.push({
+      id: "spa1",
+      name: "Spa",
+      kind: "spa",
+      outline: rect(30 * FT, 48 * FT, 8 * FT, 8 * FT),
+      depthShallowMm: 3 * FT,
+      depthDeepMm: 3 * FT,
+    });
+    design.gradeSamples = [
+      {
+        id: "gs1",
+        position: { x: 12 * FT, y: 12 * FT },
+        dropMm: 7777,
+      },
+    ];
+    const svg = buildLayoutPlanSvg(design, "imperial");
+    assert.match(svg, /LAYOUT PLAN/);
+    assert.match(svg, /PAVERS/);
+    assert.match(svg, /POOL/);
+    assert.match(svg, /SPA/);
+    assert.match(svg, /EQUIP\. PAD/);
+    assert.match(svg, /TO PAD/);
+    assert.match(svg, /HOUSE/);
+    assert.match(svg, /CLR/);
+    assert.doesNotMatch(svg, />PATIO</);
+    assert.doesNotMatch(svg, />GATE</);
+    assert.doesNotMatch(svg, />STEPS</);
+    assert.doesNotMatch(svg, /DRAFT SITE PLAN/);
+    assert.doesNotMatch(svg, /SECTION A/);
+    assert.doesNotMatch(svg, />PROPERTY LINE</);
+    assert.doesNotMatch(svg, /25'-6/);
+    const html = buildLayoutPlanHtml(
+      {
+        companyName: "Kendig Pools",
+        projectName: "Oak Street",
+        clientName: "Taylor",
+        address: "12 Oak St",
+      },
+      svg,
+    );
+    assert.match(html, /Print \/ Save as PDF/);
+    assert.match(html, /Landscape/);
+    assert.match(html, /LAYOUT PLAN/);
+    assert.match(html, /Not a survey or a permit drawing/);
   });
 });

@@ -26,7 +26,7 @@ import {
   type ShareResult,
 } from "@/components/ShareProposalButton";
 
-type WorkspaceView = "design" | "estimate" | "measurements";
+type WorkspaceView = "design" | "estimate" | "measurements" | "layout";
 
 type Props = {
   projectId: string;
@@ -393,6 +393,15 @@ export function ProjectToolbar({
               onClick={() => onViewChange("design")}
             >
               Design
+            </button>
+            <button
+              type="button"
+              className={`btn ${view === "layout" ? "" : "secondary"}`}
+              data-tour="view-layout"
+              title="Dimensioned layout — pool, pavers, and setbacks"
+              onClick={() => onViewChange("layout")}
+            >
+              Layout
             </button>
             <button
               type="button"

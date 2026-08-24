@@ -14,6 +14,7 @@ import {
   pointInPolygon,
   polygonAreaMm2,
   polygonPerimeterMm,
+  approximateIntersectionAreaMm2,
   waterBodyKind,
 } from "./design-model";
 import {
@@ -26,7 +27,7 @@ import { computePoolHydraulics } from "./pool-hydraulics";
 import { isPadEquipment } from "./plumbing-route";
 import { outlineBounds } from "./spa-defaults";
 import { formatProjectMetaLine } from "./address";
-import { formatLength, mmToFeet, MM_PER_FOOT, type UnitSystem } from "./units";
+import { formatArea, formatLength, mmToFeet, MM_PER_FOOT, type UnitSystem } from "./units";
 
 export type PermitPacketBodySummary = {
   id: string;
@@ -38,6 +39,14 @@ export type PermitPacketBodySummary = {
   shallowFt: number;
   volumeGal: number;
   excavationCy: number;
+};
+
+export type PermitDocMeta = {
+  companyName: string;
+  projectName: string;
+  clientName?: string | null;
+  phone?: string | null;
+  address?: string | null;
 };
 
 export type PermitPacket = {
@@ -70,13 +79,25 @@ function esc(s: string): string {
 
 function collectPlanPoints(design: DesignDocument): PointMm[] {
   const pts: PointMm[] = [];
-  for (const b of design.buildings) pts.push(...b.outline);
-  for (const p of design.poolBodies) pts.push(...p.outline);
-  for (const p of design.patios) pts.push(...p.outline);
-  for (const c of design.patioCovers ?? []) pts.push(...c.outline);
-  for (const f of design.fences ?? []) pts.push(...f.points);
+  for (const b of design.buildings ?? []) {
+    if (b.outline?.length) pts.push(...b.outline);
+  }
+  for (const p of design.poolBodies ?? []) {
+    if (p.outline?.length) pts.push(...p.outline);
+  }
+  for (const p of design.patios ?? []) {
+    if (p.outline?.length) pts.push(...p.outline);
+  }
+  for (const c of design.patioCovers ?? []) {
+    if (c.outline?.length) pts.push(...c.outline);
+  }
+  for (const f of design.fences ?? []) {
+    if (f.points?.length) pts.push(...f.points);
+  }
   for (const g of design.gradeSamples ?? []) pts.push(g.position);
-  for (const feat of design.features ?? []) pts.push(...feat.outline);
+  for (const feat of design.features ?? []) {
+    if (feat.outline?.length) pts.push(...feat.outline);
+  }
   for (const obj of design.objects ?? []) pts.push(...objectFootprint(obj));
   return pts;
 }
@@ -94,8 +115,8 @@ function toSvg(p: PointMm, f: Frame): { x: number; y: number } {
   };
 }
 
-function pathD(outline: PointMm[], f: Frame, close: boolean): string {
-  if (outline.length < 2) return "";
+function pathD(outline: PointMm[] | undefined, f: Frame, close: boolean): string {
+  if (!outline || outline.length < 2) return "";
   const d = outline
     .map((p, i) => {
       const s = toSvg(p, f);
@@ -153,6 +174,31 @@ function aabbGap(
     return { ax: x, ay: a.minY, bx: x, by: b.maxY, dist: a.minY - b.maxY };
   }
   return null;
+}
+
+function nearestOutlineVertex(outline: PointMm[], p: PointMm): PointMm | null {
+  if (outline.length < 1) return null;
+  let best = outline[0];
+  let bestD = Infinity;
+  for (const v of outline) {
+    const d = Math.hypot(v.x - p.x, v.y - p.y);
+    if (d < bestD) {
+      bestD = d;
+      best = v;
+    }
+  }
+  return best;
+}
+
+function patioPavingAreaMm2(
+  patioOutline: PointMm[],
+  holes: PointMm[][],
+): number {
+  let area = polygonAreaMm2(patioOutline);
+  for (const hole of holes) {
+    area -= approximateIntersectionAreaMm2(patioOutline, hole);
+  }
+  return Math.max(0, area);
 }
 
 function dimLine(
@@ -221,10 +267,13 @@ function centroidText(
 }
 
 /** Draft site plan: labels, dimensions, scale bar, north, pad, features. */
+export type PlanSheetVariant = "permit" | "layout";
+
 export function buildPlanOutlineSvg(
   design: DesignDocument,
   unitSystem: UnitSystem = design.unitSystem,
   size = 1000,
+  variant: PlanSheetVariant = "permit",
 ): string {
   const pts = collectPlanPoints(design);
   const height = Math.round(size * 0.78);
@@ -245,6 +294,14 @@ export function buildPlanOutlineSvg(
     scale,
   };
 
+  const layout = variant === "layout";
+  const waterHoles = (design.poolBodies ?? [])
+    .map((body) => body.outline)
+    .filter((o) => o && o.length >= 3);
+  const buildingHoles = (design.buildings ?? [])
+    .map((b) => b.outline)
+    .filter((o) => o && o.length >= 3);
+
   const layers: string[] = [
     `<defs>
       <pattern id="patioHatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -256,7 +313,7 @@ export function buildPlanOutlineSvg(
     </defs>`,
   ];
 
-  for (const patio of design.patios) {
+  for (const patio of design.patios ?? []) {
     const d = pathD(patio.outline, f, true);
     if (!d) continue;
     layers.push(
@@ -266,7 +323,7 @@ export function buildPlanOutlineSvg(
       `<path d="${d}" fill="url(#patioHatch)" stroke="none" opacity="0.45"/>`,
     );
     layers.push(
-      centroidText(patio.outline, f, "PATIO", {
+      centroidText(patio.outline, f, layout ? "PAVERS" : "PATIO", {
         size: 11,
         fill: "#5a5048",
         at: labelAnchor(
@@ -275,9 +332,39 @@ export function buildPlanOutlineSvg(
         ),
       }),
     );
+    if (layout) {
+      const pavingMm2 = patioPavingAreaMm2(patio.outline, [
+        ...waterHoles,
+        ...buildingHoles,
+      ]);
+      if (pavingMm2 > 10_000) {
+        const at = labelAnchor(
+          patio.outline,
+          design.poolBodies.map((body) => body.outline),
+        );
+        const s = toSvg(at, f);
+        layers.push(
+          `<text x="${s.x.toFixed(1)}" y="${(s.y + 12).toFixed(1)}" text-anchor="middle" font-size="8" fill="#5a5048" font-family="ui-monospace, Menlo, monospace">${esc(formatArea(pavingMm2, unitSystem))}</text>`,
+        );
+      }
+      const pbb = outlineBounds(patio.outline);
+      if (pbb.width > 200 && pbb.height > 200) {
+        const off = 36 / scale;
+        const a0 = toSvg({ x: pbb.minX, y: pbb.maxY + off }, f);
+        const a1 = toSvg({ x: pbb.maxX, y: pbb.maxY + off }, f);
+        layers.push(
+          dimLine(a0.x, a0.y, a1.x, a1.y, formatLength(pbb.width, unitSystem)),
+        );
+        const b0 = toSvg({ x: pbb.maxX + off, y: pbb.minY }, f);
+        const b1 = toSvg({ x: pbb.maxX + off, y: pbb.maxY }, f);
+        layers.push(
+          dimLine(b0.x, b0.y, b1.x, b1.y, formatLength(pbb.height, unitSystem)),
+        );
+      }
+    }
   }
 
-  for (const building of design.buildings) {
+  for (const building of design.buildings ?? []) {
     const d = pathD(building.outline, f, true);
     if (!d) continue;
     layers.push(
@@ -337,36 +424,39 @@ export function buildPlanOutlineSvg(
       dimLine(q0.x, q0.y, q1.x, q1.y, formatLength(bb.height, unitSystem)),
     );
 
-    try {
-      const profile = depthProfileForBody(body);
-      const ax = profile.axis;
-      const o = profile.originMm;
-      const len = profile.axisLengthMm;
-      const a = { x: o.x, y: o.y };
-      const z = { x: o.x + ax.x * len, y: o.y + ax.y * len };
-      const sa = toSvg(a, f);
-      const sz = toSvg(z, f);
-      layers.push(
-        `<line x1="${sa.x.toFixed(1)}" y1="${sa.y.toFixed(1)}" x2="${sz.x.toFixed(1)}" y2="${sz.y.toFixed(1)}" stroke="#8a1c1c" stroke-width="1.1" stroke-dasharray="6 3"/>`,
-      );
-      layers.push(
-        `<text x="${sa.x.toFixed(1)}" y="${(sa.y - 6).toFixed(1)}" font-size="9" font-weight="700" fill="#8a1c1c" font-family="ui-sans-serif, system-ui">A</text>`,
-      );
-      layers.push(
-        `<text x="${sz.x.toFixed(1)}" y="${(sz.y - 6).toFixed(1)}" font-size="9" font-weight="700" fill="#8a1c1c" font-family="ui-sans-serif, system-ui">A</text>`,
-      );
-      layers.push(
-        `<text x="${sa.x.toFixed(1)}" y="${(sa.y + 14).toFixed(1)}" font-size="8" fill="#8a1c1c" font-family="ui-monospace, Menlo, monospace">${esc(formatLength(body.depthShallowMm, unitSystem))}</text>`,
-      );
-      layers.push(
-        `<text x="${sz.x.toFixed(1)}" y="${(sz.y + 14).toFixed(1)}" font-size="8" fill="#8a1c1c" font-family="ui-monospace, Menlo, monospace">${esc(formatLength(maxDepthMmFromProfile(body), unitSystem))}</text>`,
-      );
-    } catch {
-      // no section cut
+    if (!layout) {
+      try {
+        const profile = depthProfileForBody(body);
+        const ax = profile.axis;
+        const o = profile.originMm;
+        const len = profile.axisLengthMm;
+        const a = { x: o.x, y: o.y };
+        const z = { x: o.x + ax.x * len, y: o.y + ax.y * len };
+        const sa = toSvg(a, f);
+        const sz = toSvg(z, f);
+        layers.push(
+          `<line x1="${sa.x.toFixed(1)}" y1="${sa.y.toFixed(1)}" x2="${sz.x.toFixed(1)}" y2="${sz.y.toFixed(1)}" stroke="#8a1c1c" stroke-width="1.1" stroke-dasharray="6 3"/>`,
+        );
+        layers.push(
+          `<text x="${sa.x.toFixed(1)}" y="${(sa.y - 6).toFixed(1)}" font-size="9" font-weight="700" fill="#8a1c1c" font-family="ui-sans-serif, system-ui">A</text>`,
+        );
+        layers.push(
+          `<text x="${sz.x.toFixed(1)}" y="${(sz.y - 6).toFixed(1)}" font-size="9" font-weight="700" fill="#8a1c1c" font-family="ui-sans-serif, system-ui">A</text>`,
+        );
+        layers.push(
+          `<text x="${sa.x.toFixed(1)}" y="${(sa.y + 14).toFixed(1)}" font-size="8" fill="#8a1c1c" font-family="ui-monospace, Menlo, monospace">${esc(formatLength(body.depthShallowMm, unitSystem))}</text>`,
+        );
+        layers.push(
+          `<text x="${sz.x.toFixed(1)}" y="${(sz.y + 14).toFixed(1)}" font-size="8" fill="#8a1c1c" font-family="ui-monospace, Menlo, monospace">${esc(formatLength(maxDepthMmFromProfile(body), unitSystem))}</text>`,
+        );
+      } catch {
+        // no section cut
+      }
     }
   }
 
   for (const feat of design.features ?? []) {
+    if (layout) continue;
     const d = pathD(feat.outline, f, true);
     if (!d) continue;
     layers.push(
@@ -384,6 +474,7 @@ export function buildPlanOutlineSvg(
   }
 
   for (const cover of design.patioCovers ?? []) {
+    if (layout) continue;
     const d = pathD(cover.outline, f, true);
     if (!d) continue;
     layers.push(
@@ -411,7 +502,7 @@ export function buildPlanOutlineSvg(
       layers.push(
         `<text x="${s.x.toFixed(1)}" y="${s.y.toFixed(1)}" text-anchor="middle" font-size="9" font-weight="700" fill="#2a2420" font-family="ui-sans-serif, system-ui">EQUIP. PAD</text>`,
       );
-    } else if (isPadEquipment(obj)) {
+    } else if (!layout && isPadEquipment(obj)) {
       layers.push(
         `<path d="${d}" fill="#cfc8be" stroke="#3a342e" stroke-width="0.9"/>`,
       );
@@ -425,37 +516,41 @@ export function buildPlanOutlineSvg(
         `<path d="${d}" fill="none" stroke="#1c2a22" stroke-width="2"/>`,
       );
     }
-    for (const gate of fence.gates ?? []) {
-      const a = fence.points[gate.edgeIndex];
-      const b2 = fence.points[gate.edgeIndex + 1];
-      if (!a || !b2) continue;
-      const x = a.x + (b2.x - a.x) * gate.t;
-      const y = a.y + (b2.y - a.y) * gate.t;
-      const s = toSvg({ x, y }, f);
-      layers.push(
-        `<rect x="${(s.x - 5).toFixed(1)}" y="${(s.y - 5).toFixed(1)}" width="10" height="10" fill="#fff" stroke="#1c2a22" stroke-width="1.3"/>`,
-      );
-      layers.push(
-        `<text x="${(s.x + 8).toFixed(1)}" y="${(s.y + 3).toFixed(1)}" font-size="8" font-weight="700" fill="#1c2a22" font-family="ui-sans-serif, system-ui">GATE</text>`,
-      );
-    }
-    if (fence.points.length >= 2) {
-      const mid = fence.points[Math.floor(fence.points.length / 2)];
-      const s = toSvg(mid, f);
-      layers.push(
-        `<text x="${s.x.toFixed(1)}" y="${(s.y - 8).toFixed(1)}" text-anchor="middle" font-size="8" fill="#1c2a22" font-family="ui-sans-serif, system-ui">${esc(fenceKindLabel(fence.kind).toUpperCase())} FENCE</text>`,
-      );
+    if (!layout) {
+      for (const gate of fence.gates ?? []) {
+        const a = fence.points[gate.edgeIndex];
+        const b2 = fence.points[gate.edgeIndex + 1];
+        if (!a || !b2) continue;
+        const x = a.x + (b2.x - a.x) * gate.t;
+        const y = a.y + (b2.y - a.y) * gate.t;
+        const s = toSvg({ x, y }, f);
+        layers.push(
+          `<rect x="${(s.x - 5).toFixed(1)}" y="${(s.y - 5).toFixed(1)}" width="10" height="10" fill="#fff" stroke="#1c2a22" stroke-width="1.3"/>`,
+        );
+        layers.push(
+          `<text x="${(s.x + 8).toFixed(1)}" y="${(s.y + 3).toFixed(1)}" font-size="8" font-weight="700" fill="#1c2a22" font-family="ui-sans-serif, system-ui">GATE</text>`,
+        );
+      }
+      if (fence.points.length >= 2) {
+        const mid = fence.points[Math.floor(fence.points.length / 2)];
+        const s = toSvg(mid, f);
+        layers.push(
+          `<text x="${s.x.toFixed(1)}" y="${(s.y - 8).toFixed(1)}" text-anchor="middle" font-size="8" fill="#1c2a22" font-family="ui-sans-serif, system-ui">${esc(fenceKindLabel(fence.kind).toUpperCase())} FENCE</text>`,
+        );
+      }
     }
   }
 
-  for (const sample of (design.gradeSamples ?? []).slice(0, 16)) {
-    const s = toSvg(sample.position, f);
-    layers.push(
-      `<circle cx="${s.x.toFixed(1)}" cy="${s.y.toFixed(1)}" r="2.4" fill="#3d5a2c" stroke="#152018" stroke-width="0.6"/>`,
-    );
-    layers.push(
-      `<text x="${(s.x + 6).toFixed(1)}" y="${(s.y - 4).toFixed(1)}" font-size="7" fill="#3d5a2c" font-family="ui-monospace, Menlo, monospace">${esc(formatLength(sample.dropMm, unitSystem))}</text>`,
-    );
+  if (!layout) {
+    for (const sample of (design.gradeSamples ?? []).slice(0, 16)) {
+      const s = toSvg(sample.position, f);
+      layers.push(
+        `<circle cx="${s.x.toFixed(1)}" cy="${s.y.toFixed(1)}" r="2.4" fill="#3d5a2c" stroke="#152018" stroke-width="0.6"/>`,
+      );
+      layers.push(
+        `<text x="${(s.x + 6).toFixed(1)}" y="${(s.y - 4).toFixed(1)}" font-size="7" fill="#3d5a2c" font-family="ui-monospace, Menlo, monospace">${esc(formatLength(sample.dropMm, unitSystem))}</text>`,
+      );
+    }
   }
 
   const house = design.buildings[0];
@@ -473,6 +568,41 @@ export function buildPlanOutlineSvg(
       layers.push(
         dimLine(a.x, a.y, z.x, z.y, `${formatLength(gap.dist, unitSystem)} CLR`),
       );
+    }
+  }
+
+  const pad = (design.objects ?? []).find((o) => o.catalogItemId === "equip_pad");
+  if (house && pad) {
+    const corner = nearestOutlineVertex(house.outline, pad.position);
+    if (corner) {
+      const dx = pad.position.x - corner.x;
+      const dy = pad.position.y - corner.y;
+      if (Math.abs(dx) > 200) {
+        const a = toSvg(corner, f);
+        const z = toSvg({ x: pad.position.x, y: corner.y }, f);
+        layers.push(
+          dimLine(
+            a.x,
+            a.y,
+            z.x,
+            z.y,
+            `${formatLength(Math.abs(dx), unitSystem)} TO PAD`,
+          ),
+        );
+      }
+      if (Math.abs(dy) > 200) {
+        const a = toSvg({ x: pad.position.x, y: corner.y }, f);
+        const z = toSvg(pad.position, f);
+        layers.push(
+          dimLine(
+            a.x,
+            a.y,
+            z.x,
+            z.y,
+            `${formatLength(Math.abs(dy), unitSystem)} TO PAD`,
+          ),
+        );
+      }
     }
   }
 
@@ -498,19 +628,111 @@ export function buildPlanOutlineSvg(
     <text x="0" y="-22" text-anchor="middle" font-size="11" font-weight="700" font-family="ui-sans-serif, system-ui" fill="#152018">N</text>
   </g>`);
 
-  const northNote =
-    northDeg === 0
+  const northNote = layout
+    ? northDeg === 0
+      ? "N = drawing up. Confirm true north, property lines, and utilities with the survey."
+      : `N = ${northDeg.toFixed(0)}° clockwise from drawing-up. Confirm with survey. Not a plat.`
+    : northDeg === 0
       ? "N = drawing up (0°). Confirm true north, property lines, and utilities with survey. A–A = pool section."
       : `N = ${northDeg.toFixed(0)}° clockwise from drawing-up. Confirm with survey. Property lines and utilities are not in this model. A–A = pool section.`;
 
   layers.push(
-    `<text x="24" y="22" font-size="9" fill="#8a1c1c" font-family="ui-sans-serif, system-ui" font-weight="700">DRAFT SITE PLAN — NOT FOR CONSTRUCTION / PERMIT SUBMITTAL</text>`,
+    `<text x="24" y="22" font-size="9" fill="#8a1c1c" font-family="ui-sans-serif, system-ui" font-weight="700">${
+      layout
+        ? "LAYOUT PLAN — OVERALL SIZES AND SETBACKS FROM THE MODEL"
+        : "DRAFT SITE PLAN — NOT FOR CONSTRUCTION / PERMIT SUBMITTAL"
+    }</text>`,
   );
   layers.push(
     `<text x="24" y="36" font-size="8" fill="#5a6a60" font-family="ui-sans-serif, system-ui">${esc(northNote)}</text>`,
   );
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${height}" viewBox="0 0 ${size} ${height}" style="background:#f7f4ee">${layers.join("")}</svg>`;
+}
+
+/** Clean dimensioned layout sheet (pool-builder packet style). */
+export function buildLayoutPlanSvg(
+  design: DesignDocument,
+  unitSystem: UnitSystem = design.unitSystem,
+  size = 1400,
+): string {
+  return buildPlanOutlineSvg(design, unitSystem, size, "layout");
+}
+
+export function buildLayoutPlanHtml(
+  meta: PermitDocMeta & {
+    companyLogoUrl?: string | null;
+    companyRegion?: string | null;
+  },
+  svg: string,
+): string {
+  const when = new Date().toLocaleString();
+  const metaLine = formatProjectMetaLine({
+    clientName: meta.clientName,
+    phone: meta.phone,
+    address: meta.address,
+  });
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Layout plan — ${esc(meta.projectName)}</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: "Source Serif 4", Georgia, serif; margin: 0; color: #1a2420; background: #efebe3; }
+    .sheet { max-width: 1100px; margin: 0 auto; padding: 1.25rem 1.35rem 2rem; background: #fff; }
+    header { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 2px solid #1a2420; padding-bottom: 0.85rem; margin-bottom: 1rem; }
+    .brand { display: flex; gap: 0.85rem; align-items: center; }
+    .logo { max-height: 48px; max-width: 140px; object-fit: contain; }
+    h1 { font-size: 1.45rem; margin: 0 0 0.2rem; font-family: "Fraunces", Georgia, serif; }
+    .muted { color: #5c6b64; font-size: 0.88rem; }
+    .plan { border: 1px solid #c9c2b6; background: #f7f4ee; }
+    .plan svg { display: block; width: 100%; height: auto; }
+    .legend { font-size: 0.82rem; color: #5c6b64; margin: 0.65rem 0 0; }
+    .no-print-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.85rem; }
+    button.print { appearance: none; border: 1px solid #1a2420; background: #1a2420; color: #fff; padding: 0.4rem 0.85rem; border-radius: 8px; font-weight: 650; cursor: pointer; }
+    @media print {
+      body { background: #fff; }
+      .sheet { max-width: none; padding: 0; }
+      .no-print { display: none !important; }
+      @page { size: landscape; margin: 0.45in; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="no-print no-print-actions">
+      <button type="button" class="print" onclick="window.print()">Print / Save as PDF</button>
+      <span class="muted">Landscape · choose “Save as PDF” in the print dialog.</span>
+    </div>
+    <header>
+      <div class="brand">
+        ${
+          meta.companyLogoUrl
+            ? `<img class="logo" src="${esc(meta.companyLogoUrl)}" alt="" />`
+            : ""
+        }
+        <div>
+          <div><strong>${esc(meta.companyName)}</strong></div>
+          ${meta.companyRegion ? `<div class="muted">${esc(meta.companyRegion)}</div>` : ""}
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div class="muted">Layout plan</div>
+        <div class="muted">${esc(when)}</div>
+      </div>
+    </header>
+    <h1>${esc(meta.projectName)}</h1>
+    <p class="muted">${esc(metaLine || "—")}</p>
+    <div class="plan">${svg}</div>
+    <p class="legend">
+      Hatch = pavers (area is deck minus pool, spa, and house). Dimensions are
+      overall length/width and clearances from the house, including the nearest
+      house corner to the equipment pad. Not a survey or a permit drawing.
+    </p>
+  </div>
+</body>
+</html>`;
 }
 
 /** Longitudinal pool section from the authored depth profile (sheet A–A). */
@@ -626,14 +848,6 @@ export function buildPermitPacket(
     sectionSvg: buildSectionSvg(design, unitSystem),
   };
 }
-
-export type PermitDocMeta = {
-  companyName: string;
-  projectName: string;
-  clientName?: string | null;
-  phone?: string | null;
-  address?: string | null;
-};
 
 export function buildPermitPacketHtml(
   meta: PermitDocMeta,

@@ -132,6 +132,12 @@ export const CAD_TOUR: TourStep[] = [
     target: '[data-tour="view-design"]',
   },
   {
+    id: "layout",
+    title: "The layout sheet",
+    body: "A clean plan of the pool, spa, pavers, and distances from the house. Export it as PDF.",
+    target: '[data-tour="view-layout"]',
+  },
+  {
     id: "measurements",
     title: "The tape measure",
     body: "Lengths and areas from what you drew. No prices yet — just quantities.",

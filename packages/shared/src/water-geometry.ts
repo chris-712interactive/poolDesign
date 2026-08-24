@@ -43,7 +43,7 @@ export function spaBelowDeckMm(body: PoolBody): number {
 
 /** Drop duplicate closing vertex so AABB helpers see 4-point rectangles. */
 export function openRing(outline: PointMm[]): PointMm[] {
-  if (outline.length < 2) return outline;
+  if (!outline || outline.length < 2) return outline ?? [];
   const a = outline[0];
   const b = outline[outline.length - 1];
   if (Math.hypot(a.x - b.x, a.y - b.y) < 1) return outline.slice(0, -1);
@@ -744,6 +744,128 @@ export function subtractAabbHoles(
     regions = next.filter((r) => r.length >= 3);
   }
   return regions;
+}
+
+/**
+ * Subject minus AABB holes, keeping the subject's true shape (L / U / skewed).
+ * {@link subtractAabbHoles} promotes non-rect decks to their bounding box,
+ * which fills house courtyards and can leave a paver wall through a spa when
+ * the caller falls back to ExtrudeGeometry holes (Earcut).
+ */
+export function subtractPolygonAabbHoles(
+  subject: PointMm[],
+  holes: PointMm[][],
+): PointMm[][] {
+  const sub = openRing(subject ?? []);
+  if (sub.length < 3) return [];
+  const holeList = Array.isArray(holes) ? holes : [];
+  const subB = asBounds(sub);
+  const holeBounds = holeList
+    .filter((h) => h && h.length >= 3)
+    .map((h) =>
+      asBounds(isAxisAlignedRect(openRing(h)) ? openRing(h) : outlineBoundsRect(h)),
+    );
+  const xs = uniqueSorted([
+    subB.minX,
+    subB.maxX,
+    ...sub.map((p) => p.x),
+    ...holeBounds.flatMap((h) => [
+      Math.max(subB.minX, h.minX),
+      Math.min(subB.maxX, h.maxX),
+    ]),
+  ]);
+  const ys = uniqueSorted([
+    subB.minY,
+    subB.maxY,
+    ...sub.map((p) => p.y),
+    ...holeBounds.flatMap((h) => [
+      Math.max(subB.minY, h.minY),
+      Math.min(subB.maxY, h.maxY),
+    ]),
+  ]);
+  if (xs.length < 2 || ys.length < 2) return [sub];
+
+  const S = isAxisAlignedRect(sub, 40) ? subB : null;
+  const nx = xs.length - 1;
+  const ny = ys.length - 1;
+  const filled: boolean[][] = Array.from({ length: nx }, () =>
+    Array<boolean>(ny).fill(false),
+  );
+  let any = false;
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < ny; j++) {
+      const cx = (xs[i] + xs[i + 1]) / 2;
+      const cy = (ys[j] + ys[j + 1]) / 2;
+      const inS = S
+        ? cx >= S.minX - 1e-6 &&
+          cx <= S.maxX + 1e-6 &&
+          cy >= S.minY - 1e-6 &&
+          cy <= S.maxY + 1e-6
+        : pointInPolygon({ x: cx, y: cy }, sub);
+      if (!inS) continue;
+      const inHole = holeBounds.some(
+        (h) =>
+          cx > h.minX + 1e-6 &&
+          cx < h.maxX - 1e-6 &&
+          cy > h.minY + 1e-6 &&
+          cy < h.maxY - 1e-6,
+      );
+      if (inHole) continue;
+      filled[i][j] = true;
+      any = true;
+    }
+  }
+  if (!any) return [];
+  return mergeFilledCellsToRects(xs, ys, filled);
+}
+
+/** Greedy merge of orthogonal filled cells into covering rectangles. */
+function mergeFilledCellsToRects(
+  xs: number[],
+  ys: number[],
+  filled: boolean[][],
+): PointMm[][] {
+  const nx = filled.length;
+  const ny = filled[0]?.length ?? 0;
+  const used: boolean[][] = Array.from({ length: nx }, () =>
+    Array<boolean>(ny).fill(false),
+  );
+  const out: PointMm[][] = [];
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      if (!filled[i][j] || used[i][j]) continue;
+      let i2 = i + 1;
+      while (i2 < nx && filled[i2][j] && !used[i2][j]) i2++;
+      let j2 = j + 1;
+      grow: while (j2 < ny) {
+        for (let k = i; k < i2; k++) {
+          if (!filled[k][j2] || used[k][j2]) break grow;
+        }
+        j2++;
+      }
+      for (let k = i; k < i2; k++) {
+        for (let m = j; m < j2; m++) used[k][m] = true;
+      }
+      const minX = xs[i];
+      const maxX = xs[i2];
+      const minY = ys[j];
+      const maxY = ys[j2];
+      if (maxX - minX < 2 || maxY - minY < 2) continue;
+      out.push(
+        rectRing({
+          minX,
+          minY,
+          maxX,
+          maxY,
+          width: maxX - minX,
+          height: maxY - minY,
+          cx: (minX + maxX) / 2,
+          cy: (minY + maxY) / 2,
+        }),
+      );
+    }
+  }
+  return out;
 }
 
 /**

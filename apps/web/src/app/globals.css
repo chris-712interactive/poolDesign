@@ -512,6 +512,35 @@ textarea {
   font-weight: 650;
 }
 
+.layout-plan-panel {
+  max-width: 72rem;
+}
+
+.layout-plan-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.layout-plan-panel-head h1 {
+  margin-bottom: 0.35rem;
+}
+
+.layout-plan-preview {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f7f4ee;
+  overflow: auto;
+}
+
+.layout-plan-preview svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

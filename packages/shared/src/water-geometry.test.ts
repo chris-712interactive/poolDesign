@@ -13,6 +13,7 @@ import {
   spaBelowDeckMm,
   spaNeedsDeckPit,
   subtractAabbHoles,
+  subtractPolygonAabbHoles,
   unionTouchingAabbRings,
   waterBodiesConnected,
 } from "./water-geometry";
@@ -156,6 +157,40 @@ describe("water-geometry", () => {
         inside.x > minX && inside.x < maxX && inside.y > minY && inside.y < maxY;
       assert.equal(inRect, false);
     }
+  });
+
+  it("punches a spa out of an L-shaped deck without filling the courtyard", () => {
+    const deck = [
+      { x: 0, y: 0 },
+      { x: 20000, y: 0 },
+      { x: 20000, y: 6000 },
+      { x: 8000, y: 6000 },
+      { x: 8000, y: 16000 },
+      { x: 0, y: 16000 },
+    ];
+    const spa = rect(10000, 1000, 16000, 5000);
+    const regions = subtractPolygonAabbHoles(deck, [spa]);
+    assert.ok(regions.length >= 1);
+    const spaInside = { x: 13000, y: 3000 };
+    const courtyard = { x: 14000, y: 12000 };
+    for (const r of regions) {
+      const b = outlineBounds(r);
+      const inSpa =
+        spaInside.x > b.minX &&
+        spaInside.x < b.maxX &&
+        spaInside.y > b.minY &&
+        spaInside.y < b.maxY;
+      const inYard =
+        courtyard.x > b.minX &&
+        courtyard.x < b.maxX &&
+        courtyard.y > b.minY &&
+        courtyard.y < b.maxY;
+      assert.equal(inSpa, false);
+      assert.equal(inYard, false);
+    }
+    const area = regions.reduce((s, r) => s + polygonAreaMm2(r), 0);
+    const expected = 20000 * 6000 + 8000 * 10000 - 6000 * 4000;
+    assert.ok(Math.abs(area - expected) < 1e6, `area ${area} vs ${expected}`);
   });
 
   it("punches skewed patio outlines via bounding box", () => {

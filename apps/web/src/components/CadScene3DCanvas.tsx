@@ -787,13 +787,20 @@ function ExtrudeMesh({
       applyWorldXzUvs(geo, isShallowWater ? 0.45 : 0.28);
       return geo;
     }
-    const geo = new THREE.ExtrudeGeometry(shape, {
-      depth: Math.max(0.01, desc.height),
-      bevelEnabled: false,
-    });
+    let geo: THREE.BufferGeometry;
+    try {
+      geo = new THREE.ExtrudeGeometry(shape, {
+        depth: Math.max(0.01, desc.height),
+        bevelEnabled: false,
+      });
+    } catch (err) {
+      console.warn("extrude failed", desc.id, err);
+      return new THREE.BufferGeometry();
+    }
     geo.rotateX(-Math.PI / 2);
     geo.translate(0, desc.bottomY, 0);
     if (desc.material === "ground") applyGrassWorldUVs(geo);
+    if (desc.material === "patio") applyWorldXzUvs(geo, 1);
     return geo;
   }, [desc]);
 
