@@ -1,6 +1,7 @@
 "use client";
 
 import { useContext, useLayoutEffect, useMemo, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import {
   getFloridaPlant,
@@ -140,44 +141,109 @@ function mergeGeoms(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   return out;
 }
 
-/** Palmate / costapalmate fan. Unit length along +Y from the crown. */
-function fanFrondGeometry(silver: boolean): THREE.BufferGeometry {
-  const blade = new THREE.ConeGeometry(silver ? 0.48 : 0.34, 1, 12, 1, true);
-  blade.translate(0, 0.5, 0);
-  blade.scale(1, 1, silver ? 0.055 : 0.07);
-  const rib = new THREE.CylinderGeometry(0.008, 0.016, 0.92, 5);
-  rib.translate(0, 0.46, 0);
-  return mergeGeoms([blade, rib]);
+function bendAlongY(geo: THREE.BufferGeometry, bendRad: number): THREE.BufferGeometry {
+  if (Math.abs(bendRad) < 1e-4) {
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+    return geo;
+  }
+  const pos = geo.getAttribute("position");
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const a = y * bendRad;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    pos.setXYZ(i, x, y * c - z * s, y * s + z * c);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/** Palmate / costapalmate fan with separate leaflets and a curved midrib. */
+function fanFrondGeometry(silver: boolean, bend: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const lobes = silver ? 9 : 11;
+  const spread = silver ? 1.12 : 0.92;
+  for (let i = 0; i < lobes; i++) {
+    const u = i / (lobes - 1) - 0.5;
+    const blade = new THREE.ConeGeometry(silver ? 0.07 : 0.055, 1, 4, 1, true);
+    blade.translate(0, 0.5, 0);
+    blade.rotateZ(u * spread);
+    blade.scale(1.15, 1, silver ? 0.045 : 0.055);
+    parts.push(blade);
+  }
+  const rib = new THREE.CylinderGeometry(0.006, 0.015, 0.94, 5);
+  rib.translate(0, 0.47, 0);
+  return bendAlongY(mergeGeoms([...parts, rib]), bend);
 }
 
 /**
- * Pinnate (feather) frond: rachis + paired leaflets.
+ * Pinnate (feather) frond: rachis + paired leaflets, then arched.
  * Unit length along +Y from the crown.
  */
-function pinnateFrondGeometry(plumose: boolean): THREE.BufferGeometry {
+function pinnateFrondGeometry(plumose: boolean, bend: number): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  const rachis = new THREE.CylinderGeometry(0.005, 0.012, 1, 5);
+  const rachis = new THREE.CylinderGeometry(0.004, 0.013, 1, 6);
   rachis.translate(0, 0.5, 0);
   parts.push(rachis);
-  const pairs = plumose ? 16 : 12;
+  const pairs = plumose ? 22 : 18;
   for (let i = 0; i < pairs; i++) {
-    const t = (i + 0.35) / pairs;
-    const y = t * 0.96;
-    const span = Math.sin(t * Math.PI) * (plumose ? 0.2 : 0.155);
+    const t = (i + 0.2) / pairs;
+    const y = t * 0.97;
+    const span = Math.sin(Math.pow(t, 0.82) * Math.PI) * (plumose ? 0.23 : 0.175);
+    const sweep = 0.22 + t * 0.12;
     const rows = plumose ? 2 : 1;
     for (let row = 0; row < rows; row++) {
-      const z = plumose ? (row === 0 ? 0.018 : -0.018) : 0;
+      const z = plumose ? (row === 0 ? 0.016 : -0.016) : 0;
       for (const side of [-1, 1] as const) {
-        const leaf = new THREE.BoxGeometry(span, 0.014, 0.005);
-        leaf.translate(side * span * 0.48, y, z);
+        const leaf = new THREE.BoxGeometry(span, 0.01, 0.0035);
+        leaf.translate(side * span * 0.5, 0, 0);
+        leaf.rotateZ(side * sweep);
+        leaf.rotateX((t - 0.35) * 0.35);
+        leaf.translate(0, y, z);
         parts.push(leaf);
       }
     }
   }
-  return mergeGeoms(parts);
+  return bendAlongY(mergeGeoms(parts), bend);
 }
 
-const UNIT_UP = new THREE.Vector3(0, 1, 0);
+const _palmX = new THREE.Vector3();
+const _palmY = new THREE.Vector3();
+const _palmZ = new THREE.Vector3();
+const _palmMat = new THREE.Matrix4();
+const _palmDummy = new THREE.Object3D();
+
+function setPalmFrondQuaternion(
+  dummy: THREE.Object3D,
+  yaw: number,
+  droop: number,
+  twist: number,
+) {
+  _palmY
+    .set(
+      Math.sin(droop) * Math.sin(yaw),
+      Math.cos(droop),
+      Math.sin(droop) * Math.cos(yaw),
+    )
+    .normalize();
+  _palmZ
+    .set(
+      Math.cos(droop) * Math.sin(yaw),
+      -Math.sin(droop),
+      Math.cos(droop) * Math.cos(yaw),
+    )
+    .normalize();
+  _palmX.crossVectors(_palmY, _palmZ).normalize();
+  _palmZ.crossVectors(_palmX, _palmY).normalize();
+  _palmMat.makeBasis(_palmX, _palmY, _palmZ);
+  dummy.quaternion.setFromRotationMatrix(_palmMat);
+  dummy.rotateY(twist);
+}
 
 function leafBladeGeometry(): THREE.BufferGeometry {
   const g = new THREE.SphereGeometry(0.08, 8, 6);
@@ -471,9 +537,34 @@ function PalmFronds({
   const fan = form === "fan_palm" || saw;
   const plumose = form === "foxtail_palm" || plant.id === "queen_palm";
   const coconut = form === "coconut_palm";
+  const canary = plant.id === "canary_date";
+  const bend = coconut
+    ? 0.95
+    : saw
+      ? 0.78
+      : silver
+        ? 0.32
+        : canary
+          ? 0.34
+          : fan
+            ? 0.52
+            : plumose
+              ? 0.62
+              : 0.55;
+  const windAmp = coconut
+    ? 0.2
+    : saw
+      ? 0.16
+      : silver || canary
+        ? 0.07
+        : fan
+          ? 0.12
+          : 0.14;
+  const windHz = coconut || silver ? 0.55 : saw ? 0.95 : 0.72;
   const geo = useMemo(
-    () => (fan ? fanFrondGeometry(silver) : pinnateFrondGeometry(plumose)),
-    [fan, plumose, silver],
+    () =>
+      fan ? fanFrondGeometry(silver, bend) : pinnateFrondGeometry(plumose, bend),
+    [bend, fan, plumose, silver],
   );
   const count = saw
     ? 16
@@ -485,69 +576,93 @@ function PalmFronds({
           ? 30
           : coconut
             ? 28
-            : plant.id === "canary_date"
+            : canary
               ? 36
               : 26;
-  const spec = useMemo((): ScatterSpec => {
-    const dir = new THREE.Vector3();
-    return {
-      count,
-      geo,
-      color: plantCssColor(plant.foliage),
-      roughness: silver ? 0.72 : 0.86,
-      doubleSide: true,
-      place: (i, rng, dummy) => {
-        const yaw = (i / count) * Math.PI * 2 + rng() * 0.2;
-        const droop = fan
-          ? silver
-            ? 0.72 + rng() * 0.38
-            : saw
-              ? 1.05 + rng() * 0.45
-              : 0.82 + rng() * 0.4
-          : coconut
-            ? 0.55 + (i / Math.max(1, count - 1)) * 1.05 + rng() * 0.18
-            : plant.id === "canary_date"
-              ? 0.7 + rng() * 0.4
-              : 0.75 + rng() * 0.45;
-        const len =
-          radius *
-          (fan ? (silver ? 1.12 : 1) : coconut ? 1.08 : plumose ? 1.02 : 1) *
-          (0.82 + rng() * 0.22);
-        dummy.position.set(
-          Math.sin(yaw) * radius * 0.04,
-          yCrown,
-          Math.cos(yaw) * radius * 0.04,
-        );
-        dir
-          .set(
-            Math.sin(droop) * Math.sin(yaw),
-            Math.cos(droop),
-            Math.sin(droop) * Math.cos(yaw),
-          )
-          .normalize();
-        dummy.quaternion.setFromUnitVectors(UNIT_UP, dir);
-        dummy.rotateY((rng() - 0.5) * 0.35);
-        dummy.scale.set(len, len, len);
-      },
-    };
-  }, [
-    coconut,
-    count,
-    fan,
-    geo,
-    plant.foliage,
-    plant.id,
-    plumose,
-    radius,
-    silver,
-    yCrown,
-  ]);
+  const seed = hashStr(plant.id) ^ Math.round(radius * 80);
+  const poses = useMemo(() => {
+    const rng = mulberry32(seed);
+    return Array.from({ length: count }, (_, i) => {
+      const yaw = (i / count) * Math.PI * 2 + rng() * 0.22;
+      const droop = fan
+        ? silver
+          ? 0.68 + rng() * 0.42
+          : saw
+            ? 1.0 + rng() * 0.5
+            : 0.78 + rng() * 0.42
+        : coconut
+          ? 0.48 + (i / Math.max(1, count - 1)) * 1.15 + rng() * 0.16
+          : canary
+            ? 0.68 + rng() * 0.42
+            : 0.7 + rng() * 0.48;
+      const len =
+        radius *
+        (fan ? (silver ? 1.12 : 1) : coconut ? 1.1 : plumose ? 1.02 : 1) *
+        (0.8 + rng() * 0.24);
+      return {
+        yaw,
+        droop,
+        twist: (rng() - 0.5) * 0.45,
+        len,
+        px: Math.sin(yaw) * radius * 0.04,
+        py: yCrown,
+        pz: Math.cos(yaw) * radius * 0.04,
+        phase: rng() * Math.PI * 2,
+        amp: windAmp * (0.75 + rng() * 0.5) * (0.7 + 0.45 * Math.min(1, droop / 1.4)),
+      };
+    });
+  }, [canary, coconut, count, fan, plumose, radius, seed, silver, windAmp, yCrown]);
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+
+  const writePoses = (time: number) => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const gust = 0.62 + 0.38 * Math.sin(time * 0.15);
+    const dummy = _palmDummy;
+    for (let i = 0; i < poses.length; i++) {
+      const p = poses[i]!;
+      const w =
+        (Math.sin(time * windHz + p.phase) * 0.62 +
+          Math.sin(time * windHz * 1.7 + p.phase * 1.35) * 0.28 +
+          Math.sin(time * windHz * 0.33 + p.phase * 0.5) * 0.22) *
+        p.amp *
+        gust;
+      dummy.position.set(p.px, p.py, p.pz);
+      dummy.scale.set(p.len, p.len, p.len);
+      setPalmFrondQuaternion(
+        dummy,
+        p.yaw + w * 0.7,
+        p.droop + w,
+        p.twist + w * 0.25,
+      );
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  };
+
+  useLayoutEffect(() => {
+    writePoses(0);
+  }, [poses, windHz]);
+
+  useFrame(({ clock }) => {
+    writePoses(clock.elapsedTime);
+  });
+
   return (
-    <InstancedParts
-      spec={spec}
-      seed={hashStr(plant.id) ^ Math.round(radius * 80)}
-      selected={selected}
-    />
+    <instancedMesh
+      ref={meshRef}
+      args={[geo, undefined, count]}
+      castShadow
+      frustumCulled={false}
+    >
+      <PlantMat
+        color={plantCssColor(plant.foliage)}
+        roughness={silver ? 0.72 : 0.86}
+        selected={selected}
+        doubleSide
+      />
+    </instancedMesh>
   );
 }
 
@@ -1034,7 +1149,7 @@ function RosettePlant({
   const y0 = -sy / 2;
   const cycad = plant.form === "cycad";
   const geo = useMemo(
-    () => (cycad ? pinnateFrondGeometry(false) : swordGeometry()),
+    () => (cycad ? pinnateFrondGeometry(false, 0.45) : swordGeometry()),
     [cycad],
   );
   const n = cycad ? 16 : plant.id === "bromeliad" ? 18 : 20;
@@ -1229,7 +1344,7 @@ function FernPlant({
   selected: boolean;
 }) {
   const y0 = -sy / 2;
-  const geo = useMemo(() => pinnateFrondGeometry(true), []);
+  const geo = useMemo(() => pinnateFrondGeometry(true, 0.7), []);
   const spec = useMemo(
     (): ScatterSpec => ({
       count: 18,
