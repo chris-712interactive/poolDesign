@@ -116,18 +116,68 @@ function flowerGeometry(bloom: PlantBloom): THREE.BufferGeometry | null {
   return null;
 }
 
-function fanFrondGeometry(silver: boolean): THREE.BufferGeometry {
-  const g = new THREE.ConeGeometry(silver ? 0.42 : 0.32, 1, 8, 1, true);
-  g.translate(0, 0.5, 0);
-  g.scale(1, 1, silver ? 0.08 : 0.1);
-  return g;
+function mergeGeoms(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (const g of parts) {
+    const p = g.getAttribute("position");
+    const base = pos.length / 3;
+    for (let i = 0; i < p.count; i++) {
+      pos.push(p.getX(i), p.getY(i), p.getZ(i));
+    }
+    const index = g.getIndex();
+    if (index) {
+      for (let i = 0; i < index.count; i++) idx.push(index.getX(i) + base);
+    } else {
+      for (let i = 0; i < p.count; i++) idx.push(base + i);
+    }
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  out.setIndex(idx);
+  out.computeVertexNormals();
+  return out;
 }
 
-function pinnateFrondGeometry(plumose: boolean): THREE.BufferGeometry {
-  const g = new THREE.BoxGeometry(plumose ? 0.22 : 0.14, 1, plumose ? 0.08 : 0.055);
-  g.translate(0, 0.5, 0);
-  return g;
+/** Palmate / costapalmate fan. Unit length along +Y from the crown. */
+function fanFrondGeometry(silver: boolean): THREE.BufferGeometry {
+  const blade = new THREE.ConeGeometry(silver ? 0.48 : 0.34, 1, 12, 1, true);
+  blade.translate(0, 0.5, 0);
+  blade.scale(1, 1, silver ? 0.055 : 0.07);
+  const rib = new THREE.CylinderGeometry(0.008, 0.016, 0.92, 5);
+  rib.translate(0, 0.46, 0);
+  return mergeGeoms([blade, rib]);
 }
+
+/**
+ * Pinnate (feather) frond: rachis + paired leaflets.
+ * Unit length along +Y from the crown.
+ */
+function pinnateFrondGeometry(plumose: boolean): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const rachis = new THREE.CylinderGeometry(0.005, 0.012, 1, 5);
+  rachis.translate(0, 0.5, 0);
+  parts.push(rachis);
+  const pairs = plumose ? 16 : 12;
+  for (let i = 0; i < pairs; i++) {
+    const t = (i + 0.35) / pairs;
+    const y = t * 0.96;
+    const span = Math.sin(t * Math.PI) * (plumose ? 0.2 : 0.155);
+    const rows = plumose ? 2 : 1;
+    for (let row = 0; row < rows; row++) {
+      const z = plumose ? (row === 0 ? 0.018 : -0.018) : 0;
+      for (const side of [-1, 1] as const) {
+        const leaf = new THREE.BoxGeometry(span, 0.014, 0.005);
+        leaf.translate(side * span * 0.48, y, z);
+        parts.push(leaf);
+      }
+    }
+  }
+  return mergeGeoms(parts);
+}
+
+const UNIT_UP = new THREE.Vector3(0, 1, 0);
 
 function leafBladeGeometry(): THREE.BufferGeometry {
   const g = new THREE.SphereGeometry(0.08, 8, 6);
@@ -181,6 +231,9 @@ function InstancedParts({
     const dummy = new THREE.Object3D();
     const rng = mulberry32(seed);
     for (let i = 0; i < spec.count; i++) {
+      dummy.position.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.quaternion.identity();
       spec.place(i, rng, dummy);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
@@ -362,6 +415,8 @@ function FruitScatter({
   count,
   selected,
   seed,
+  size = 0.045,
+  spreadY = 0.18,
 }: {
   color: string;
   y0: number;
@@ -371,8 +426,10 @@ function FruitScatter({
   count: number;
   selected: boolean;
   seed: number;
+  size?: number;
+  spreadY?: number;
 }) {
-  const geo = useMemo(() => new THREE.SphereGeometry(0.045, 8, 6), []);
+  const geo = useMemo(() => new THREE.SphereGeometry(size, 8, 6), [size]);
   const spec = useMemo(
     (): ScatterSpec => ({
       count,
@@ -382,16 +439,16 @@ function FruitScatter({
       place: (_i, rng, dummy) => {
         const a = rng() * Math.PI * 2;
         dummy.position.set(
-          Math.cos(a) * (0.12 + rng() * 0.32) * sx,
-          y0 + yCenter + (rng() - 0.5) * 0.35 * yCenter,
-          Math.sin(a) * (0.12 + rng() * 0.32) * sz,
+          Math.cos(a) * (0.15 + rng() * 0.55) * sx,
+          y0 + yCenter + (rng() - 0.5) * spreadY,
+          Math.sin(a) * (0.15 + rng() * 0.55) * sz,
         );
         dummy.rotation.set(0, rng() * Math.PI, 0);
-        const s = 0.7 + rng() * 0.55;
-        dummy.scale.set(s, s, s);
+        const s = 0.75 + rng() * 0.5;
+        dummy.scale.set(s, s * 0.9, s);
       },
     }),
-    [count, geo, sx, sz, y0, yCenter],
+    [count, geo, spreadY, sx, sz, y0, yCenter],
   );
   return <InstancedParts spec={spec} seed={seed} selected={selected} />;
 }
@@ -413,60 +470,78 @@ function PalmFronds({
   const saw = form === "saw_palmetto";
   const fan = form === "fan_palm" || saw;
   const plumose = form === "foxtail_palm" || plant.id === "queen_palm";
+  const coconut = form === "coconut_palm";
   const geo = useMemo(
     () => (fan ? fanFrondGeometry(silver) : pinnateFrondGeometry(plumose)),
     [fan, plumose, silver],
   );
   const count = saw
-    ? 14
+    ? 16
     : silver
-      ? 16
+      ? 18
       : fan
-        ? 18
+        ? 20
         : form === "foxtail_palm"
-          ? 28
-          : form === "coconut_palm"
-            ? 22
+          ? 30
+          : coconut
+            ? 28
             : plant.id === "canary_date"
               ? 36
-              : 24;
-  const spec = useMemo(
-    (): ScatterSpec => ({
+              : 26;
+  const spec = useMemo((): ScatterSpec => {
+    const dir = new THREE.Vector3();
+    return {
       count,
       geo,
       color: plantCssColor(plant.foliage),
-      roughness: silver ? 0.72 : 0.88,
+      roughness: silver ? 0.72 : 0.86,
       doubleSide: true,
       place: (i, rng, dummy) => {
-        const t = i / count;
-        const yaw = t * Math.PI * 2 + rng() * 0.18;
+        const yaw = (i / count) * Math.PI * 2 + rng() * 0.2;
         const droop = fan
           ? silver
-            ? 0.55 + rng() * 0.35
+            ? 0.72 + rng() * 0.38
             : saw
-              ? 0.9 + rng() * 0.5
-              : 0.7 + rng() * 0.45
-          : form === "coconut_palm"
-            ? 0.85 + rng() * 0.55
+              ? 1.05 + rng() * 0.45
+              : 0.82 + rng() * 0.4
+          : coconut
+            ? 0.55 + (i / Math.max(1, count - 1)) * 1.05 + rng() * 0.18
             : plant.id === "canary_date"
-              ? 0.55 + rng() * 0.35
-              : 0.65 + rng() * 0.5;
-        const len = radius * (fan ? (silver ? 1.15 : 1) : plumose ? 1.05 : 1) * (0.78 + rng() * 0.28);
+              ? 0.7 + rng() * 0.4
+              : 0.75 + rng() * 0.45;
+        const len =
+          radius *
+          (fan ? (silver ? 1.12 : 1) : coconut ? 1.08 : plumose ? 1.02 : 1) *
+          (0.82 + rng() * 0.22);
         dummy.position.set(
-          Math.cos(yaw) * radius * 0.08,
+          Math.sin(yaw) * radius * 0.04,
           yCrown,
-          Math.sin(yaw) * radius * 0.08,
+          Math.cos(yaw) * radius * 0.04,
         );
-        dummy.rotation.set(droop, yaw, (rng() - 0.5) * 0.25);
-        dummy.scale.set(
-          fan ? radius * (silver ? 1.15 : 0.85) : radius * (plumose ? 0.55 : 0.42),
-          len,
-          fan ? radius * 0.85 : radius * (plumose ? 0.7 : 0.55),
-        );
+        dir
+          .set(
+            Math.sin(droop) * Math.sin(yaw),
+            Math.cos(droop),
+            Math.sin(droop) * Math.cos(yaw),
+          )
+          .normalize();
+        dummy.quaternion.setFromUnitVectors(UNIT_UP, dir);
+        dummy.rotateY((rng() - 0.5) * 0.35);
+        dummy.scale.set(len, len, len);
       },
-    }),
-    [count, fan, form, geo, plant.foliage, plant.id, plumose, radius, silver, yCrown],
-  );
+    };
+  }, [
+    coconut,
+    count,
+    fan,
+    geo,
+    plant.foliage,
+    plant.id,
+    plumose,
+    radius,
+    silver,
+    yCrown,
+  ]);
   return (
     <InstancedParts
       spec={spec}
@@ -496,8 +571,14 @@ function PalmPlant({
   const royal = plant.form === "royal_palm";
   const clump = plant.form === "clumping_palm";
   const canary = plant.id === "canary_date";
-  const lean = coconut ? -0.22 : 0;
-  const trunkH = saw ? sy * 0.22 : royal ? sy * 0.72 : coconut ? sy * 0.7 : sy * 0.68;
+  const lean = coconut ? -0.2 : 0;
+  const trunkH = saw
+    ? sy * 0.22
+    : royal
+      ? sy * 0.72
+      : coconut
+        ? sy * 0.72
+        : sy * 0.68;
   const rBase = saw
     ? r * 0.12
     : canary
@@ -505,10 +586,10 @@ function PalmPlant({
       : royal
         ? r * 0.09
         : coconut
-          ? r * 0.07
+          ? r * 0.075
           : r * 0.065;
-  const rTop = royal ? rBase * 0.82 : rBase * 0.62;
-  const yCrown = y0 + trunkH + (royal ? sy * 0.06 : 0);
+  const rTop = royal ? rBase * 0.82 : coconut ? rBase * 0.72 : rBase * 0.62;
+  const crownRadius = r * (saw ? 0.95 : coconut ? 0.98 : 0.92);
 
   if (clump) {
     const stems = 7;
@@ -544,51 +625,66 @@ function PalmPlant({
   }
 
   return (
-    <group>
-      <Trunk
-        y0={y0}
-        height={trunkH}
-        rBase={rBase}
-        rTop={rTop}
-        color={plantCssColor(plant.trunk)}
-        selected={selected}
-        lean={lean}
-        segments={canary ? 12 : 10}
-      />
-      {royal ? (
-        <mesh
-          position={[0, y0 + trunkH + sy * 0.05, 0]}
-          castShadow
-        >
-          <cylinderGeometry args={[r * 0.07, r * 0.085, sy * 0.1, 12]} />
-          <PlantMat color="#3d7a48" roughness={0.55} selected={selected} />
+    <group position={[0, y0, 0]}>
+      <group rotation={[0, 0, lean]}>
+        <mesh position={[0, trunkH / 2, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[rTop, rBase, trunkH, canary ? 12 : 10]} />
+          <PlantMat
+            color={plantCssColor(plant.trunk)}
+            roughness={coconut ? 0.88 : 0.92}
+            selected={selected}
+          />
         </mesh>
-      ) : null}
-      {plant.id === "sabal_palmetto" ? (
-        <mesh position={[0, y0 + trunkH * 0.92, 0]} castShadow>
-          <sphereGeometry args={[r * 0.12, 8, 6]} />
-          <PlantMat color="#6a5a44" roughness={0.95} selected={selected} />
-        </mesh>
-      ) : null}
-      <PalmFronds
-        form={plant.form}
-        plant={plant}
-        yCrown={yCrown}
-        radius={r * (saw ? 0.95 : 0.92)}
-        selected={selected}
-      />
-      {coconut ? (
-        <FruitScatter
-          color="#6a4220"
-          y0={y0}
-          sx={sx * 0.35}
-          sz={sz * 0.35}
-          yCenter={trunkH * 0.92}
-          count={5}
+        {coconut
+          ? Array.from({ length: 9 }, (_, i) => {
+              const y = trunkH * (0.18 + (i / 8) * 0.72);
+              const rr = rBase + (rTop - rBase) * (y / trunkH);
+              return (
+                <mesh key={`ring-${i}`} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                  <torusGeometry args={[rr * 1.02, rr * 0.08, 5, 12]} />
+                  <PlantMat
+                    color="#9a8868"
+                    roughness={0.95}
+                    selected={selected}
+                  />
+                </mesh>
+              );
+            })
+          : null}
+        {royal ? (
+          <mesh position={[0, trunkH + sy * 0.05, 0]} castShadow>
+            <cylinderGeometry args={[r * 0.07, r * 0.085, sy * 0.1, 12]} />
+            <PlantMat color="#3d7a48" roughness={0.55} selected={selected} />
+          </mesh>
+        ) : null}
+        {plant.id === "sabal_palmetto" ? (
+          <mesh position={[0, trunkH * 0.96, 0]} castShadow>
+            <sphereGeometry args={[r * 0.12, 8, 6]} />
+            <PlantMat color="#6a5a44" roughness={0.95} selected={selected} />
+          </mesh>
+        ) : null}
+        <PalmFronds
+          form={plant.form}
+          plant={plant}
+          yCrown={trunkH + (royal ? sy * 0.06 : 0)}
+          radius={crownRadius}
           selected={selected}
-          seed={hashStr(plant.id)}
         />
-      ) : null}
+        {coconut ? (
+          <FruitScatter
+            color="#6a4220"
+            y0={0}
+            sx={rBase * 3.2}
+            sz={rBase * 3.2}
+            yCenter={trunkH * 0.97}
+            count={6}
+            selected={selected}
+            seed={hashStr(plant.id)}
+            size={0.1}
+            spreadY={0.14}
+          />
+        ) : null}
+      </group>
     </group>
   );
 }
