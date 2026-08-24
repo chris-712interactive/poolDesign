@@ -4569,14 +4569,20 @@ export function buildSceneModel(
       !isEquip
         ? shelfTopY + h / 2
         : null;
-    // Patio furniture / dry-deck scale figures stand on finished deck.
-    const deckTopY = mmToMeters(PATIO_SLAB_THICKNESS_MM);
+    // Deck furniture sits on the patio slab; trees and yard objects sit on
+    // existing grade so downhill grass doesn't leave them floating at FFE.
+    const onPatio = (design.patios ?? []).some(
+      (p) => p.outline.length >= 3 && pointInPolygon(obj.position, p.outline),
+    );
+    const groundY = onPatio
+      ? mmToMeters(PATIO_SLAB_THICKNESS_MM)
+      : -mmToMeters(existingGradeDropMm(obj.position, gradeSamples));
     const y =
       fixtureY ??
       coverY ??
       personY ??
       shelfY ??
-      (isEquip ? h / 2 : deckTopY + h / 2);
+      groundY + h / 2;
 
     const isBubbler =
       obj.catalogItemId === "spa_bubbler" ||
