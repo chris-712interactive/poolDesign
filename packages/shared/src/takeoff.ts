@@ -528,11 +528,14 @@ export function buildTakeoff(
 
   // House doors/windows are plan annotation only — not outdoor project scope.
 
-  // Furniture / scale figures are layout aids — do not inflate install labor.
+  // Furniture and landscaping plants are layout / 3D aids — not sold.
+  // Bill landscaping with a custom estimate line if needed.
   const billableObjectCount = (design.objects ?? []).filter((o) => {
     const item = getPlaceableItem(o.catalogItemId);
     if (!item) return false;
-    if (item.category === "furniture") return false;
+    if (item.category === "furniture" || item.category === "landscaping") {
+      return false;
+    }
     if (item.unitPriceCents <= 0 || o.catalogItemId === "person_scale") {
       return false;
     }
@@ -574,7 +577,7 @@ export function buildTakeoff(
   }
   }
 
-  // Group placed library objects (furniture is layout-only — not sold/billed).
+  // Group placed library objects (furniture and plants are layout-only).
   const objectCounts = new Map<string, number>();
   for (const obj of design.objects ?? []) {
     objectCounts.set(
@@ -585,7 +588,9 @@ export function buildTakeoff(
   for (const [catalogItemId, count] of objectCounts) {
     const item = getPlaceableItem(catalogItemId);
     if (!item) continue;
-    if (item.category === "furniture") continue;
+    if (item.category === "furniture" || item.category === "landscaping") {
+      continue;
+    }
     // Skip free scale / reference items (e.g. person for scale).
     if (item.unitPriceCents <= 0 || catalogItemId === "person_scale") continue;
     const category: TakeoffLine["category"] =

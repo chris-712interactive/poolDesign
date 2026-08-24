@@ -17,6 +17,7 @@ import {
   isDiningSetId,
   PATIO_SLAB_THICKNESS_MM,
   getFloridaVine,
+  isFloridaPlantId,
   isTrellisId,
   resolvePersonOutfitId,
   resolvePersonSex,
@@ -24,6 +25,7 @@ import {
   vineCssColor,
 } from "@pool-design/shared";
 import { PersonMesh } from "@/lib/cad3d/PersonMesh";
+import { FloridaPlantMesh } from "@/lib/cad3d/FloridaPlantMesh";
 import {
   isPadEquipmentCatalogId,
   PadEquipmentMesh,
@@ -2035,6 +2037,19 @@ export function CatalogObjectMesh({ desc, selected, onSelect }: Props) {
     rotation: [0, rotationY, 0] as [number, number, number],
     ...handlers,
   };
+
+  if (isFloridaPlantId(catalogId)) {
+    return (
+      <FloridaPlantMesh
+        catalogId={catalogId}
+        sx={sx}
+        sy={sy}
+        sz={sz}
+        selected={selected}
+        groupProps={groupProps}
+      />
+    );
+  }
 
   if (isTrellisId(catalogId)) {
     return (

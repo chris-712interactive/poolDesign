@@ -22,7 +22,10 @@ import {
   siteLineSegments,
   bearingToUnitVector,
   getFloridaVine,
+  getFloridaPlant,
+  isFloridaPlantId,
   isTrellisId,
+  plantCssColor,
   vineCssColor,
   vineDisplayName,
   type Building,
@@ -1056,6 +1059,85 @@ export function drawPlacedObject(
       );
     }
     return;
+  }
+
+  if (isFloridaPlantId(obj.catalogItemId)) {
+    const plant = getFloridaPlant(obj.catalogItemId);
+    if (plant) {
+      const rad = ((obj.rotationDeg || 0) * Math.PI) / 180;
+      const w = obj.widthMm * vp.scale;
+      const d = obj.depthMm * vp.scale;
+      const rx = Math.max(4, w * 0.48);
+      const ry = Math.max(4, d * 0.48);
+      const leaf = plantCssColor(plant.foliage);
+      const flower = plant.flower ? plantCssColor(plant.flower) : leaf;
+      ctx.save();
+      ctx.translate(center.x, center.y);
+      ctx.rotate(rad);
+      if (preview) ctx.setLineDash([5, 4]);
+      ctx.fillStyle = selected || preview
+        ? leaf.replace("rgb(", "rgba(").replace(")", ",0.42)")
+        : leaf.replace("rgb(", "rgba(").replace(")", ",0.28)");
+      ctx.strokeStyle = selected || preview ? "#2a4a32" : "#3d6b45";
+      ctx.lineWidth = selected ? 2.2 : 1.4;
+      ctx.beginPath();
+      if (plant.group === "palms") {
+        ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.beginPath();
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2;
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(a) * rx * 0.92, Math.sin(a) * ry * 0.92);
+        }
+        ctx.stroke();
+        ctx.fillStyle = selected ? "#5a4a32" : "#6a5a40";
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(2, Math.min(rx, ry) * 0.12), 0, Math.PI * 2);
+        ctx.fill();
+      } else if (plant.group === "tropical" || plant.group === "shrubs") {
+        ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        if (plant.flower) {
+          ctx.fillStyle = flower;
+          ctx.globalAlpha = 0.85;
+          for (let i = 0; i < 4; i++) {
+            const a = (i / 4) * Math.PI * 2 + 0.4;
+            ctx.beginPath();
+            ctx.arc(
+              Math.cos(a) * rx * 0.35,
+              Math.sin(a) * ry * 0.35,
+              Math.max(1.4, Math.min(rx, ry) * 0.12),
+              0,
+              Math.PI * 2,
+            );
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+        }
+      } else {
+        ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.ellipse(0, 0, rx * 0.55, ry * 0.55, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = selected ? "#5a4a32" : "#6a5a40";
+        ctx.beginPath();
+        ctx.rect(-Math.min(rx, ry) * 0.08, 0, Math.min(rx, ry) * 0.16, ry * 0.55);
+        ctx.fill();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+      if (selected || preview) {
+        ctx.fillStyle = "rgba(20,32,41,0.8)";
+        ctx.font = "10px Source Sans 3, sans-serif";
+        ctx.fillText(plant.name, center.x + rx + 3, center.y + 3);
+      }
+      return;
+    }
   }
 
   const outline = objectFootprint(obj);

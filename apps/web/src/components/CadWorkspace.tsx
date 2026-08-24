@@ -77,6 +77,10 @@ import {
   furnitureFinishRoles,
   defaultVineId,
   isTrellisId,
+  isFloridaPlantId,
+  isLandscapingCatalogId,
+  getFloridaPlant,
+  plantDescription,
   clampTrellisHeightMm,
   getPlaceableItem,
   isBubblerId,
@@ -4461,6 +4465,8 @@ export function CadWorkspace({
                               ? `Click on a sunshelf / tanning ledge to place ${placeItem?.name ?? "this"}. R rotates 15°.`
                               : placeItem?.id === "umbrella"
                                 ? "Click to place. Near a sunshelf pole holder, the umbrella snaps into the sleeve."
+                                : isLandscapingCatalogId(placeItem?.id ?? "")
+                                  ? `Click to plant ${placeItem?.name ?? "this"}. R rotates 15°. Resize in Properties.`
                                 : "Pick furniture/fixture, then click to place. R rotates 15°."
                         : tool === "measure"
                           ? "Click two points to measure distance. Esc clears."
@@ -8686,6 +8692,7 @@ function FurnitureFields({
     finishRoles.frame || finishRoles.fabric || finishRoles.canopy;
   const bubbler = isBubblerId(object.catalogItemId);
   const isPerson = object.catalogItemId === "person_scale";
+  const plant = getFloridaPlant(object.catalogItemId);
   const personSex = resolvePersonSex(object.personSex);
   const personOutfit = resolvePersonOutfitId(object.personOutfitId);
   const personHeight = resolvePersonHeightMm(
@@ -8699,6 +8706,12 @@ function FurnitureFields({
         <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
           Place anywhere on the plan. R rotates 15°. Set height below; lattice
           frame finish and Florida vine variety follow.
+        </p>
+      )}
+      {plant && (
+        <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
+          {plantDescription(plant)} Layout and 3D only — not on the estimate.
+          Add a custom landscaping line if you need to bill plantings.
         </p>
       )}
       {isPerson && onPersonChange && (
@@ -8880,6 +8893,29 @@ function FurnitureFields({
                 />
                 <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
                   Lattice height in 3D. Typical 6′–8′; range 3′–12′.
+                </p>
+              </div>
+            ) : isFloridaPlantId(object.catalogItemId) && onHeight ? (
+              <div className="field">
+                <label htmlFor="furn-height">Height</label>
+                <input
+                  id="furn-height"
+                  defaultValue={formatLength(
+                    object.heightMm ?? plant?.heightMm ?? 0,
+                    unitSystem,
+                  )}
+                  placeholder={
+                    unitSystem === "imperial" ? "e.g. 18′" : "e.g. 5.5m"
+                  }
+                  onBlur={(e) => {
+                    const mm = parseLengthToMm(e.target.value, unitSystem);
+                    if (mm == null || mm <= 0) return;
+                    onHeight(Math.max(300, Math.min(20000, mm)));
+                  }}
+                />
+                <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
+                  Installed height in 3D. Typical landscape size, not a forest
+                  giant.
                 </p>
               </div>
             ) : null}

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { isLandscapingCatalogId } from "@pool-design/shared";
 
 export { ToolTooltip } from "@/components/ToolTooltip";
 
@@ -40,6 +41,7 @@ export type ToolRealm = "land" | "water" | "house";
 export type ToolGroupId =
   | "pad"
   | "furniture"
+  | "landscaping"
   | "patio"
   | "site"
   | "cover"
@@ -93,11 +95,24 @@ export const TOOL_GROUPS: {
   {
     id: "furniture",
     realm: "land",
-    label: "Furniture & yard",
-    hint: "Lounge furniture, fire pit, planters, flowering trellis, and similar",
+    label: "Furniture",
+    hint: "Lounge furniture, fire pit, dining, and similar",
     icon: (
       <Svg>
         <path d="M5 11h14v7H5zM7 11V8a5 5 0 0 1 10 0v3" />
+      </Svg>
+    ),
+  },
+  {
+    id: "landscaping",
+    realm: "land",
+    label: "Landscaping",
+    hint: "Florida palms, trees, shrubs, tropicals, planters, and flowering trellis",
+    icon: (
+      <Svg>
+        <path d="M12 21V11" />
+        <path d="M12 11c-3.2-1.5-5-4.2-5-7 3.5 0 5 2.2 5 5.2C12 6.2 13.5 4 17 4c0 2.8-1.8 5.5-5 7z" />
+        <path d="M7 16c-1.6-.8-2.6-2.2-2.6-3.8 2 0 2.8 1.1 2.8 2.8" />
       </Svg>
     ),
   },
@@ -562,6 +577,7 @@ export function toolGroupForTool(
       return "spa";
     }
     if (placeCatalogId === "pool_bubbler") return "pool";
+    if (isLandscapingCatalogId(placeCatalogId)) return "landscaping";
     // Lights appear under both Pool and Spa — don't force a group switch.
     if (
       placeCatalogId === "light_standard" ||

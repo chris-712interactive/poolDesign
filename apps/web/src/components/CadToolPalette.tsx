@@ -16,6 +16,11 @@ import {
 } from "@/components/CadToolIcons";
 import {
   isCoverAccessoryId,
+  isLandscapingCatalogId,
+  isFloridaPlantId,
+  getFloridaPlant,
+  PLANT_GROUPS,
+  PLANT_GROUP_LABELS,
   isSunshelfLayoutId,
   fenceKindLabel,
   gateKindLabel,
@@ -242,13 +247,50 @@ export function CadToolPalette({
 
                   {group.id === "furniture" && (
                     <PlaceList
-                      items={placeLibrary}
+                      items={placeLibrary.filter(
+                        (item) => !isLandscapingCatalogId(item.id),
+                      )}
                       tool={tool}
                       placeItemId={placeItemId}
                       group="furniture"
                       onPlace={activatePlace}
                       tall
                     />
+                  )}
+
+                  {group.id === "landscaping" && (
+                    <div className="cad-compact-list-landscaping">
+                      <strong className="cad-tool-subgroup-label">
+                        Yard structures
+                      </strong>
+                      <PlaceList
+                        items={placeLibrary.filter(
+                          (item) =>
+                            isLandscapingCatalogId(item.id) &&
+                            !isFloridaPlantId(item.id),
+                        )}
+                        tool={tool}
+                        placeItemId={placeItemId}
+                        group="landscaping"
+                        onPlace={activatePlace}
+                      />
+                      {PLANT_GROUPS.map((g) => (
+                        <div key={g}>
+                          <strong className="cad-tool-subgroup-label">
+                            {PLANT_GROUP_LABELS[g]}
+                          </strong>
+                          <PlaceList
+                            items={placeLibrary.filter(
+                              (item) => getFloridaPlant(item.id)?.group === g,
+                            )}
+                            tool={tool}
+                            placeItemId={placeItemId}
+                            group="landscaping"
+                            onPlace={activatePlace}
+                          />
+                        </div>
+                      ))}
+                    </div>
                   )}
 
                   {group.id === "patio" && (

@@ -1,11 +1,14 @@
 import type { DesignLevel } from "./design-level";
 
+import { FLORIDA_PLANTS, plantDescription, type FloridaPlant } from "./florida-plants";
+
 export type PlaceableCategory =
   | "furniture"
   | "hardscape"
   | "amenity"
   | "attraction"
-  | "equipment";
+  | "equipment"
+  | "landscaping";
 
 export type PlaceableItem = {
   id: string;
@@ -484,7 +487,24 @@ export const OBJECT_LIBRARY: PlaceableItem[] = [
     levels: ["water_park"],
     unitPriceCents: 25000000,
   },
+  ...FLORIDA_PLANTS.map(plantToPlaceable),
 ];
+
+function plantToPlaceable(plant: FloridaPlant): PlaceableItem {
+  return {
+    id: plant.id,
+    name: plant.name,
+    category: "landscaping",
+    widthMm: plant.widthMm,
+    depthMm: plant.depthMm,
+    heightMm: plant.heightMm,
+    layerId: "furniture",
+    levels: ["residential", "commercial", "water_park"],
+    /** Layout / 3D only — never billed; use a custom estimate line if needed. */
+    unitPriceCents: 0,
+    description: plantDescription(plant),
+  };
+}
 
 export function objectLibraryForLevel(level: DesignLevel): PlaceableItem[] {
   return OBJECT_LIBRARY.filter((item) => item.levels.includes(level));

@@ -20,6 +20,9 @@ describe("dining set sizing", () => {
     assert.ok(ids.includes("cover_light"));
     assert.ok(ids.includes("sunshelf_chaise"));
     assert.ok(ids.includes("umbrella_sleeve"));
+    assert.ok(ids.includes("sabal_palmetto"));
+    assert.ok(ids.includes("live_oak"));
+    assert.ok(ids.includes("hibiscus"));
   });
 
   it("adds chair clearance around the tabletop", () => {

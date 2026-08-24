@@ -1745,6 +1745,19 @@ textarea {
   max-height: 220px;
 }
 
+.cad-compact-list-landscaping {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.cad-compact-list-landscaping .cad-compact-list {
+  max-height: none;
+  overflow: visible;
+}
+
 .cad-action-row {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));

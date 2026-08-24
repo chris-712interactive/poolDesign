@@ -15,7 +15,7 @@ function rect(w: number, d: number) {
 }
 
 describe("buildTakeoff", () => {
-  it("excludes furniture from the estimate", () => {
+  it("excludes furniture and landscaping plants from the estimate", () => {
     const design = emptyDesignDocument("residential");
     design.poolBodies = [
       {
@@ -88,6 +88,16 @@ describe("buildTakeoff", () => {
         widthMm: 1320,
         depthMm: 1320,
       },
+      {
+        id: "o7",
+        catalogItemId: "live_oak",
+        name: "Southern live oak",
+        position: { x: 4000, y: 0 },
+        rotationDeg: 0,
+        layerId: "furniture",
+        widthMm: 28 * FT,
+        depthMm: 28 * FT,
+      },
     ];
 
     const takeoff = buildTakeoff(design, "imperial");
@@ -101,6 +111,7 @@ describe("buildTakeoff", () => {
     assert.ok(takeoff.lines.some((l) => l.catalogItemId === "planter"));
     assert.ok(takeoff.lines.some((l) => l.catalogItemId === "umbrella_sleeve"));
     assert.ok(takeoff.lines.some((l) => l.catalogItemId === "cover_fan"));
+    assert.ok(!takeoff.lines.some((l) => l.catalogItemId === "live_oak"));
   });
 
   it("honors removed auto lines and custom adds", () => {

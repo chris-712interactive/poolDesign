@@ -301,6 +301,8 @@ export function defaultObjectHeightMm(catalogItemId: string): number {
       return 900;
     case "hardscape":
       return 450;
+    case "landscaping":
+      return 2400;
     case "amenity":
       return 1100;
     case "attraction":

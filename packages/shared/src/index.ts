@@ -21,6 +21,7 @@ export * from "./design-normalize";
 export * from "./patio-finishes";
 export * from "./furniture-finishes";
 export * from "./florida-vines";
+export * from "./florida-plants";
 export * from "./person-options";
 export * from "./fence-finishes";
 export * from "./house-finishes";

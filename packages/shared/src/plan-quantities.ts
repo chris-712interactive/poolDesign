@@ -436,7 +436,9 @@ function laborInstallHours(design: DesignDocument): number {
   const billableObjectCount = (design.objects ?? []).filter((o) => {
     const item = getPlaceableItem(o.catalogItemId);
     if (!item) return false;
-    if (item.category === "furniture") return false;
+    if (item.category === "furniture" || item.category === "landscaping") {
+      return false;
+    }
     if (item.unitPriceCents <= 0 || o.catalogItemId === "person_scale") {
       return false;
     }
