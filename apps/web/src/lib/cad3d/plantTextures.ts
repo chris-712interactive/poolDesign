@@ -410,6 +410,11 @@ export function getSpeciesLeafTexture(plant: FloridaPlant): THREE.CanvasTexture 
         r = mix(r, alt.r, 0.28);
         g = mix(g, alt.g, 0.28);
         b = mix(b, alt.b, 0.28);
+      } else if (plant.form === "cordyline") {
+        const edge = Math.min(1, Math.abs(u) * 1.5 + Math.max(0, v - 0.3) * 0.7);
+        r = mix(f.r, alt.r, 0.2 + edge * 0.6);
+        g = mix(f.g, alt.g, 0.2 + edge * 0.6);
+        b = mix(f.b, alt.b, 0.2 + edge * 0.6);
       } else {
         r = mix(r, r * 0.82, n * 0.35);
         g = mix(g, Math.min(255, g * 1.06), n * 0.2);
@@ -425,6 +430,20 @@ export function getSpeciesLeafTexture(plant: FloridaPlant): THREE.CanvasTexture 
         const mid = Math.abs(u) < 0.06 ? 0.4 : 0;
         const lat =
           Math.abs(u) > 0.07 && Math.abs(Math.sin((v * 7 + Math.abs(u)) * Math.PI)) < 0.12
+            ? 0.14
+            : 0;
+        vein = Math.max(mid, lat);
+      } else if (plant.form === "cordyline") {
+        const mid = Math.abs(u) < 0.07 ? 0.55 : 0;
+        const lat =
+          Math.abs(u) > 0.08 && Math.abs(Math.sin((v * 6 + Math.abs(u)) * Math.PI)) < 0.1
+            ? 0.12
+            : 0;
+        vein = Math.max(mid, lat);
+      } else if (plant.form === "bird_of_paradise" || plant.form === "fern") {
+        const mid = Math.abs(u) < 0.06 ? 0.4 : 0;
+        const lat =
+          Math.abs(u) > 0.07 && Math.abs(Math.sin((v * 10 + Math.abs(u)) * Math.PI)) < 0.1
             ? 0.14
             : 0;
         vein = Math.max(mid, lat);
@@ -454,6 +473,14 @@ export function getSpeciesLeafTexture(plant: FloridaPlant): THREE.CanvasTexture 
           r = mix(r, 48, vein * 0.35);
           g = mix(g, 130, vein * 0.35);
           b = mix(b, 52, vein * 0.35);
+        } else if (plant.form === "cordyline") {
+          r = mix(r, 236, vein * 0.5);
+          g = mix(g, 150, vein * 0.5);
+          b = mix(b, 160, vein * 0.5);
+        } else if (plant.form === "bird_of_paradise") {
+          r = mix(r, 170, vein * 0.4);
+          g = mix(g, 186, vein * 0.4);
+          b = mix(b, 120, vein * 0.4);
         } else if (redVeins) {
           r = mix(r, 168, vein);
           g = mix(g, 52, vein);
