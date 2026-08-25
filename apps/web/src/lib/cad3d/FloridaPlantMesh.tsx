@@ -513,6 +513,39 @@ function bananaLeafGeometry(tattered: boolean, bend: number): THREE.BufferGeomet
   return bendAlongY(merged, bend);
 }
 
+/** Ravenala: long petiole + oblong blade, mild arch — used in a single-plane fan. */
+function travelersLeafGeometry(bend: number): THREE.BufferGeometry {
+  const petiole = new THREE.CylinderGeometry(0.012, 0.026, 0.4, 8);
+  petiole.translate(0, 0.2, 0);
+  const ptsL: [number, number][] = [[0, 0.38]];
+  const ptsR: [number, number][] = [[0, 0.38]];
+  const n = 18;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const y = 0.38 + t * 0.6;
+    const w = Math.sin(Math.pow(t, 0.7) * Math.PI) * 0.26;
+    ptsL.push([-Math.max(0.01, w), y]);
+    ptsR.push([Math.max(0.01, w), y]);
+  }
+  ptsL.push([0, 0.99]);
+  ptsR.push([0, 0.99]);
+  const left = outlineLeaf(ptsL);
+  const right = outlineLeaf(ptsR);
+  const rib = new THREE.CylinderGeometry(0.008, 0.015, 0.62, 6);
+  rib.translate(0, 0.68, 0.008);
+  const merged = mergeGeoms([petiole, left, right, rib]);
+  const pos = merged.getAttribute("position");
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    if (y > 0.38) {
+      pos.setZ(i, pos.getZ(i) + Math.sin(x * 18) * 0.01);
+    }
+  }
+  pos.needsUpdate = true;
+  return bendAlongY(merged, bend);
+}
+
 function heartLeafGeometry(): THREE.BufferGeometry {
   const g = new THREE.SphereGeometry(0.22, 12, 10);
   g.scale(1.05, 1.12, 0.04);
@@ -1102,43 +1135,110 @@ function TravelersPlant({
   selected: boolean;
 }) {
   const y0 = -sy / 2;
-  const geo = useMemo(() => paddleGeometry(), []);
-  const n = 11;
+  const trunkH = sy * 0.36;
+  const rBase = sx * 0.048;
+  const rTop = sx * 0.034;
+  const yCrown = y0 + trunkH;
+  const n = 12;
+  const leafLen = Math.min(sy * 0.58, sx * 0.52);
+  const leafWide = sx * 0.13;
+  const geo = useMemo(() => travelersLeafGeometry(0.48), []);
+  const sheathGeo = useMemo(() => {
+    const g = new THREE.BoxGeometry(0.2, 0.42, 0.065);
+    g.translate(0, 0.18, 0);
+    return g;
+  }, []);
   const leafMap = getSpeciesLeafTexture(plant);
-  const spec = useMemo(
-    (): ScatterSpec => ({
-      count: n,
-      geo,
-      color: leafMap ? "#ffffff" : plantCssColor(plant.foliage),
-      map: leafMap,
-      roughness: 0.48,
-      doubleSide: true,
-      place: (i, rng, dummy) => {
-        const t = i / (n - 1) - 0.5;
-        const angle = t * 1.15;
-        dummy.position.set(0, y0 + sy * 0.12, 0);
-        dummy.rotation.set(0, 0, angle);
-        dummy.scale.set(
-          sx * (0.35 + rng() * 0.08),
-          sy * (0.55 + rng() * 0.12),
-          Math.max(0.08, sz * 0.22),
-        );
-      },
-    }),
-    [geo, n, leafMap, plant.foliage, sx, sy, sz, y0],
-  );
+  const leafColor = leafMap ? "#ffffff" : plantCssColor(plant.foliage);
+  const seed = hashStr(plant.id) ^ Math.round(sx * 20);
+  const poses = useMemo(() => {
+    const rng = mulberry32(seed);
+    return Array.from({ length: n }, (_, i) => {
+      const t = n <= 1 ? 0 : i / (n - 1);
+      const angle = (t - 0.5) * 2.7;
+      return {
+        angle,
+        twist: (rng() - 0.5) * 0.06,
+        len: leafLen * (0.9 + rng() * 0.14),
+        wide: leafWide * (0.88 + rng() * 0.2),
+        z: (t - 0.5) * sz * 0.22,
+        phase: rng() * Math.PI * 2,
+      };
+    });
+  }, [leafLen, leafWide, n, seed, sz]);
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+
+  const writeLeaves = (time: number) => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const dummy = _palmDummy;
+    const gust = 0.7 + 0.3 * Math.sin(time * 0.16);
+    for (let i = 0; i < poses.length; i++) {
+      const p = poses[i]!;
+      const w = Math.sin(time * 0.55 + p.phase) * 0.045 * gust;
+      dummy.position.set(0, yCrown, p.z);
+      dummy.scale.set(p.wide, p.len, 1);
+      dummy.quaternion.identity();
+      dummy.rotation.set(p.twist, 0, p.angle + w);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  };
+
+  useLayoutEffect(() => {
+    writeLeaves(0);
+  }, [poses, yCrown]);
+
+  useFrame(({ clock }) => {
+    writeLeaves(clock.elapsedTime);
+  });
+
   return (
     <group>
-      <mesh position={[0, y0 + sy * 0.12, 0]} castShadow>
-        <sphereGeometry args={[Math.min(sx, sz) * 0.12, 10, 8]} />
+      <mesh position={[0, y0 + trunkH / 2, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[rTop, rBase, trunkH, 12]} />
         <BarkMat
           plant={plant}
           selected={selected}
-          along={1.6}
+          along={Math.max(2, trunkH / Math.max(0.05, rBase) * 0.2)}
           fallback={plantCssColor(plant.trunk)}
         />
       </mesh>
-      <InstancedParts spec={spec} seed={hashStr(plant.id)} selected={selected} />
+      {Array.from({ length: 7 }, (_, i) => {
+        const t = i / 6 - 0.5;
+        const angle = t * 1.15;
+        return (
+          <mesh
+            key={`sheath-${i}`}
+            geometry={sheathGeo}
+            position={[0, yCrown - sy * 0.02, (t) * sz * 0.12]}
+            rotation={[0.05, 0, angle]}
+            scale={[sx * 0.14, sy * 0.1, 1]}
+            castShadow
+          >
+            <PlantMat
+              color={plantCssColor(plant.foliage)}
+              roughness={0.55}
+              selected={selected}
+            />
+          </mesh>
+        );
+      })}
+      <instancedMesh
+        ref={meshRef}
+        args={[geo, undefined, n]}
+        castShadow
+        frustumCulled={false}
+      >
+        <PlantMat
+          color={leafColor}
+          map={leafMap}
+          roughness={0.4}
+          selected={selected}
+          doubleSide
+        />
+      </instancedMesh>
     </group>
   );
 }
