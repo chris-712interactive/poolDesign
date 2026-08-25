@@ -385,3 +385,58 @@ describe("parseDesignDocument", () => {
     assert.ok(next.layers.some((l) => l.id === "house"));
   });
 });
+
+describe("flower beds", () => {
+  it("normalizes tilled and raised beds and drops invalid outlines", () => {
+    const raw = {
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [],
+      poolBodies: [],
+      patios: [],
+      flowerBeds: [
+        {
+          id: "bed_1",
+          name: "  ",
+          style: "tilled",
+          outline: [
+            { x: 0, y: 0 },
+            { x: 2000, y: 0 },
+            { x: 2000, y: 1500 },
+            { x: 0, y: 1500 },
+          ],
+        },
+        {
+          id: "bed_2",
+          name: "Herb box",
+          style: "raised",
+          heightMm: 9999,
+          wallFinish: "brick",
+          outline: [
+            { x: 0, y: 0 },
+            { x: 1200, y: 0 },
+            { x: 1200, y: 800 },
+            { x: 0, y: 800 },
+          ],
+        },
+        { id: "skip", name: "too small", style: "tilled", outline: [{ x: 0, y: 0 }] },
+      ],
+      buildings: [],
+      patioCovers: [],
+      features: [],
+      objects: [],
+      plumbingRuns: [],
+    } as unknown as DesignDocument;
+
+    const next = normalizeDesignDocument(raw);
+    assert.equal(next.flowerBeds?.length, 2);
+    assert.equal(next.flowerBeds?.[0].style, "tilled");
+    assert.equal(next.flowerBeds?.[0].name, "Flower bed");
+    assert.equal(next.flowerBeds?.[0].heightMm, undefined);
+    assert.equal(next.flowerBeds?.[1].style, "raised");
+    assert.equal(next.flowerBeds?.[1].wallFinish, "timber");
+    assert.ok((next.flowerBeds?.[1].heightMm ?? 0) <= 914.4);
+    assert.ok((next.flowerBeds?.[1].heightMm ?? 0) >= 152.4);
+  });
+});

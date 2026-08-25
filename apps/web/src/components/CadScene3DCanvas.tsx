@@ -13,7 +13,7 @@ import type { CadScene3DHandle } from "@/lib/cad3d/cadScene3dHandle";
 import { Canvas, ThreeEvent, useThree } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
-import type { DesignDocument, PointMm } from "@pool-design/shared";
+import type { DesignDocument, FlowerBedWallFinish, PointMm } from "@pool-design/shared";
 import {
   depthMmAtT,
   depthTAtPlanPoint,
@@ -75,6 +75,10 @@ import {
   makeWaterlineTileTexture,
 } from "@/lib/cad3d/proceduralTextures";
 import { getPatioFinishTexture } from "@/lib/cad3d/patioFinishTextures";
+import {
+  getFlowerBedSoilTexture,
+  getFlowerBedWallTexture,
+} from "@/lib/cad3d/flowerBedTextures";
 import { getWaterlineTileTexture } from "@/lib/cad3d/waterlineTileTextures";
 import { getHouseSidingTexture } from "@/lib/cad3d/houseSidingTextures";
 import { getRoofFinishTexture } from "@/lib/cad3d/roofFinishTextures";
@@ -217,6 +221,8 @@ const MATERIALS: Record<SceneMaterialKey, MatDef> = {
   sectionWater: { color: "#0d7a9a", roughness: 0.1, metalness: 0 },
   fill: { color: "#a89070", roughness: 0.95, metalness: 0 },
   retaining: { color: "#8a8074", roughness: 0.85, metalness: 0.05 },
+  flowerBedSoil: { color: "#ffffff", roughness: 0.98, metalness: 0 },
+  flowerBedWall: { color: "#ffffff", roughness: 0.88, metalness: 0 },
   fence: {
     color: "#2a2a2c",
     roughness: 0.55,
@@ -488,6 +494,8 @@ function SelectableMaterial({
   /** Water volume fill vs top surface — different depth/side settings. */
   waterLayer,
   patioFinishId,
+  flowerBedSoilKind,
+  flowerBedWallFinish,
   waterlineTileId,
   colorHex,
   houseSidingId,
@@ -499,6 +507,8 @@ function SelectableMaterial({
   selected: boolean;
   waterLayer?: "volume" | "surface";
   patioFinishId?: string;
+  flowerBedSoilKind?: "tilled" | "mulch";
+  flowerBedWallFinish?: FlowerBedWallFinish;
   waterlineTileId?: string;
   colorHex?: string;
   houseSidingId?: string;
@@ -513,6 +523,15 @@ function SelectableMaterial({
       material === "patio" ? getPatioFinishTexture(patioFinishId) : null,
     [material, patioFinishId],
   );
+  const flowerBedPair = useMemo(() => {
+    if (material === "flowerBedSoil") {
+      return getFlowerBedSoilTexture(flowerBedSoilKind ?? "tilled");
+    }
+    if (material === "flowerBedWall") {
+      return getFlowerBedWallTexture(flowerBedWallFinish ?? "timber");
+    }
+    return null;
+  }, [material, flowerBedSoilKind, flowerBedWallFinish]);
   const waterlinePair = useMemo(
     () =>
       material === "waterline"
@@ -540,10 +559,11 @@ function SelectableMaterial({
       };
     return getRoofFinishTexture(roofFinishId, paint);
   }, [material, roofFinishId, colorHex]);
-  const pair = patioPair ?? waterlinePair ?? housePair ?? roofPair ??
+  const pair = patioPair ?? flowerBedPair ?? waterlinePair ?? housePair ?? roofPair ??
     (mat.map && textures ? textures[mat.map] : null);
   const normalMap =
     patioPair?.normal ??
+    flowerBedPair?.normal ??
     waterlinePair?.normal ??
     housePair?.normal ??
     roofPair?.normal;
@@ -637,6 +657,8 @@ function SelectableMaterial({
       normalScale={
         material === "patio"
           ? [1.35, 1.35]
+          : material === "flowerBedSoil" || material === "flowerBedWall"
+            ? [1.6, 1.6]
           : material === "roof"
             ? [1.25, 1.25]
             : [1, 1]
@@ -801,6 +823,8 @@ function ExtrudeMesh({
     geo.translate(0, desc.bottomY, 0);
     if (desc.material === "ground") applyGrassWorldUVs(geo);
     if (desc.material === "patio") applyWorldXzUvs(geo, 1);
+    if (desc.material === "flowerBedSoil") applyWorldXzUvs(geo, 1);
+    if (desc.material === "flowerBedWall") applyWorldXzUvs(geo, 0.45);
     return geo;
   }, [desc]);
 
@@ -830,6 +854,8 @@ function ExtrudeMesh({
           selected={selected}
           waterLayer={waterLayer}
           patioFinishId={desc.patioFinishId}
+          flowerBedSoilKind={desc.flowerBedSoilKind}
+          flowerBedWallFinish={desc.flowerBedWallFinish}
           waterShallow={desc.waterShallow}
           colorHex={desc.colorHex}
           houseSidingId={desc.sidingId}

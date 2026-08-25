@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { isLandscapingCatalogId } from "@pool-design/shared";
+import { isLandscapingCatalogId, type FlowerBedStyle } from "@pool-design/shared";
 
 export { ToolTooltip } from "@/components/ToolTooltip";
 
@@ -16,6 +16,10 @@ export type DrawToolId =
   | "sunshelf"
   | "patio_rect"
   | "patio"
+  | "flowerbed_tilled_rect"
+  | "flowerbed_tilled_poly"
+  | "flowerbed_raised_rect"
+  | "flowerbed_raised_poly"
   | "grade_point"
   | "property_line"
   | "easement"
@@ -107,7 +111,7 @@ export const TOOL_GROUPS: {
     id: "landscaping",
     realm: "land",
     label: "Landscaping",
-    hint: "Florida palms, trees, shrubs, tropicals, planters, and flowering trellis",
+    hint: "Florida palms, trees, shrubs, tropicals, flower beds, planters, and flowering trellis",
     icon: (
       <Svg>
         <path d="M12 21V11" />
@@ -356,6 +360,46 @@ export const TOOL_META: {
     ),
   },
   {
+    id: "flowerbed_tilled_rect",
+    label: "Tilled bed rectangle",
+    icon: (
+      <Svg>
+        <rect x="4" y="7" width="16" height="10" rx="1" />
+        <path d="M6 10h12M6 13h12M6 16h12" />
+      </Svg>
+    ),
+  },
+  {
+    id: "flowerbed_tilled_poly",
+    label: "Tilled bed freeform",
+    icon: (
+      <Svg>
+        <path d="M5 16 8 6l8 2 4 9-9 2z" />
+        <path d="M7 12h9M8 15h8" />
+      </Svg>
+    ),
+  },
+  {
+    id: "flowerbed_raised_rect",
+    label: "Raised bed rectangle",
+    icon: (
+      <Svg>
+        <rect x="4" y="8" width="16" height="10" rx="1" />
+        <rect x="6.5" y="10.5" width="11" height="5" rx="0.5" />
+      </Svg>
+    ),
+  },
+  {
+    id: "flowerbed_raised_poly",
+    label: "Raised bed freeform",
+    icon: (
+      <Svg>
+        <path d="M4 17 7 7l9 1 5 8-8 3z" />
+        <path d="M7.5 15.5 9 10l6 0.6 3.2 5.2-6.2 2z" />
+      </Svg>
+    ),
+  },
+  {
     id: "grade_point",
     label: "Grade point",
     icon: (
@@ -529,6 +573,33 @@ export const PAD_EQUIP_TOOLS: {
   },
 ];
 
+export function isFlowerBedTool(tool: string): boolean {
+  return (
+    tool === "flowerbed_tilled_rect" ||
+    tool === "flowerbed_tilled_poly" ||
+    tool === "flowerbed_raised_rect" ||
+    tool === "flowerbed_raised_poly"
+  );
+}
+
+export function isFlowerBedRectTool(tool: string): boolean {
+  return tool === "flowerbed_tilled_rect" || tool === "flowerbed_raised_rect";
+}
+
+export function isFlowerBedPolyTool(tool: string): boolean {
+  return tool === "flowerbed_tilled_poly" || tool === "flowerbed_raised_poly";
+}
+
+export function flowerBedStyleForTool(tool: string): FlowerBedStyle | null {
+  if (tool === "flowerbed_tilled_rect" || tool === "flowerbed_tilled_poly") {
+    return "tilled";
+  }
+  if (tool === "flowerbed_raised_rect" || tool === "flowerbed_raised_poly") {
+    return "raised";
+  }
+  return null;
+}
+
 export function catalogIdForPadTool(tool: PadEquipToolId): string {
   return PAD_EQUIP_TOOLS.find((t) => t.id === tool)!.catalogItemId;
 }
@@ -546,6 +617,7 @@ export function toolGroupForTool(
   if (isPadEquipTool(tool)) return "pad";
   if (tool === "patio" || tool === "patio_rect" || tool === "grade_point")
     return "patio";
+  if (isFlowerBedTool(tool)) return "landscaping";
   if (tool === "property_line" || tool === "easement") return "site";
   if (tool === "cover_rect") return "cover";
   if (tool === "fence" || tool === "gate") return "fence";

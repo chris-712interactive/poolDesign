@@ -35,6 +35,7 @@ import {
   type SiteLine,
   type GradeSample,
   type PatioCover,
+  type FlowerBedRegion,
   type PlacedObject,
   type PlumbingRun,
   type PointMm,
@@ -166,6 +167,74 @@ export function drawPolygon(
       ctx.fill();
       ctx.stroke();
     }
+  }
+}
+
+export function drawFlowerBed(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  bed: FlowerBedRegion,
+  selected: boolean,
+  unitSystem: UnitSystem,
+) {
+  if (bed.outline.length < 2) return;
+  const raised = bed.style === "raised";
+  const stroke = raised ? "#6b4a28" : "#5a3d24";
+  const fill = raised ? "rgba(92, 58, 32, 0.42)" : "rgba(110, 72, 38, 0.38)";
+  drawPolygon(
+    ctx,
+    vp,
+    bed.outline,
+    selected,
+    stroke,
+    fill,
+    unitSystem,
+    selected,
+    selected,
+  );
+
+  const ring = flattenClosedOutline(bed.outline);
+  if (ring.length < 3) return;
+  ctx.save();
+  ctx.beginPath();
+  ring.forEach((p, i) => {
+    const c = worldToScreen(p, vp);
+    if (i === 0) ctx.moveTo(c.x, c.y);
+    else ctx.lineTo(c.x, c.y);
+  });
+  ctx.closePath();
+  ctx.clip();
+  const xs = ring.map((p) => worldToScreen(p, vp).x);
+  const ys = ring.map((p) => worldToScreen(p, vp).y);
+  const minX = Math.min(...xs) - 8;
+  const maxX = Math.max(...xs) + 8;
+  const minY = Math.min(...ys) - 8;
+  const maxY = Math.max(...ys) + 8;
+  ctx.strokeStyle = raised ? "rgba(62, 38, 18, 0.35)" : "rgba(72, 46, 24, 0.55)";
+  ctx.lineWidth = raised ? 1 : 1.25;
+  const step = raised ? 7 : 5;
+  for (let x = minX - (maxY - minY); x < maxX + (maxY - minY); x += step) {
+    ctx.beginPath();
+    ctx.moveTo(x, minY);
+    ctx.lineTo(x + (maxY - minY), maxY);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  if (raised) {
+    ctx.beginPath();
+    ring.forEach((p, i) => {
+      const c = worldToScreen(p, vp);
+      if (i === 0) ctx.moveTo(c.x, c.y);
+      else ctx.lineTo(c.x, c.y);
+    });
+    ctx.closePath();
+    ctx.strokeStyle = selected ? "#0f5c4a" : "#8a6234";
+    ctx.lineWidth = selected ? 5 : 4;
+    ctx.stroke();
+    ctx.strokeStyle = selected ? "#d8c4a0" : "#c4a574";
+    ctx.lineWidth = selected ? 2 : 1.5;
+    ctx.stroke();
   }
 }
 

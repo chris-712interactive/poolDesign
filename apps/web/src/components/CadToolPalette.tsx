@@ -6,6 +6,7 @@ import {
   TOOL_GROUPS,
   TOOL_REALMS,
   ToolTooltip,
+  isFlowerBedTool,
   isPadEquipTool,
   realmForGroup,
   toolGroupForTool,
@@ -176,6 +177,10 @@ export function CadToolPalette({
             ? coverKind === "roof"
               ? "Patio roof: side, then depth."
               : "Pergola: side, then depth."
+            : isFlowerBedTool(tool)
+              ? tool.includes("poly")
+                ? "Trace the bed. Hold Shift for 90°. Close near the start."
+                : "Click first corner of one side, then second, then depth."
             : toolHelp;
 
   return (
@@ -260,6 +265,51 @@ export function CadToolPalette({
 
                   {group.id === "landscaping" && (
                     <div className="cad-compact-list-landscaping">
+                      <strong className="cad-tool-subgroup-label">
+                        Flower beds
+                      </strong>
+                      <div className="cad-icon-toolbar cad-icon-toolbar-2">
+                        <button
+                          type="button"
+                          className={`tool-icon-btn ${tool === "flowerbed_tilled_rect" ? "active" : ""}`}
+                          title="Tilled bed rectangle"
+                          aria-label="Tilled bed rectangle"
+                          onClick={() => activateDraw("flowerbed_tilled_rect")}
+                        >
+                          {toolMeta("flowerbed_tilled_rect").icon}
+                          <ToolTooltip label="Tilled rectangle" />
+                        </button>
+                        <button
+                          type="button"
+                          className={`tool-icon-btn ${tool === "flowerbed_tilled_poly" ? "active" : ""}`}
+                          title="Tilled bed freeform"
+                          aria-label="Tilled bed freeform"
+                          onClick={() => activateDraw("flowerbed_tilled_poly")}
+                        >
+                          {toolMeta("flowerbed_tilled_poly").icon}
+                          <ToolTooltip label="Tilled freeform" />
+                        </button>
+                        <button
+                          type="button"
+                          className={`tool-icon-btn ${tool === "flowerbed_raised_rect" ? "active" : ""}`}
+                          title="Raised planter rectangle"
+                          aria-label="Raised planter rectangle"
+                          onClick={() => activateDraw("flowerbed_raised_rect")}
+                        >
+                          {toolMeta("flowerbed_raised_rect").icon}
+                          <ToolTooltip label="Raised rectangle" />
+                        </button>
+                        <button
+                          type="button"
+                          className={`tool-icon-btn ${tool === "flowerbed_raised_poly" ? "active" : ""}`}
+                          title="Raised planter freeform"
+                          aria-label="Raised planter freeform"
+                          onClick={() => activateDraw("flowerbed_raised_poly")}
+                        >
+                          {toolMeta("flowerbed_raised_poly").icon}
+                          <ToolTooltip label="Raised freeform" />
+                        </button>
+                      </div>
                       <strong className="cad-tool-subgroup-label">
                         Yard structures
                       </strong>

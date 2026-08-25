@@ -82,6 +82,11 @@ import {
   getFloridaPlant,
   plantDescription,
   clampTrellisHeightMm,
+  clampFlowerBedHeightMm,
+  flowerBedHeightMm,
+  flowerBedWallFinishLabel,
+  FLOWER_BED_WALL_FINISHES,
+  resolveFlowerBedWallFinish,
   getPlaceableItem,
   isBubblerId,
   isDiningSetId,
@@ -204,6 +209,9 @@ import {
   type PatioCover,
   type PatioCoverKind,
   type PatioRegion,
+  type FlowerBedRegion,
+  type FlowerBedStyle,
+  type FlowerBedWallFinish,
   type PlaceableItem,
   type PlacedObject,
   type PointMm,
@@ -233,6 +241,10 @@ import { PatioFinishPicker } from "@/components/PatioFinishPicker";
 import { WaterlineTilePicker } from "@/components/WaterlineTilePicker";
 import {
   catalogIdForPadTool,
+  flowerBedStyleForTool,
+  isFlowerBedPolyTool,
+  isFlowerBedRectTool,
+  isFlowerBedTool,
   isPadEquipTool,
   type ToolId,
 } from "@/components/CadToolIcons";
@@ -259,6 +271,7 @@ import {
   drawGrid,
   drawMeasure,
   drawPatioCover,
+  drawFlowerBed,
   drawPlacedObject,
   drawPolygon,
   drawPatioGradeEdges,
@@ -282,6 +295,7 @@ type Tool = ToolId;
 type Selection =
   | { kind: "pool"; id: string }
   | { kind: "patio"; id: string }
+  | { kind: "flowerBed"; id: string }
   | { kind: "building"; id: string }
   | { kind: "opening"; buildingId: string; id: string }
   | { kind: "cover"; id: string }
@@ -313,6 +327,7 @@ type DragState =
       kind:
         | "pool"
         | "patio"
+        | "flowerBed"
         | "building"
         | "cover"
         | "run"
@@ -324,7 +339,7 @@ type DragState =
     }
   | {
       mode: "edge";
-      kind: "pool" | "patio" | "building" | "cover" | "feature";
+      kind: "pool" | "patio" | "flowerBed" | "building" | "cover" | "feature";
       id: string;
       edgeIndex: number;
       nx: number;
@@ -333,7 +348,7 @@ type DragState =
     }
   | {
       mode: "bulge";
-      kind: "pool" | "patio" | "building" | "cover" | "feature";
+      kind: "pool" | "patio" | "flowerBed" | "building" | "cover" | "feature";
       id: string;
       edgeIndex: number;
     }
@@ -347,6 +362,7 @@ type DragState =
       kind:
         | "pool"
         | "patio"
+        | "flowerBed"
         | "building"
         | "cover"
         | "run"
@@ -431,7 +447,8 @@ function isRectDrawTool(tool: Tool): boolean {
     tool === "pool_rect" ||
     tool === "house_rect" ||
     tool === "cover_rect" ||
-    tool === "patio_rect"
+    tool === "patio_rect" ||
+    isFlowerBedRectTool(tool)
   );
 }
 
@@ -440,6 +457,7 @@ function isClosedOutlineTool(tool: Tool): boolean {
     tool === "pool_poly" ||
     tool === "patio" ||
     tool === "house_poly" ||
+    isFlowerBedPolyTool(tool) ||
     tool === "property_line" ||
     tool === "easement"
   );
@@ -509,6 +527,7 @@ type DesignClipboard = {
     | { kind: "feature"; feature: PoolFeature }
     | { kind: "pool"; body: PoolBody }
     | { kind: "patio"; patio: PatioRegion }
+    | { kind: "flowerBed"; bed: FlowerBedRegion }
     | { kind: "building"; building: Building }
     | { kind: "cover"; cover: PatioCover }
     | { kind: "coverSupport"; coverId: string; support: CoverSupport }
@@ -562,6 +581,8 @@ function selectionOnVisibleLayer(
       return anyLayerVisible(design, "pool", "pools");
     case "patio":
       return anyLayerVisible(design, "patio", "deck");
+    case "flowerBed":
+      return anyLayerVisible(design, "furniture");
     case "building":
     case "opening":
       return anyLayerVisible(design, "house", "building");
@@ -760,6 +781,13 @@ export function CadWorkspace({
         ? design.patios.find((p) => p.id === selection.id) ?? null
         : null,
     [design.patios, selection],
+  );
+  const selectedFlowerBed = useMemo(
+    () =>
+      selection?.kind === "flowerBed"
+        ? (design.flowerBeds ?? []).find((b) => b.id === selection.id) ?? null
+        : null,
+    [design.flowerBeds, selection],
   );
   const selectedBuilding = useMemo(
     () =>
@@ -1131,6 +1159,18 @@ export function CadWorkspace({
       }
     }
 
+    if (anyLayerVisible(design, "furniture")) {
+      for (const bed of design.flowerBeds ?? []) {
+        drawFlowerBed(
+          ctx,
+          vp,
+          bed,
+          selection?.kind === "flowerBed" && selection.id === bed.id,
+          unitSystem,
+        );
+      }
+    }
+
     for (const sample of design.gradeSamples ?? []) {
       const selected = selectedGradeIds(selection).includes(sample.id);
       drawGradeSample(
@@ -1355,6 +1395,10 @@ export function CadWorkspace({
               : "#8a6a3a"
             : tool === "patio_rect"
               ? "#8a6a2f"
+            : isFlowerBedRectTool(tool)
+              ? flowerBedStyleForTool(tool) === "raised"
+                ? "#6b4a28"
+                : "#5a3d24"
             : waterKind === "spa"
               ? "#1a6b8a"
               : "#146353";
@@ -1367,6 +1411,8 @@ export function CadWorkspace({
               : "rgba(138,106,58,0.18)"
             : tool === "patio_rect"
               ? "rgba(196,165,116,0.28)"
+            : isFlowerBedRectTool(tool)
+              ? "rgba(110,72,38,0.38)"
             : waterKind === "spa"
               ? "rgba(26,107,138,0.15)"
               : "rgba(31,138,112,0.15)";
@@ -1398,6 +1444,8 @@ export function CadWorkspace({
         previewPoint,
         tool === "patio"
           ? "#8a6a2f"
+          : isFlowerBedPolyTool(tool)
+            ? "#5a3d24"
           : tool === "house_poly"
             ? "#7a6550"
             : tool === "roof_ridge"
@@ -1414,7 +1462,7 @@ export function CadWorkspace({
           tool !== "property_line" &&
           tool !== "easement" &&
           tool !== "roof_ridge",
-        tool === "pool_poly" || tool === "patio" || tool === "house_poly",
+        tool === "pool_poly" || tool === "patio" || tool === "house_poly" || isFlowerBedPolyTool(tool),
       );
       if (
         draftPoints.length > 0 &&
@@ -1874,6 +1922,28 @@ export function CadWorkspace({
     clearDraft();
   }
 
+  function commitFlowerBed(outline: PointMm[], style: FlowerBedStyle) {
+    const beds = design.flowerBeds ?? [];
+    const raised = style === "raised";
+    const bed: FlowerBedRegion = {
+      id: newId("bed"),
+      name: raised
+        ? `Raised bed ${beds.filter((b) => b.style === "raised").length + 1}`
+        : `Flower bed ${beds.filter((b) => b.style !== "raised").length + 1}`,
+      outline: outline.map((p) => ({ ...p })),
+      style,
+      heightMm: raised ? clampFlowerBedHeightMm(undefined) : undefined,
+      wallFinish: raised ? resolveFlowerBedWallFinish(undefined) : undefined,
+    };
+    const base = withLayersVisible(design, "furniture");
+    commitDesign({
+      ...base,
+      flowerBeds: [...(base.flowerBeds ?? []), bed],
+    });
+    setSelection({ kind: "flowerBed", id: bed.id });
+    clearDraft();
+  }
+
   function buildingForRidge(point: PointMm): Building | undefined {
     const buildings = design.buildings ?? [];
     if (selection?.kind === "building") {
@@ -1919,13 +1989,15 @@ export function CadWorkspace({
     clearDraft();
   }
 
-  function finishPolygon(kind: "pool" | "patio" | "house") {
+  function finishPolygon(kind: "pool" | "patio" | "house" | "flowerBed") {
     const outline = outlineFromDraft();
     if (!outline) return;
     if (kind === "pool") {
       commitWaterBody(outline);
     } else if (kind === "house") {
       commitBuilding(outline);
+    } else if (kind === "flowerBed") {
+      commitFlowerBed(outline, flowerBedStyleForTool(tool) ?? "tilled");
     } else {
       commitPatio(outline);
     }
@@ -2042,6 +2114,7 @@ export function CadWorkspace({
     else if (tool === "easement") finishSiteLine("easement", false);
     else if (tool === "pool_poly") finishPolygon("pool");
     else if (tool === "patio") finishPolygon("patio");
+    else if (isFlowerBedPolyTool(tool)) finishPolygon("flowerBed");
     else if (tool === "house_poly") finishPolygon("house");
     else if (tool === "roof_ridge" && draftPoints.length >= 2) {
       commitRoofRidge(draftPoints[0], draftPoints[draftPoints.length - 1]);
@@ -2088,6 +2161,9 @@ export function CadWorkspace({
       if (tool === "house_rect") commitBuilding(outline);
       else if (tool === "cover_rect") commitPatioCover(outline);
       else if (tool === "patio_rect") commitPatio(outline);
+      else if (isFlowerBedRectTool(tool)) {
+        commitFlowerBed(outline, flowerBedStyleForTool(tool) ?? "tilled");
+      }
       else commitWaterBody(outline);
       return;
     }
@@ -2109,6 +2185,7 @@ export function CadWorkspace({
         kind:
           | "pool"
           | "patio"
+          | "flowerBed"
           | "building"
           | "cover"
           | "run"
@@ -2124,6 +2201,7 @@ export function CadWorkspace({
       kind:
         | "pool"
         | "patio"
+        | "flowerBed"
         | "building"
         | "cover"
         | "run"
@@ -2144,6 +2222,14 @@ export function CadWorkspace({
     }
     if (selection?.kind === "patio" && selectedPatio) {
       const hit = check("patio", selectedPatio.id, selectedPatio.outline);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "flowerBed" && selectedFlowerBed) {
+      const hit = check(
+        "flowerBed",
+        selectedFlowerBed.id,
+        selectedFlowerBed.outline,
+      );
       if (hit) return hit;
     }
     if (selection?.kind === "building" && selectedBuilding) {
@@ -2200,7 +2286,7 @@ export function CadWorkspace({
     point: PointMm,
   ):
     | {
-        kind: "pool" | "patio" | "building" | "cover" | "feature";
+        kind: "pool" | "patio" | "flowerBed" | "building" | "cover" | "feature";
         id: string;
         edgeIndex: number;
         nx: number;
@@ -2210,13 +2296,13 @@ export function CadWorkspace({
     const distTol = EDGE_HIT_PX / vp.scale;
     const endTol = VERTEX_HIT_PX / vp.scale;
     const check = (
-      kind: "pool" | "patio" | "building" | "cover" | "feature",
+      kind: "pool" | "patio" | "flowerBed" | "building" | "cover" | "feature",
       id: string,
       pts: PointMm[],
     ) => {
       if (pts.length < 2) return null;
       let best: {
-        kind: "pool" | "patio" | "building" | "cover" | "feature";
+        kind: "pool" | "patio" | "flowerBed" | "building" | "cover" | "feature";
         id: string;
         edgeIndex: number;
         nx: number;
@@ -2274,6 +2360,14 @@ export function CadWorkspace({
       const hit = check("patio", selectedPatio.id, selectedPatio.outline);
       if (hit) return hit;
     }
+    if (selection?.kind === "flowerBed" && selectedFlowerBed) {
+      const hit = check(
+        "flowerBed",
+        selectedFlowerBed.id,
+        selectedFlowerBed.outline,
+      );
+      if (hit) return hit;
+    }
     if (selection?.kind === "building" && selectedBuilding) {
       const hit = check(
         "building",
@@ -2297,7 +2391,7 @@ export function CadWorkspace({
     point: PointMm,
   ):
     | {
-        kind: "pool" | "patio" | "building" | "cover" | "feature";
+        kind: "pool" | "patio" | "flowerBed" | "building" | "cover" | "feature";
         id: string;
         edgeIndex: number;
       }
@@ -2305,13 +2399,13 @@ export function CadWorkspace({
     const tol = BULGE_HIT_PX / vp.scale;
     const idle = 14 / vp.scale;
     const check = (
-      kind: "pool" | "patio" | "building" | "cover" | "feature",
+      kind: "pool" | "patio" | "flowerBed" | "building" | "cover" | "feature",
       id: string,
       pts: PointMm[],
     ) => {
       if (pts.length < 2) return null;
       let best: {
-        kind: "pool" | "patio" | "building" | "cover" | "feature";
+        kind: "pool" | "patio" | "flowerBed" | "building" | "cover" | "feature";
         id: string;
         edgeIndex: number;
         dist: number;
@@ -2337,6 +2431,14 @@ export function CadWorkspace({
     }
     if (selection?.kind === "patio" && selectedPatio) {
       const hit = check("patio", selectedPatio.id, selectedPatio.outline);
+      if (hit) return hit;
+    }
+    if (selection?.kind === "flowerBed" && selectedFlowerBed) {
+      const hit = check(
+        "flowerBed",
+        selectedFlowerBed.id,
+        selectedFlowerBed.outline,
+      );
       if (hit) return hit;
     }
     if (selection?.kind === "building" && selectedBuilding) {
@@ -2624,6 +2726,14 @@ export function CadWorkspace({
         }
       }
     }
+    if (anyLayerVisible(design, "furniture")) {
+      for (let i = (design.flowerBeds ?? []).length - 1; i >= 0; i--) {
+        const bed = design.flowerBeds![i];
+        if (pointInPolygon(point, bed.outline)) {
+          return { kind: "flowerBed", id: bed.id };
+        }
+      }
+    }
     if (anyLayerVisible(design, "patio", "deck")) {
       for (let i = design.patios.length - 1; i >= 0; i--) {
         if (pointInPolygon(point, design.patios[i].outline)) {
@@ -2658,6 +2768,11 @@ export function CadWorkspace({
         patioCovers: (d.patioCovers ?? []).map((c) =>
           c.patioId === sel.id ? { ...c, patioId: undefined } : c,
         ),
+      });
+    } else if (sel.kind === "flowerBed") {
+      commitDesign({
+        ...d,
+        flowerBeds: (d.flowerBeds ?? []).filter((b) => b.id !== sel.id),
       });
     } else if (sel.kind === "building") {
       commitDesign({
@@ -2784,6 +2899,13 @@ export function CadWorkspace({
       clipboardRef.current = {
         pasteCount: 0,
         payload: { kind: "patio", patio: structuredClone(patio) },
+      };
+    } else if (sel.kind === "flowerBed") {
+      const bed = (d.flowerBeds ?? []).find((b) => b.id === sel.id);
+      if (!bed) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "flowerBed", bed: structuredClone(bed) },
       };
     } else if (sel.kind === "building") {
       const building = (d.buildings ?? []).find((b) => b.id === sel.id);
@@ -2922,6 +3044,15 @@ export function CadWorkspace({
       };
       next = { ...d, patios: [...d.patios, patio] };
       nextSel = { kind: "patio", id: patio.id };
+    } else if (payload.kind === "flowerBed") {
+      const bed: FlowerBedRegion = {
+        ...payload.bed,
+        id: newId("bed"),
+        name: copyName(payload.bed.name),
+        outline: offsetPointsMm(payload.bed.outline, n),
+      };
+      next = { ...d, flowerBeds: [...(d.flowerBeds ?? []), bed] };
+      nextSel = { kind: "flowerBed", id: bed.id };
     } else if (payload.kind === "building") {
       const building: Building = {
         ...payload.building,
@@ -3230,6 +3361,7 @@ export function CadWorkspace({
         hit &&
         (hit.kind === "pool" ||
           hit.kind === "patio" ||
+          hit.kind === "flowerBed" ||
           hit.kind === "building" ||
           hit.kind === "cover" ||
           hit.kind === "run" ||
@@ -3408,6 +3540,9 @@ export function CadWorkspace({
       if (tool === "house_rect") commitBuilding(outline);
       else if (tool === "cover_rect") commitPatioCover(outline);
       else if (tool === "patio_rect") commitPatio(outline);
+      else if (isFlowerBedRectTool(tool)) {
+        commitFlowerBed(outline, flowerBedStyleForTool(tool) ?? "tilled");
+      }
       else commitWaterBody(outline);
       return;
     }
@@ -3415,6 +3550,7 @@ export function CadWorkspace({
     if (
       tool === "pool_poly" ||
       tool === "patio" ||
+      isFlowerBedPolyTool(tool) ||
       tool === "house_poly" ||
       tool === "plumbing" ||
       tool === "fence" ||
@@ -3436,7 +3572,13 @@ export function CadWorkspace({
         else if (tool === "easement") finishSiteLine("easement", true);
         else if (draftPoints.length >= 3)
           finishPolygon(
-            tool === "patio" ? "patio" : tool === "house_poly" ? "house" : "pool",
+            isFlowerBedPolyTool(tool)
+              ? "flowerBed"
+              : tool === "patio"
+                ? "patio"
+                : tool === "house_poly"
+                  ? "house"
+                  : "pool",
           );
         return;
       }
@@ -3456,11 +3598,18 @@ export function CadWorkspace({
         if (
           (tool === "pool_poly" ||
             tool === "patio" ||
+            isFlowerBedPolyTool(tool) ||
             tool === "house_poly") &&
           draftPoints.length >= 3
         ) {
           finishPolygon(
-            tool === "patio" ? "patio" : tool === "house_poly" ? "house" : "pool",
+            isFlowerBedPolyTool(tool)
+              ? "flowerBed"
+              : tool === "patio"
+                ? "patio"
+                : tool === "house_poly"
+                  ? "house"
+                  : "pool",
           );
           return;
         }
@@ -3685,6 +3834,10 @@ export function CadWorkspace({
             ? designRef.current.poolBodies.find((p) => p.id === drag.id)?.outline
             : drag.kind === "patio"
               ? designRef.current.patios.find((p) => p.id === drag.id)?.outline
+              : drag.kind === "flowerBed"
+                ? (designRef.current.flowerBeds ?? []).find(
+                    (b) => b.id === drag.id,
+                  )?.outline
               : drag.kind === "building"
                 ? (designRef.current.buildings ?? []).find(
                     (b) => b.id === drag.id,
@@ -3745,6 +3898,23 @@ export function CadWorkspace({
                     ),
                   }
                 : p,
+            ),
+          };
+        }
+        if (drag.kind === "flowerBed") {
+          return {
+            ...d,
+            flowerBeds: (d.flowerBeds ?? []).map((b) =>
+              b.id === drag.id
+                ? {
+                    ...b,
+                    outline: b.outline.map((pt, i) =>
+                      i === drag.index
+                        ? { ...pt, x: snapped.x, y: snapped.y }
+                        : pt,
+                    ),
+                  }
+                : b,
             ),
           };
         }
@@ -3858,6 +4028,9 @@ export function CadWorkspace({
           ? designRef.current.poolBodies.find((p) => p.id === drag.id)?.outline
           : drag.kind === "patio"
             ? designRef.current.patios.find((p) => p.id === drag.id)?.outline
+            : drag.kind === "flowerBed"
+              ? (designRef.current.flowerBeds ?? []).find((b) => b.id === drag.id)
+                  ?.outline
             : drag.kind === "building"
               ? (designRef.current.buildings ?? []).find((b) => b.id === drag.id)
                   ?.outline
@@ -3895,6 +4068,14 @@ export function CadWorkspace({
             ),
           };
         }
+        if (drag.kind === "flowerBed") {
+          return {
+            ...d,
+            flowerBeds: (d.flowerBeds ?? []).map((b) =>
+              b.id === drag.id ? { ...b, outline: nextPts } : b,
+            ),
+          };
+        }
         if (drag.kind === "building") {
           return {
             ...d,
@@ -3928,6 +4109,9 @@ export function CadWorkspace({
           ? originDesign.poolBodies.find((p) => p.id === drag.id)?.outline
           : drag.kind === "patio"
             ? originDesign.patios.find((p) => p.id === drag.id)?.outline
+            : drag.kind === "flowerBed"
+              ? (originDesign.flowerBeds ?? []).find((b) => b.id === drag.id)
+                  ?.outline
             : drag.kind === "building"
               ? (originDesign.buildings ?? []).find((b) => b.id === drag.id)
                   ?.outline
@@ -3958,6 +4142,14 @@ export function CadWorkspace({
             ...d,
             patios: d.patios.map((p) =>
               p.id === drag.id ? { ...p, outline: nextPts } : p,
+            ),
+          };
+        }
+        if (drag.kind === "flowerBed") {
+          return {
+            ...d,
+            flowerBeds: (d.flowerBeds ?? []).map((b) =>
+              b.id === drag.id ? { ...b, outline: nextPts } : b,
             ),
           };
         }
@@ -4362,6 +4554,7 @@ export function CadWorkspace({
         tool === "pool_poly" ||
         tool === "patio" ||
         tool === "patio_rect" ||
+        isFlowerBedTool(tool) ||
         tool === "pool_rect" ||
         tool === "house_poly" ||
         tool === "house_rect" ||
@@ -4436,6 +4629,14 @@ export function CadWorkspace({
                       : draftPoints.length === 1
                         ? "Second corner of this side (Shift = 90°). Type length + Enter for exact width."
                         : "Click to set patio depth (or type length + Enter)."
+                  : isFlowerBedRectTool(tool)
+                    ? draftPoints.length === 0
+                      ? `${flowerBedStyleForTool(tool) === "raised" ? "Raised planter" : "Tilled bed"}: click first corner of one side, then second, then depth.`
+                      : draftPoints.length === 1
+                        ? "Second corner of this side (Shift = 90°). Type length + Enter for exact width."
+                        : "Click to set depth (or type length + Enter)."
+                  : isFlowerBedPolyTool(tool)
+                    ? `Trace the ${flowerBedStyleForTool(tool) === "raised" ? "raised planter" : "tilled bed"}. Hold Shift for 90°. Close near the start.`
                   : tool === "grade_point"
                     ? "Click to place a grade point. Set drop/rise from house FFE in Properties."
                   : tool === "fence"
@@ -4628,6 +4829,7 @@ export function CadWorkspace({
                         tool === "easement" ||
                         tool === "pool_poly" ||
                         tool === "patio" ||
+                        isFlowerBedPolyTool(tool) ||
                         tool === "house_poly"
                       ) {
                         finishDraft();
@@ -4784,6 +4986,7 @@ export function CadWorkspace({
                   showFinishDraft={
                     tool === "pool_poly" ||
                     tool === "patio" ||
+                    isFlowerBedPolyTool(tool) ||
                     tool === "house_poly" ||
                     tool === "plumbing" ||
                     tool === "fence" ||
@@ -5285,6 +5488,142 @@ export function CadWorkspace({
                         })
                       }
                     />
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+                {selectedFlowerBed && (
+                  <div className="stack">
+                    <strong>{selectedFlowerBed.name}</strong>
+                    <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>
+                      {selectedFlowerBed.style === "raised"
+                        ? "Raised planter with a wall and soil fill. Place plants on top."
+                        : "At-grade tilled earth. Place plants in the bed."}
+                    </p>
+                    <div className="field">
+                      <label htmlFor="flowerbed-style">Bed type</label>
+                      <select
+                        id="flowerbed-style"
+                        value={selectedFlowerBed.style}
+                        onChange={(e) => {
+                          const style = e.target.value as FlowerBedStyle;
+                          commitDesign({
+                            ...design,
+                            flowerBeds: (design.flowerBeds ?? []).map((b) =>
+                              b.id === selectedFlowerBed.id
+                                ? {
+                                    ...b,
+                                    style,
+                                    heightMm:
+                                      style === "raised"
+                                        ? clampFlowerBedHeightMm(b.heightMm)
+                                        : undefined,
+                                    wallFinish:
+                                      style === "raised"
+                                        ? resolveFlowerBedWallFinish(
+                                            b.wallFinish,
+                                          )
+                                        : undefined,
+                                  }
+                                : b,
+                            ),
+                          });
+                        }}
+                      >
+                        <option value="tilled">Tilled earth (at grade)</option>
+                        <option value="raised">Raised planter bed</option>
+                      </select>
+                    </div>
+                    <RectDimensionFields
+                      key={`bed-rect-${selectedFlowerBed.id}-${selectedFlowerBed.outline.map((p) => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join("|")}`}
+                      outline={selectedFlowerBed.outline}
+                      unitSystem={unitSystem}
+                      onResize={(widthMm, lengthMm) =>
+                        commitDesign({
+                          ...design,
+                          flowerBeds: (design.flowerBeds ?? []).map((b) =>
+                            b.id === selectedFlowerBed.id
+                              ? {
+                                  ...b,
+                                  outline: resizeRectangleOutline(
+                                    b.outline,
+                                    widthMm,
+                                    lengthMm,
+                                  ),
+                                }
+                              : b,
+                          ),
+                        })
+                      }
+                    />
+                    {selectedFlowerBed.style === "raised" && (
+                      <>
+                        <div className="field">
+                          <label htmlFor="flowerbed-height">Wall height</label>
+                          <input
+                            id="flowerbed-height"
+                            key={`bed-h-${selectedFlowerBed.id}-${flowerBedHeightMm(selectedFlowerBed)}`}
+                            defaultValue={formatLength(
+                              flowerBedHeightMm(selectedFlowerBed),
+                              unitSystem,
+                            )}
+                            placeholder={
+                              unitSystem === "imperial" ? "e.g. 18\"" : "e.g. 0.45m"
+                            }
+                            onBlur={(e) => {
+                              const mm = parseLengthToMm(
+                                e.target.value,
+                                unitSystem,
+                              );
+                              if (mm == null || mm <= 0) return;
+                              commitDesign({
+                                ...design,
+                                flowerBeds: (design.flowerBeds ?? []).map((b) =>
+                                  b.id === selectedFlowerBed.id
+                                    ? {
+                                        ...b,
+                                        heightMm: clampFlowerBedHeightMm(mm),
+                                      }
+                                    : b,
+                                ),
+                              });
+                            }}
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="flowerbed-wall">Wall finish</label>
+                          <select
+                            id="flowerbed-wall"
+                            value={resolveFlowerBedWallFinish(
+                              selectedFlowerBed.wallFinish,
+                            )}
+                            onChange={(e) => {
+                              const wallFinish = e.target
+                                .value as FlowerBedWallFinish;
+                              commitDesign({
+                                ...design,
+                                flowerBeds: (design.flowerBeds ?? []).map((b) =>
+                                  b.id === selectedFlowerBed.id
+                                    ? { ...b, wallFinish }
+                                    : b,
+                                ),
+                              });
+                            }}
+                          >
+                            {FLOWER_BED_WALL_FINISHES.map((f) => (
+                              <option key={f} value={f}>
+                                {flowerBedWallFinishLabel(f)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </>
+                    )}
                     <button
                       type="button"
                       className="btn danger"
@@ -9141,6 +9480,7 @@ function translateDesign(
   kind:
     | "pool"
     | "patio"
+    | "flowerBed"
     | "building"
     | "cover"
     | "run"
@@ -9182,6 +9522,14 @@ function translateDesign(
       ...d,
       patios: d.patios.map((p) =>
         p.id === id ? { ...p, outline: p.outline.map(shift) } : p,
+      ),
+    };
+  }
+  if (kind === "flowerBed") {
+    return {
+      ...d,
+      flowerBeds: (d.flowerBeds ?? []).map((b) =>
+        b.id === id ? { ...b, outline: b.outline.map(shift) } : b,
       ),
     };
   }

@@ -232,6 +232,86 @@ export type PatioRegion = {
   edgeGrades?: PatioEdgeGradeOverride[];
 };
 
+/** In-grade tilled planting area vs a framed raised planter. */
+export const FLOWER_BED_STYLES = ["tilled", "raised"] as const;
+export type FlowerBedStyle = (typeof FLOWER_BED_STYLES)[number];
+
+export const FLOWER_BED_WALL_FINISHES = ["timber", "block", "stone"] as const;
+export type FlowerBedWallFinish = (typeof FLOWER_BED_WALL_FINISHES)[number];
+
+/** Default raised-bed wall height: 18″. */
+export const DEFAULT_FLOWER_BED_HEIGHT_MM = 457.2;
+export const MIN_FLOWER_BED_HEIGHT_MM = 152.4;
+export const MAX_FLOWER_BED_HEIGHT_MM = 914.4;
+export const DEFAULT_FLOWER_BED_WALL_FINISH: FlowerBedWallFinish = "timber";
+
+export type FlowerBedRegion = {
+  id: string;
+  name: string;
+  outline: PointMm[];
+  style: FlowerBedStyle;
+  /** Raised wall height above grade (mm). Ignored for tilled beds. */
+  heightMm?: number;
+  wallFinish?: FlowerBedWallFinish;
+};
+
+export function isFlowerBedStyle(value: unknown): value is FlowerBedStyle {
+  return (
+    typeof value === "string" &&
+    (FLOWER_BED_STYLES as readonly string[]).includes(value)
+  );
+}
+
+export function isFlowerBedWallFinish(
+  value: unknown,
+): value is FlowerBedWallFinish {
+  return (
+    typeof value === "string" &&
+    (FLOWER_BED_WALL_FINISHES as readonly string[]).includes(value)
+  );
+}
+
+export function flowerBedStyleLabel(style: FlowerBedStyle): string {
+  return style === "raised" ? "Raised planter bed" : "Tilled flower bed";
+}
+
+export function flowerBedWallFinishLabel(finish: FlowerBedWallFinish): string {
+  if (finish === "block") return "Concrete block";
+  if (finish === "stone") return "Stacked stone";
+  return "Landscape timber";
+}
+
+export function resolveFlowerBedWallFinish(
+  finish: string | undefined,
+): FlowerBedWallFinish {
+  return isFlowerBedWallFinish(finish)
+    ? finish
+    : DEFAULT_FLOWER_BED_WALL_FINISH;
+}
+
+/** Landscape timber ~5½″, CMU 8″, stacked stone ~7″. */
+export function flowerBedWallThicknessMm(finish: FlowerBedWallFinish): number {
+  if (finish === "block") return 203.2;
+  if (finish === "stone") return 177.8;
+  return 139.7;
+}
+
+export function clampFlowerBedHeightMm(heightMm: number | undefined): number {
+  const n =
+    typeof heightMm === "number" && Number.isFinite(heightMm)
+      ? heightMm
+      : DEFAULT_FLOWER_BED_HEIGHT_MM;
+  return Math.min(
+    MAX_FLOWER_BED_HEIGHT_MM,
+    Math.max(MIN_FLOWER_BED_HEIGHT_MM, n),
+  );
+}
+
+export function flowerBedHeightMm(bed: FlowerBedRegion): number {
+  if (bed.style !== "raised") return 0;
+  return clampFlowerBedHeightMm(bed.heightMm);
+}
+
 /**
  * Spot elevation on the property relative to house FFE (patio top datum).
  * `dropMm > 0` = existing grade below FFE; `dropMm < 0` = rise above FFE.
@@ -733,6 +813,8 @@ export type DesignDocument = {
   layers: { id: string; name: string; visible: boolean }[];
   poolBodies: PoolBody[];
   patios: PatioRegion[];
+  /** Tilled earth and raised planter beds (landscaping, not billed). */
+  flowerBeds?: FlowerBedRegion[];
   buildings: Building[];
   patioCovers: PatioCover[];
   objects: PlacedObject[];
@@ -808,6 +890,7 @@ export function emptyDesignDocument(
     })),
     poolBodies: [],
     patios: [],
+    flowerBeds: [],
     buildings: [],
     patioCovers: [],
     objects: [],

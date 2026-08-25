@@ -120,6 +120,7 @@ export function designBoundsMm(design: DesignDocument): DesignBoundsMm {
 
   for (const b of design.buildings ?? []) include(b.outline);
   for (const p of design.patios ?? []) include(p.outline);
+  for (const b of design.flowerBeds ?? []) include(b.outline);
   for (const c of design.patioCovers ?? []) include(c.outline);
   for (const p of design.poolBodies ?? []) include(p.outline);
   for (const f of design.features ?? []) include(f.outline);

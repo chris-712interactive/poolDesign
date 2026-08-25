@@ -15,6 +15,9 @@ import {
   depthTAtPlanPoint,
   designBoundsMm,
   existingGradeDropMm,
+  flowerBedHeightMm,
+  flowerBedWallThicknessMm,
+  resolveFlowerBedWallFinish,
   distToPolygonBoundaryMm,
   featureDepthMm,
   flattenClosedOutline,
@@ -82,6 +85,8 @@ import {
   type BuildingOpeningKind,
   type DepthTransition,
   type DesignDocument,
+  type FlowerBedRegion,
+  type FlowerBedWallFinish,
   type PatioCover,
   type PointMm,
   gateOutwardNormal,
@@ -106,6 +111,7 @@ import {
 export type SceneSelection =
   | { kind: "pool"; id: string }
   | { kind: "patio"; id: string }
+  | { kind: "flowerBed"; id: string }
   | { kind: "building"; id: string }
   | { kind: "opening"; buildingId: string; id: string }
   | { kind: "cover"; id: string }
@@ -143,6 +149,8 @@ export type SceneMaterialKey =
   | "sectionWater"
   | "fill"
   | "retaining"
+  | "flowerBedSoil"
+  | "flowerBedWall"
   | "fence"
   | "gate"
   | "gateSteel"
@@ -177,6 +185,10 @@ export type ExtrudeDescriptor = {
   opacity?: number;
   /** Patio finish catalog id (when material === "patio"). */
   patioFinishId?: string;
+  /** Tilled furrows vs bark mulch (when material === "flowerBedSoil"). */
+  flowerBedSoilKind?: "tilled" | "mulch";
+  /** Raised-bed wall finish (when material === "flowerBedWall"). */
+  flowerBedWallFinish?: FlowerBedWallFinish;
   /**
    * Shallow water overlay (sunshelf): use thin transmission so ~9″ of water
    * reads lighter than the deep end — not the deep-basin thickness model.
@@ -526,6 +538,33 @@ function anyLayerVisible(design: DesignDocument, ...ids: string[]): boolean {
   const present = ids.filter((id) => design.layers.some((l) => l.id === id));
   if (present.length === 0) return true;
   return present.some((id) => layerVisible(design, id));
+}
+
+function flowerBedGradeY(
+  outline: PointMm[],
+  patios: { outline: PointMm[] }[],
+  gradeSamples: Parameters<typeof existingGradeDropMm>[1],
+): number {
+  const bb = outlineBounds(outline);
+  const center = { x: bb.cx, y: bb.cy };
+  for (const patio of patios) {
+    if (patio.outline.length >= 3 && pointInPolygon(center, patio.outline)) {
+      return mmToMeters(PATIO_SLAB_THICKNESS_MM);
+    }
+  }
+  return -mmToMeters(existingGradeDropMm(center, gradeSamples));
+}
+
+function flowerBedSoilTopY(
+  bed: FlowerBedRegion,
+  patios: { outline: PointMm[] }[],
+  gradeSamples: Parameters<typeof existingGradeDropMm>[1],
+): number {
+  const gradeY = flowerBedGradeY(bed.outline, patios, gradeSamples);
+  if (bed.style === "raised") {
+    return gradeY + mmToMeters(flowerBedHeightMm(bed)) - 0.05;
+  }
+  return gradeY + 0.08;
 }
 
 function closeOutline(outline: PointMm[]): PointMm[] {
@@ -2432,6 +2471,24 @@ export function selectionReadouts(
     return labels;
   }
 
+  if (selection.kind === "flowerBed") {
+    const bed = (design.flowerBeds ?? []).find((b) => b.id === selection.id);
+    if (!bed || bed.outline.length < 3) return labels;
+    const bb = outlineBounds(bed.outline);
+    const center = planToWorldXZ({ x: bb.cx, y: bb.cy });
+    const frame = rectangleFrame(bed.outline);
+    const w = frame?.widthMm ?? bb.width;
+    const len = frame?.lengthMm ?? bb.height;
+    const kind = bed.style === "raised" ? "Raised bed" : "Tilled bed";
+    labels.push({
+      kind: "label",
+      id: `lbl_bed_${bed.id}`,
+      text: `${kind} ${formatLength(w, unit)} × ${formatLength(len, unit)}`,
+      position: { x: center.x, y: 0.35, z: center.z },
+    });
+    return labels;
+  }
+
   if (selection.kind === "feature") {
     const f = (design.features ?? []).find((x) => x.id === selection.id);
     if (!f || f.outline.length < 3) return labels;
@@ -2690,8 +2747,13 @@ export function buildSceneModel(
   const patioGrassHoles = patioClusters
     .map((c) => ringPoints(c.outline))
     .filter((h) => h.length >= 3 && isAxisAlignedRect(h, 80));
+  const flowerBedGrassHoles = anyLayerVisible(design, "furniture")
+    ? (design.flowerBeds ?? [])
+        .map((b) => ringPoints(b.outline))
+        .filter((h) => h.length >= 3 && isAxisAlignedRect(h, 80))
+    : [];
   const groundHoles = deckPunchHoles(
-    [...poolPitHoles, ...patioGrassHoles],
+    [...poolPitHoles, ...patioGrassHoles, ...flowerBedGrassHoles],
     infinityTroughCuts,
   );
   const groundRegions = subtractAabbHoles(groundOutline, groundHoles);
@@ -4511,6 +4573,57 @@ export function buildSceneModel(
     }
   }
 
+  if (anyLayerVisible(design, "furniture")) {
+    let bi = 0;
+    for (const bed of design.flowerBeds ?? []) {
+      if (bed.outline.length < 3) continue;
+      const select: SceneSelection = { kind: "flowerBed", id: bed.id };
+      const gradeY = flowerBedGradeY(bed.outline, design.patios ?? [], gradeSamples);
+      if (bed.style === "raised") {
+        const wallMm = flowerBedWallThicknessMm(
+          resolveFlowerBedWallFinish(bed.wallFinish),
+        );
+        const wallH = mmToMeters(flowerBedHeightMm(bed));
+        const inner = insetClosedOutline(bed.outline, wallMm);
+        const innerOk =
+          inner.length >= 3 &&
+          Math.abs(polygonAreaMm2(inner)) > Math.abs(polygonAreaMm2(bed.outline)) * 0.15;
+        meshes.push({
+          kind: "extrude",
+          id: `flowerbed_wall_${bed.id}_${bi++}`,
+          material: "flowerBedWall",
+          outlineMm: bed.outline,
+          holeOutlineMm: innerOk ? inner : undefined,
+          bottomY: gradeY - 0.04,
+          height: wallH + 0.04,
+          flowerBedWallFinish: resolveFlowerBedWallFinish(bed.wallFinish),
+          select,
+        });
+        meshes.push({
+          kind: "extrude",
+          id: `flowerbed_soil_${bed.id}_${bi++}`,
+          material: "flowerBedSoil",
+          outlineMm: innerOk ? inner : bed.outline,
+          bottomY: gradeY + 0.01,
+          height: Math.max(0.06, wallH - 0.05),
+          flowerBedSoilKind: "mulch",
+          select,
+        });
+      } else {
+        meshes.push({
+          kind: "extrude",
+          id: `flowerbed_soil_${bed.id}_${bi++}`,
+          material: "flowerBedSoil",
+          outlineMm: bed.outline,
+          bottomY: gradeY - 0.02,
+          height: 0.1,
+          flowerBedSoilKind: "tilled",
+          select,
+        });
+      }
+    }
+  }
+
   for (const obj of design.objects ?? []) {
     const hasLayer = design.layers.some((l) => l.id === obj.layerId);
     if (hasLayer && !layerVisible(design, obj.layerId)) continue;
@@ -4574,9 +4687,14 @@ export function buildSceneModel(
     const onPatio = (design.patios ?? []).some(
       (p) => p.outline.length >= 3 && pointInPolygon(obj.position, p.outline),
     );
-    const groundY = onPatio
-      ? mmToMeters(PATIO_SLAB_THICKNESS_MM)
-      : -mmToMeters(existingGradeDropMm(obj.position, gradeSamples));
+    const inBed = (design.flowerBeds ?? []).find(
+      (b) => b.outline.length >= 3 && pointInPolygon(obj.position, b.outline),
+    );
+    const groundY = inBed
+      ? flowerBedSoilTopY(inBed, design.patios ?? [], gradeSamples)
+      : onPatio
+        ? mmToMeters(PATIO_SLAB_THICKNESS_MM)
+        : -mmToMeters(existingGradeDropMm(obj.position, gradeSamples));
     const y =
       fixtureY ??
       coverY ??

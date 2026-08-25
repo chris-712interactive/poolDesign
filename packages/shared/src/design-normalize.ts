@@ -33,6 +33,10 @@ import {
   type InfinityEdgeWeir,
   type InfinityTrough,
   isInfinityEdgeStyle,
+  isFlowerBedStyle,
+  resolveFlowerBedWallFinish,
+  clampFlowerBedHeightMm,
+  type FlowerBedRegion,
 } from "./design-model";
 import {
   isWallWaterFixtureId,
@@ -400,6 +404,36 @@ export function normalizeDesignDocument(
         edgeGrades: edgeGrades.length ? edgeGrades : undefined,
       };
     }),
+    flowerBeds: (Array.isArray(doc.flowerBeds) ? doc.flowerBeds : [])
+      .filter(
+        (b): b is FlowerBedRegion =>
+          !!b &&
+          typeof b.id === "string" &&
+          Array.isArray(b.outline) &&
+          b.outline.length >= 3,
+      )
+      .map((b) => {
+        const style = isFlowerBedStyle(b.style) ? b.style : "tilled";
+        return {
+          id: b.id,
+          name:
+            typeof b.name === "string" && b.name.trim()
+              ? b.name.trim()
+              : style === "raised"
+                ? "Raised planter bed"
+                : "Flower bed",
+          outline: b.outline.map((p) => ({ x: p.x, y: p.y, bulge: p.bulge })),
+          style,
+          heightMm:
+            style === "raised"
+              ? clampFlowerBedHeightMm(b.heightMm)
+              : undefined,
+          wallFinish:
+            style === "raised"
+              ? resolveFlowerBedWallFinish(b.wallFinish)
+              : undefined,
+        };
+      }),
     gradeSamples: normalizeGradeSamples(doc.gradeSamples),
     gradeOptions: normalizeGradeOptions(doc.gradeOptions),
     northDeg: normalizeNorthDeg(doc.northDeg),
