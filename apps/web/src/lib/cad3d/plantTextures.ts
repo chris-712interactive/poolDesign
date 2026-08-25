@@ -14,6 +14,7 @@ export type PlantBarkKind =
   | "palm_diamond"
   | "palm_fiber"
   | "palm_gold"
+  | "pseudostem"
   | "frangipani";
 
 export type PlantBarkTex = {
@@ -86,7 +87,8 @@ export function plantBarkKind(plant: Pick<FloridaPlant, "id" | "form">): PlantBa
   if (id === "washingtonia") return "palm_fiber";
   if (id === "mahogany") return "oak";
   if (id === "sabal_palmetto" || form === "saw_palmetto") return "palm_fiber";
-  if (form === "clumping_palm" || form === "banana") return "palm_gold";
+  if (form === "clumping_palm") return "palm_gold";
+  if (form === "banana") return "pseudostem";
   if (form === "travelers") return "frangipani";
   if (
     form === "royal_palm" ||
@@ -208,6 +210,15 @@ function drawBark(kind: PlantBarkKind): PlantBarkTex {
         b = 62 + ring * 16;
         rough = 60 + ring * 25;
         height = 130 + ring * 40;
+      } else if (kind === "pseudostem") {
+        const helix = 0.5 + 0.5 * Math.sin((u * 5.2 + v * 3.4) * Math.PI * 2);
+        const n = fbm(u * 6, v * 10, 14, 3);
+        const base = Math.max(0, (v < 0.5 ? 1 - v * 2 : 0) * 0.55);
+        r = 92 + helix * 38 + n * 18 + base * 50;
+        g = 128 + helix * 22 + n * 10 - base * 40;
+        b = 42 + helix * 12 - base * 8;
+        rough = 48 + helix * 30 + base * 40;
+        height = 118 + helix * 70 + n * 20;
       } else {
         const n = fbm(u * 8, v * 16, 2, 4);
         r = 86 + n * 40;
@@ -242,7 +253,9 @@ function drawBark(kind: PlantBarkKind): PlantBarkTex {
       ? 0.09
       : kind === "gumbo" || kind === "crape" || kind === "frangipani"
         ? 0.03
-        : 0.055;
+        : kind === "pseudostem"
+          ? 0.04
+          : 0.055;
   return { color, roughness, bump, bumpScale };
 }
 
@@ -370,7 +383,12 @@ export function getSpeciesLeafTexture(plant: FloridaPlant): THREE.CanvasTexture 
         b = mix(b, b * 0.9, n * 0.25);
       }
       let vein = 0;
-      if (habit === "needle") {
+      if (plant.form === "banana") {
+        const mid = Math.abs(u) < 0.07 ? 0.55 : 0;
+        const parallel =
+          Math.abs(u) > 0.08 && Math.abs(Math.sin(v * Math.PI * 28)) < 0.16 ? 0.22 : 0;
+        vein = Math.max(mid, parallel);
+      } else if (habit === "needle") {
         vein = Math.abs(u) < 0.12 ? 0.18 : 0;
       } else if (habit === "palmate") {
         const arms = Math.min(
@@ -388,7 +406,11 @@ export function getSpeciesLeafTexture(plant: FloridaPlant): THREE.CanvasTexture 
         vein = Math.max(mid, lat);
       }
       if (vein > 0) {
-        if (redVeins) {
+        if (plant.form === "banana") {
+          r = mix(r, 186, vein * 0.55);
+          g = mix(g, 198, vein * 0.55);
+          b = mix(b, 88, vein * 0.55);
+        } else if (redVeins) {
           r = mix(r, 168, vein);
           g = mix(g, 52, vein);
           b = mix(b, 42, vein);

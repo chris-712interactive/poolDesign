@@ -476,6 +476,43 @@ function paddleGeometry(): THREE.BufferGeometry {
   return g;
 }
 
+function bananaHalfBlade(side: 1 | -1, tattered: boolean): THREE.BufferGeometry {
+  const pts: [number, number][] = [[0, 0.24]];
+  const n = 22;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const y = 0.24 + t * 0.74;
+    let w = Math.sin(Math.pow(t, 0.72) * Math.PI) * 0.32;
+    if (tattered && t > 0.12 && t < 0.92) {
+      const tear = Math.sin(t * Math.PI * 10 + (side > 0 ? 0 : 1.1));
+      if (tear > 0.42) w *= 0.18 + (1 - tear) * 0.35;
+    }
+    pts.push([side * Math.max(0.012, w), y]);
+  }
+  pts.push([0, 0.99]);
+  return outlineLeaf(pts);
+}
+
+/** Musa leaf: petiole + oblong blade with midrib, optional wind-splits, then arched. */
+function bananaLeafGeometry(tattered: boolean, bend: number): THREE.BufferGeometry {
+  const petiole = new THREE.CylinderGeometry(0.016, 0.028, 0.26, 8);
+  petiole.translate(0, 0.13, 0);
+  const left = bananaHalfBlade(-1, tattered);
+  const right = bananaHalfBlade(1, tattered);
+  const rib = new THREE.CylinderGeometry(0.009, 0.018, 0.78, 6);
+  rib.translate(0, 0.6, 0.01);
+  const merged = mergeGeoms([petiole, left, right, rib]);
+  const pos = merged.getAttribute("position");
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const fold = Math.sin(x * 22) * 0.016 * Math.max(0, Math.sin((y - 0.22) * Math.PI));
+    pos.setZ(i, pos.getZ(i) + fold);
+  }
+  pos.needsUpdate = true;
+  return bendAlongY(merged, bend);
+}
+
 function heartLeafGeometry(): THREE.BufferGeometry {
   const g = new THREE.SphereGeometry(0.22, 12, 10);
   g.scale(1.05, 1.12, 0.04);
@@ -1484,6 +1521,222 @@ function RosettePlant({
   );
 }
 
+function BananaPlant({
+  plant,
+  sx,
+  sy,
+  sz,
+  selected,
+}: {
+  plant: FloridaPlant;
+  sx: number;
+  sy: number;
+  sz: number;
+  selected: boolean;
+}) {
+  const y0 = -sy / 2;
+  const r = Math.min(sx, sz) * 0.5;
+  const stemH = sy * 0.38;
+  const rBase = r * 0.15;
+  const rTop = r * 0.1;
+  const matureGeo = useMemo(() => bananaLeafGeometry(true, 1.12), []);
+  const freshGeo = useMemo(() => bananaLeafGeometry(false, 0.58), []);
+  const pupGeo = useMemo(() => bananaLeafGeometry(false, 0.7), []);
+  const leafMap = getSpeciesLeafTexture(plant);
+  const leafColor = leafMap ? "#ffffff" : plantCssColor(plant.foliage);
+  const matureN = 7;
+  const freshN = 2;
+  const seed = hashStr(plant.id) ^ Math.round(sx * 40);
+  const maturePoses = useMemo(() => {
+    const rng = mulberry32(seed);
+    return Array.from({ length: matureN }, (_, i) => {
+      const age = (i + 0.35) / (matureN + freshN);
+      const yaw = i * 2.399 + rng() * 0.12;
+      return {
+        yaw,
+        droop: 0.72 + age * 0.7 + rng() * 0.08,
+        twist: (rng() - 0.5) * 0.18,
+        len: r * (1.55 + rng() * 0.22),
+        wide: r * (0.72 + rng() * 0.12),
+        px: Math.sin(yaw) * rTop * 0.45,
+        py: y0 + stemH * (0.78 + age * 0.12),
+        pz: Math.cos(yaw) * rTop * 0.45,
+        phase: rng() * Math.PI * 2,
+      };
+    });
+  }, [matureN, r, rTop, seed, stemH, y0]);
+  const freshPoses = useMemo(() => {
+    const rng = mulberry32(seed + 17);
+    return Array.from({ length: freshN }, (_, i) => {
+      const yaw = (i + 0.5) * 2.399 + 0.4;
+      return {
+        yaw,
+        droop: 0.28 + i * 0.16,
+        twist: (rng() - 0.5) * 0.1,
+        len: r * (1.15 + i * 0.12),
+        wide: r * 0.55,
+        px: Math.sin(yaw) * rTop * 0.2,
+        py: y0 + stemH * 0.92,
+        pz: Math.cos(yaw) * rTop * 0.2,
+        phase: rng() * Math.PI * 2,
+      };
+    });
+  }, [freshN, r, rTop, seed, stemH, y0]);
+  const matureRef = useRef<THREE.InstancedMesh>(null);
+  const freshRef = useRef<THREE.InstancedMesh>(null);
+
+  const writeLeaves = (time: number) => {
+    const dummy = _palmDummy;
+    const gust = 0.7 + 0.3 * Math.sin(time * 0.18);
+    const write = (
+      mesh: THREE.InstancedMesh | null,
+      poses: typeof maturePoses,
+    ) => {
+      if (!mesh) return;
+      for (let i = 0; i < poses.length; i++) {
+        const p = poses[i]!;
+        const w =
+          Math.sin(time * 0.65 + p.phase) * 0.07 * gust * (0.6 + p.droop * 0.4);
+        dummy.position.set(p.px, p.py, p.pz);
+        dummy.scale.set(p.wide, p.len, 1);
+        setPalmFrondQuaternion(dummy, p.yaw + w * 0.5, p.droop + w, p.twist);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    write(matureRef.current, maturePoses);
+    write(freshRef.current, freshPoses);
+  };
+
+  useLayoutEffect(() => {
+    writeLeaves(0);
+  }, [freshPoses, maturePoses]);
+
+  useFrame(({ clock }) => {
+    writeLeaves(clock.elapsedTime);
+  });
+
+  return (
+    <group>
+      <mesh position={[0, y0 + stemH * 0.08, 0]} castShadow>
+        <sphereGeometry args={[rBase * 1.15, 10, 8]} />
+        <PlantMat color="#6a5a32" roughness={0.9} selected={selected} />
+      </mesh>
+      <mesh position={[0, y0 + stemH / 2, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[rTop, rBase, stemH, 12, 1, true]} />
+        <BarkMat
+          plant={plant}
+          selected={selected}
+          along={2.1}
+          fallback={plantCssColor(plant.trunk)}
+        />
+      </mesh>
+      <mesh position={[0, y0 + stemH - 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[rTop * 0.98, 12]} />
+        <PlantMat color={plantCssColor(plant.trunk)} roughness={0.7} selected={selected} />
+      </mesh>
+      {Array.from({ length: 3 }, (_, i) => {
+        const h = stemH * (0.22 + i * 0.08);
+        const rr = rBase * (1.08 - i * 0.08);
+        return (
+          <mesh
+            key={`sheath-${i}`}
+            position={[0, y0 + h * 0.45 + i * stemH * 0.04, 0]}
+            rotation={[0, i * 0.85, 0.04]}
+            castShadow
+          >
+            <cylinderGeometry args={[rr * 0.82, rr, h, 10, 1, true]} />
+            <BarkMat
+              plant={plant}
+              selected={selected}
+              along={1.3}
+              fallback={plantCssColor(plant.trunk)}
+            />
+          </mesh>
+        );
+      })}
+      <instancedMesh
+        ref={matureRef}
+        args={[matureGeo, undefined, matureN]}
+        castShadow
+        frustumCulled={false}
+      >
+        <PlantMat
+          color={leafColor}
+          map={leafMap}
+          roughness={0.42}
+          selected={selected}
+          doubleSide
+        />
+      </instancedMesh>
+      <instancedMesh
+        ref={freshRef}
+        args={[freshGeo, undefined, freshN]}
+        castShadow
+        frustumCulled={false}
+      >
+        <PlantMat
+          color={leafColor}
+          map={leafMap}
+          roughness={0.38}
+          selected={selected}
+          doubleSide
+        />
+      </instancedMesh>
+      <mesh
+        position={[0, y0 + stemH + sy * 0.08, 0]}
+        rotation={[0.12, 0.4, 0]}
+        castShadow
+      >
+        <coneGeometry args={[r * 0.045, sy * 0.22, 8]} />
+        <PlantMat
+          color={plantCssColor(plant.foliage)}
+          roughness={0.45}
+          selected={selected}
+        />
+      </mesh>
+      <group position={[r * 0.55, y0 * 0.62, -r * 0.32]} scale={0.38}>
+        <mesh position={[0, y0 + stemH * 0.45, 0]} castShadow>
+          <cylinderGeometry args={[rTop * 0.9, rBase, stemH * 0.85, 8, 1, true]} />
+          <BarkMat
+            plant={plant}
+            selected={selected}
+            along={1.6}
+            fallback={plantCssColor(plant.trunk)}
+          />
+        </mesh>
+        {[0.2, 2.3, 4.4].map((yaw, i) => {
+          setPalmFrondQuaternion(_palmDummy, yaw, 0.7 + i * 0.1, 0);
+          const q = _palmDummy.quaternion;
+          return (
+            <mesh
+              key={`pup-${i}`}
+              geometry={pupGeo}
+              position={[
+                Math.sin(yaw) * rTop * 0.3,
+                y0 + stemH * 0.72,
+                Math.cos(yaw) * rTop * 0.3,
+              ]}
+              quaternion={[q.x, q.y, q.z, q.w]}
+              scale={[r * 0.55, r * 1.1, 1]}
+              castShadow
+            >
+              <PlantMat
+                color={leafColor}
+                map={leafMap}
+                roughness={0.42}
+                selected={selected}
+                doubleSide
+              />
+            </mesh>
+          );
+        })}
+      </group>
+    </group>
+  );
+}
+
 function PaddleClump({
   plant,
   sx,
@@ -1498,14 +1751,13 @@ function PaddleClump({
   selected: boolean;
 }) {
   const y0 = -sy / 2;
-  const banana = plant.form === "banana";
   const ear = plant.form === "elephant_ear";
   const phil = plant.form === "philodendron";
   const geo = useMemo(
     () => (ear ? heartLeafGeometry() : paddleGeometry()),
     [ear],
   );
-  const n = banana ? 9 : ear ? 7 : phil ? 10 : 8;
+  const n = ear ? 7 : phil ? 10 : 8;
   const leafMap = getSpeciesLeafTexture(plant);
   const spec = useMemo(
     (): ScatterSpec => ({
@@ -1517,10 +1769,10 @@ function PaddleClump({
       doubleSide: true,
       place: (i, rng, dummy) => {
         const a = (i / n) * Math.PI * 2 + rng() * 0.2;
-        const spread = banana ? 0.18 : 0.22;
+        const spread = 0.22;
         dummy.position.set(
           Math.cos(a) * sx * spread,
-          y0 + sy * (banana ? 0.18 : 0.12),
+          y0 + sy * 0.12,
           Math.sin(a) * sz * spread,
         );
         dummy.rotation.set(
@@ -1529,29 +1781,29 @@ function PaddleClump({
           (rng() - 0.5) * 0.35,
         );
         dummy.scale.set(
-          (ear ? sx : sx) * (banana ? 0.55 : 0.42) * (0.85 + rng() * 0.25),
-          sy * (banana ? 0.7 : 0.55) * (0.85 + rng() * 0.2),
+          sx * 0.42 * (0.85 + rng() * 0.25),
+          sy * 0.55 * (0.85 + rng() * 0.2),
           Math.max(0.06, sz * 0.12),
         );
       },
     }),
-    [banana, ear, geo, leafMap, n, phil, plant.foliage, sx, sy, sz, y0],
+    [ear, geo, leafMap, n, phil, plant.foliage, sx, sy, sz, y0],
   );
   return (
     <group>
-      <mesh position={[0, y0 + sy * (banana ? 0.28 : 0.12), 0]} castShadow>
+      <mesh position={[0, y0 + sy * 0.12, 0]} castShadow>
         <cylinderGeometry
           args={[
-            Math.min(sx, sz) * (banana ? 0.1 : 0.06),
-            Math.min(sx, sz) * (banana ? 0.14 : 0.08),
-            sy * (banana ? 0.5 : 0.2),
+            Math.min(sx, sz) * 0.06,
+            Math.min(sx, sz) * 0.08,
+            sy * 0.2,
             8,
           ]}
         />
         <BarkMat
           plant={plant}
           selected={selected}
-          along={banana ? 2.4 : 1.6}
+          along={1.6}
           fallback={plantCssColor(plant.trunk)}
         />
       </mesh>
@@ -1710,9 +1962,11 @@ function PlantBody({
   if (form === "rosette" || form === "cycad") {
     return <RosettePlant plant={plant} sx={sx} sy={sy} sz={sz} selected={selected} />;
   }
+  if (form === "banana") {
+    return <BananaPlant plant={plant} sx={sx} sy={sy} sz={sz} selected={selected} />;
+  }
   if (
     form === "bird_of_paradise" ||
-    form === "banana" ||
     form === "elephant_ear" ||
     form === "philodendron"
   ) {
