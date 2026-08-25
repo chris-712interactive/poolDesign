@@ -377,13 +377,39 @@ function leafGeometry(habit: LeafHabit): THREE.BufferGeometry {
     );
   }
   if (habit === "round") {
+    const petiole = new THREE.CylinderGeometry(0.012, 0.02, 0.16, 5);
+    petiole.translate(0, 0.08, 0);
     const pts: [number, number][] = [];
-    const n = 16;
+    const n = 18;
     for (let i = 0; i <= n; i++) {
       const a = (i / n) * Math.PI * 2 - Math.PI / 2;
-      pts.push([Math.cos(a) * 0.48, 0.5 + Math.sin(a) * 0.48]);
+      pts.push([Math.cos(a) * 0.5, 0.58 + Math.sin(a) * 0.46]);
     }
-    return outlineLeaf(pts);
+    const disc = outlineLeaf(pts);
+    const pos = disc.getAttribute("position");
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const d = Math.hypot(x, y - 0.58);
+      pos.setZ(i, pos.getZ(i) - d * d * 0.18);
+    }
+    pos.needsUpdate = true;
+    return mergeGeoms([petiole, disc]);
+  }
+  if (habit === "citrus") {
+    const petiole = new THREE.CylinderGeometry(0.01, 0.014, 0.2, 5);
+    petiole.translate(0, 0.1, 0);
+    const wingL = outlineLeaf(ovalOutline((t) => Math.sin(t * Math.PI) * 0.08, 6));
+    wingL.scale(0.9, 0.18, 1);
+    wingL.translate(-0.045, 0.08, 0);
+    const wingR = outlineLeaf(ovalOutline((t) => Math.sin(t * Math.PI) * 0.08, 6));
+    wingR.scale(0.9, 0.18, 1);
+    wingR.translate(0.045, 0.08, 0);
+    const blade = outlineLeaf(
+      ovalOutline((t) => Math.sin(Math.pow(t, 0.85) * Math.PI) * 0.26, 12),
+    );
+    blade.translate(0, 0.18, 0);
+    return mergeGeoms([petiole, wingL, wingR, blade]);
   }
   if (habit === "palmate") {
     return outlineLeaf([
@@ -657,6 +683,7 @@ function leafSizeFor(habit: LeafHabit, sx: number, sz: number): { w: number; l: 
   if (habit === "fern") return { w: span * 0.09, l: span * 0.16 };
   if (habit === "compound") return { w: span * 0.12, l: span * 0.2 };
   if (habit === "toothed") return { w: span * 0.1, l: span * 0.14 };
+  if (habit === "citrus") return { w: span * 0.038, l: span * 0.065 };
   return { w: span * 0.08, l: span * 0.13 };
 }
 
@@ -1243,6 +1270,209 @@ function TravelersPlant({
   );
 }
 
+function limbPoint(
+  b: { ox: number; oy: number; oz: number; yaw: number; droop: number; len: number },
+  t: number,
+) {
+  return {
+    x: b.ox + Math.sin(b.droop) * Math.sin(b.yaw) * b.len * t,
+    y: b.oy + Math.cos(b.droop) * b.len * t,
+    z: b.oz + Math.sin(b.droop) * Math.cos(b.yaw) * b.len * t,
+  };
+}
+
+function BranchedLeafTree({
+  plant,
+  sx,
+  sy,
+  sz,
+  selected,
+  kind,
+}: {
+  plant: FloridaPlant;
+  sx: number;
+  sy: number;
+  sz: number;
+  selected: boolean;
+  kind: "citrus" | "sea_grape";
+}) {
+  const y0 = -sy / 2;
+  const r = Math.min(sx, sz) * 0.5;
+  const citrus = kind === "citrus";
+  const trunkH = citrus ? sy * 0.34 : sy * 0.4;
+  const rBase = citrus ? r * 0.07 : r * 0.08;
+  const rTop = rBase * 0.62;
+  const habit = leafHabitFor(plant);
+  const geo = useMemo(() => leafGeometry(habit), [habit]);
+  const fruitGeo = useMemo(
+    () => (citrus ? new THREE.SphereGeometry(0.055, 8, 6) : null),
+    [citrus],
+  );
+  const leafMap = getSpeciesLeafTexture(plant);
+  const seed = hashStr(plant.id) ^ Math.round(sx * 31);
+  const limbs = useMemo(() => {
+    const rng = mulberry32(seed);
+    const primaries = citrus ? 8 : 7;
+    const out: {
+      ox: number;
+      oy: number;
+      oz: number;
+      yaw: number;
+      droop: number;
+      len: number;
+      r0: number;
+      r1: number;
+    }[] = [];
+    for (let i = 0; i < primaries; i++) {
+      const yaw = (i / primaries) * Math.PI * 2 + rng() * 0.28;
+      const droop = citrus ? 0.72 + rng() * 0.42 : 0.62 + rng() * 0.5;
+      const len = r * (citrus ? 0.72 + rng() * 0.22 : 0.68 + rng() * 0.28);
+      const attach = y0 + trunkH * (citrus ? 0.48 + rng() * 0.4 : 0.42 + rng() * 0.45);
+      const b = {
+        ox: Math.sin(yaw) * rTop * 0.35,
+        oy: attach,
+        oz: Math.cos(yaw) * rTop * 0.35,
+        yaw,
+        droop,
+        len,
+        r0: rBase * (citrus ? 0.38 : 0.42),
+        r1: rBase * 0.16,
+      };
+      out.push(b);
+      const twigs = citrus ? 2 : 1;
+      for (let s = 0; s < twigs; s++) {
+        const t = 0.42 + s * 0.28 + rng() * 0.08;
+        const p = limbPoint(b, t);
+        const side = s % 2 === 0 ? 0.85 : -0.85;
+        out.push({
+          ox: p.x,
+          oy: p.y,
+          oz: p.z,
+          yaw: yaw + side + (rng() - 0.5) * 0.25,
+          droop: droop + 0.12 + rng() * 0.2,
+          len: len * (0.38 + rng() * 0.14),
+          r0: rBase * 0.16,
+          r1: rBase * 0.07,
+        });
+      }
+    }
+    return out;
+  }, [citrus, r, rBase, rTop, seed, trunkH, y0]);
+
+  const leafCount = citrus ? 220 : 70;
+  const leafW = citrus ? r * 0.09 : r * 0.2;
+  const leafL = citrus ? r * 0.15 : r * 0.2;
+  const leafSpec = useMemo((): ScatterSpec => {
+    return {
+      count: leafCount,
+      geo,
+      color: leafMap ? "#ffffff" : plantCssColor(plant.foliage),
+      map: leafMap,
+      roughness: citrus ? 0.32 : 0.48,
+      doubleSide: true,
+      place: (i, rng, dummy) => {
+        const b = limbs[i % limbs.length]!;
+        const t = citrus ? 0.38 + rng() ** 0.65 * 0.6 : 0.28 + rng() * 0.68;
+        const p = limbPoint(b, t);
+        dummy.position.set(p.x, p.y, p.z);
+        dummy.rotation.set(
+          0.25 + rng() * 0.9,
+          b.yaw + (rng() - 0.5) * 0.9,
+          (rng() - 0.5) * 0.55,
+        );
+        const s = 0.8 + rng() * 0.45;
+        dummy.scale.set(s * leafW, s * leafL, s);
+      },
+    };
+  }, [citrus, geo, leafCount, leafL, leafMap, leafW, limbs, plant.foliage]);
+
+  const alt = plant.foliageAlt;
+  const altSpec = useMemo((): ScatterSpec | null => {
+    if (!alt || citrus) return null;
+    return {
+      count: Math.max(8, Math.round(leafCount * 0.18)),
+      geo,
+      color: plantCssColor(alt),
+      roughness: 0.5,
+      doubleSide: true,
+      place: leafSpec.place,
+    };
+  }, [alt, citrus, geo, leafCount, leafSpec.place]);
+
+  const fruitSpec = useMemo((): ScatterSpec | null => {
+    if (!fruitGeo) return null;
+    return {
+      count: 22,
+      geo: fruitGeo,
+      color: "#e07020",
+      roughness: 0.38,
+      place: (i, rng, dummy) => {
+        const b = limbs[i % limbs.length]!;
+        const t = 0.58 + rng() * 0.38;
+        const p = limbPoint(b, t);
+        dummy.position.set(p.x, p.y - r * 0.04, p.z);
+        dummy.rotation.set(rng() * 0.4, rng() * Math.PI, 0);
+        const s = 0.85 + rng() * 0.4;
+        dummy.scale.set(s, s * 0.92, s);
+      },
+    };
+  }, [fruitGeo, limbs, r]);
+
+  return (
+    <group>
+      <Trunk
+        plant={plant}
+        y0={y0}
+        height={trunkH}
+        rBase={rBase}
+        rTop={rTop}
+        selected={selected}
+      />
+      {limbs.map((b, i) => {
+        const mid = limbPoint(b, 0.5);
+        setPalmFrondQuaternion(_palmDummy, b.yaw, b.droop, 0);
+        const q = _palmDummy.quaternion;
+        return (
+          <mesh
+            key={i}
+            position={[mid.x, mid.y, mid.z]}
+            quaternion={[q.x, q.y, q.z, q.w]}
+            castShadow
+          >
+            <cylinderGeometry args={[b.r1, b.r0, b.len, 6]} />
+            <BarkMat
+              plant={plant}
+              selected={selected}
+              along={1.5}
+              fallback={plantCssColor(plant.trunk)}
+            />
+          </mesh>
+        );
+      })}
+      <InstancedParts spec={leafSpec} seed={seed + 3} selected={selected} />
+      {altSpec ? (
+        <InstancedParts spec={altSpec} seed={seed + 19} selected={selected} />
+      ) : null}
+      {fruitSpec ? (
+        <InstancedParts spec={fruitSpec} seed={seed + 41} selected={selected} />
+      ) : null}
+      {citrus ? (
+        <BloomScatter
+          plant={plant}
+          y0={y0}
+          sx={sx * 0.55}
+          sy={sy}
+          sz={sz * 0.55}
+          selected={selected}
+          yCenter={sy * 0.62}
+          spreadY={sy * 0.22}
+          count={10}
+        />
+      ) : null}
+    </group>
+  );
+}
+
 function TreePlant({
   plant,
   sx,
@@ -1268,6 +1498,18 @@ function TreePlant({
   const citrus = plant.form === "citrus";
   const sea = plant.form === "sea_grape";
   const jacaranda = plant.form === "jacaranda";
+  if (citrus || sea) {
+    return (
+      <BranchedLeafTree
+        plant={plant}
+        sx={sx}
+        sy={sy}
+        sz={sz}
+        selected={selected}
+        kind={citrus ? "citrus" : "sea_grape"}
+      />
+    );
+  }
   const r = Math.min(sx, sz) * 0.5;
   const trunkH = pine
     ? sy * 0.62

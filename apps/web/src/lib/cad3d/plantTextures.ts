@@ -16,6 +16,8 @@ export type PlantBarkKind =
   | "palm_gold"
   | "pseudostem"
   | "ravenala"
+  | "citrus"
+  | "seagrape"
   | "frangipani";
 
 export type PlantBarkTex = {
@@ -91,6 +93,8 @@ export function plantBarkKind(plant: Pick<FloridaPlant, "id" | "form">): PlantBa
   if (form === "clumping_palm") return "palm_gold";
   if (form === "banana") return "pseudostem";
   if (form === "travelers") return "ravenala";
+  if (form === "citrus") return "citrus";
+  if (form === "sea_grape") return "seagrape";
   if (
     form === "royal_palm" ||
     form === "foxtail_palm" ||
@@ -230,6 +234,21 @@ function drawBark(kind: PlantBarkKind): PlantBarkTex {
         b = 92 + n * 12 - scar * 10;
         rough = 100 + scar * 50 + n * 30;
         height = 90 + (1 - chevron) * 80 + n * 20;
+      } else if (kind === "citrus") {
+        const n = fbm(u * 5, v * 12, 4, 3);
+        const lent = hash2(x, y, 19) > 0.975 ? 1 : 0;
+        r = 102 + n * 28 + lent * 22;
+        g = 90 + n * 20 + lent * 12;
+        b = 70 + n * 14;
+        rough = 72 + n * 35 + lent * 20;
+        height = 130 + n * 30 + lent * 25;
+      } else if (kind === "seagrape") {
+        const n = fbm(u * 4, v * 7, 15, 4);
+        r = 118 + n * 36;
+        g = 112 + n * 28;
+        b = 98 + n * 22;
+        rough = 80 + n * 40;
+        height = 140 + n * 25;
       } else {
         const n = fbm(u * 8, v * 16, 2, 4);
         r = 86 + n * 40;
@@ -262,7 +281,7 @@ function drawBark(kind: PlantBarkKind): PlantBarkTex {
   const bumpScale =
     kind === "oak" || kind === "palm_diamond" || kind === "palm_ringed"
       ? 0.09
-      : kind === "gumbo" || kind === "crape" || kind === "frangipani"
+      : kind === "gumbo" || kind === "crape" || kind === "frangipani" || kind === "citrus" || kind === "seagrape"
         ? 0.03
         : kind === "pseudostem" || kind === "ravenala"
           ? 0.045
@@ -332,20 +351,22 @@ export type LeafHabit =
   | "linear"
   | "fern"
   | "compound"
-  | "toothed";
+  | "toothed"
+  | "citrus";
 
 export function leafHabitFor(plant: Pick<FloridaPlant, "id" | "form">): LeafHabit {
   const f = plant.form as PlantForm;
   if (f === "live_oak") return "oak";
   if (f === "magnolia" || plant.id === "loquat" || plant.id === "gardenia") return "large_glossy";
   if (plant.id === "red_maple" || plant.id === "tabebuia_pink") return "palmate";
+  if (f === "citrus") return "citrus";
   if (f === "sea_grape") return "round";
   if (f === "pine" || f === "cypress") return "needle";
   if (f === "jacaranda") return "fern";
   if (f === "bottlebrush" || plant.id === "oleander") return "linear";
   if (f === "gumbo_limbo" || plant.id === "mahogany") return "compound";
   if (plant.id === "hibiscus") return "toothed";
-  if (f === "citrus" || f === "crape_myrtle" || f === "broadleaf" || f === "frangipani") {
+  if (f === "crape_myrtle" || f === "broadleaf" || f === "frangipani") {
     return "oval";
   }
   return "oval";
@@ -399,6 +420,13 @@ export function getSpeciesLeafTexture(plant: FloridaPlant): THREE.CanvasTexture 
         const parallel =
           Math.abs(u) > 0.08 && Math.abs(Math.sin(v * Math.PI * 28)) < 0.16 ? 0.22 : 0;
         vein = Math.max(mid, parallel);
+      } else if (plant.form === "citrus") {
+        const mid = Math.abs(u) < 0.06 ? 0.4 : 0;
+        const lat =
+          Math.abs(u) > 0.07 && Math.abs(Math.sin((v * 7 + Math.abs(u)) * Math.PI)) < 0.12
+            ? 0.14
+            : 0;
+        vein = Math.max(mid, lat);
       } else if (habit === "needle") {
         vein = Math.abs(u) < 0.12 ? 0.18 : 0;
       } else if (habit === "palmate") {
@@ -421,6 +449,10 @@ export function getSpeciesLeafTexture(plant: FloridaPlant): THREE.CanvasTexture 
           r = mix(r, 186, vein * 0.55);
           g = mix(g, 198, vein * 0.55);
           b = mix(b, 88, vein * 0.55);
+        } else if (plant.form === "citrus") {
+          r = mix(r, 48, vein * 0.35);
+          g = mix(g, 130, vein * 0.35);
+          b = mix(b, 52, vein * 0.35);
         } else if (redVeins) {
           r = mix(r, 168, vein);
           g = mix(g, 52, vein);
