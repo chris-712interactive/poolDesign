@@ -11,6 +11,14 @@ import {
   type PlantForm,
 } from "@pool-design/shared";
 import { ClipPlanesContext } from "@/lib/cad3d/clipContext";
+import {
+  getLeafVeinTexture,
+  getPlantBarkTexture,
+  getSpeciesLeafTexture,
+  leafHabitFor,
+  plantBarkKind,
+  type LeafHabit,
+} from "@/lib/cad3d/plantTextures";
 
 type GroupProps = {
   position: [number, number, number];
@@ -53,6 +61,10 @@ function PlantMat({
   selected,
   opacity = 1,
   doubleSide = false,
+  map,
+  roughnessMap,
+  bumpMap,
+  bumpScale = 0.05,
 }: {
   color: string;
   roughness?: number;
@@ -60,11 +72,19 @@ function PlantMat({
   selected: boolean;
   opacity?: number;
   doubleSide?: boolean;
+  map?: THREE.Texture | null;
+  roughnessMap?: THREE.Texture | null;
+  bumpMap?: THREE.Texture | null;
+  bumpScale?: number;
 }) {
   const clippingPlanes = useContext(ClipPlanesContext);
   return (
     <meshStandardMaterial
       color={color}
+      map={map ?? null}
+      roughnessMap={roughnessMap ?? null}
+      bumpMap={bumpMap ?? null}
+      bumpScale={bumpMap ? bumpScale : 0}
       roughness={roughness}
       metalness={metalness}
       transparent={opacity < 0.99}
@@ -74,6 +94,43 @@ function PlantMat({
       emissiveIntensity={selected ? 0.22 : 0}
       clippingPlanes={clippingPlanes}
       clipShadows={clippingPlanes.length > 0}
+    />
+  );
+}
+
+function BarkMat({
+  plant,
+  selected,
+  along = 2,
+  fallback,
+}: {
+  plant: FloridaPlant;
+  selected: boolean;
+  along?: number;
+  fallback: string;
+}) {
+  const maps = useMemo(() => {
+    const tex = getPlantBarkTexture(plantBarkKind(plant));
+    if (!tex) return null;
+    const color = tex.color.clone();
+    const roughness = tex.roughness.clone();
+    const bump = tex.bump.clone();
+    const v = Math.max(1.4, along);
+    for (const t of [color, roughness, bump]) {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(1.15, v);
+    }
+    return { color, roughness, bump, bumpScale: tex.bumpScale };
+  }, [along, plant.form, plant.id]);
+  return (
+    <PlantMat
+      color={maps ? "#ffffff" : fallback}
+      map={maps?.color}
+      roughnessMap={maps?.roughness}
+      bumpMap={maps?.bump}
+      bumpScale={maps?.bumpScale}
+      roughness={0.9}
+      selected={selected}
     />
   );
 }
@@ -119,12 +176,16 @@ function flowerGeometry(bloom: PlantBloom): THREE.BufferGeometry | null {
 
 function mergeGeoms(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   const pos: number[] = [];
+  const uv: number[] = [];
   const idx: number[] = [];
   for (const g of parts) {
     const p = g.getAttribute("position");
+    const u = g.getAttribute("uv");
     const base = pos.length / 3;
     for (let i = 0; i < p.count; i++) {
       pos.push(p.getX(i), p.getY(i), p.getZ(i));
+      if (u) uv.push(u.getX(i), u.getY(i));
+      else uv.push(0.5, 0.5);
     }
     const index = g.getIndex();
     if (index) {
@@ -136,6 +197,7 @@ function mergeGeoms(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   }
   const out = new THREE.BufferGeometry();
   out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
   out.setIndex(idx);
   out.computeVertexNormals();
   return out;
@@ -164,21 +226,51 @@ function bendAlongY(geo: THREE.BufferGeometry, bendRad: number): THREE.BufferGeo
 }
 
 /** Palmate / costapalmate fan with separate leaflets and a curved midrib. */
+function fanLeafletGeometry(len: number, width: number): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.lineTo(width * 0.22, len * 0.06);
+  shape.lineTo(width, len * 0.88);
+  shape.lineTo(width * 0.12, len);
+  shape.lineTo(0, len);
+  shape.lineTo(-width * 0.12, len);
+  shape.lineTo(-width, len * 0.88);
+  shape.lineTo(-width * 0.22, len * 0.06);
+  shape.closePath();
+  const g = new THREE.ExtrudeGeometry(shape, { depth: 0.008, bevelEnabled: false, steps: 1 });
+  g.translate(0, 0, -0.004);
+  return g;
+}
+
 function fanFrondGeometry(silver: boolean, bend: number): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  const lobes = silver ? 9 : 11;
-  const spread = silver ? 1.12 : 0.92;
+  const lobes = silver ? 10 : 13;
+  const spread = silver ? 1.05 : 0.98;
   for (let i = 0; i < lobes; i++) {
     const u = i / (lobes - 1) - 0.5;
-    const blade = new THREE.ConeGeometry(silver ? 0.07 : 0.055, 1, 4, 1, true);
-    blade.translate(0, 0.5, 0);
+    const blade = fanLeafletGeometry(silver ? 0.92 : 1, silver ? 0.055 : 0.038);
     blade.rotateZ(u * spread);
-    blade.scale(1.15, 1, silver ? 0.045 : 0.055);
     parts.push(blade);
   }
   const rib = new THREE.CylinderGeometry(0.006, 0.015, 0.94, 5);
   rib.translate(0, 0.47, 0);
   return bendAlongY(mergeGeoms([...parts, rib]), bend);
+}
+
+function diamondLeafletGeometry(len: number, width: number): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.lineTo(width * 0.55, len * 0.12);
+  shape.lineTo(width, len * 0.48);
+  shape.lineTo(width * 0.18, len * 0.92);
+  shape.lineTo(0, len);
+  shape.lineTo(-width * 0.18, len * 0.92);
+  shape.lineTo(-width, len * 0.48);
+  shape.lineTo(-width * 0.55, len * 0.12);
+  shape.closePath();
+  const g = new THREE.ExtrudeGeometry(shape, { depth: 0.006, bevelEnabled: false, steps: 1 });
+  g.translate(0, 0, -0.003);
+  return g;
 }
 
 /**
@@ -200,8 +292,8 @@ function pinnateFrondGeometry(plumose: boolean, bend: number): THREE.BufferGeome
     for (let row = 0; row < rows; row++) {
       const z = plumose ? (row === 0 ? 0.016 : -0.016) : 0;
       for (const side of [-1, 1] as const) {
-        const leaf = new THREE.BoxGeometry(span, 0.01, 0.0035);
-        leaf.translate(side * span * 0.5, 0, 0);
+        const leaf = diamondLeafletGeometry(span, span * 0.11);
+        leaf.rotateZ(side * -Math.PI / 2);
         leaf.rotateZ(side * sweep);
         leaf.rotateX((t - 0.35) * 0.35);
         leaf.translate(0, y, z);
@@ -245,23 +337,149 @@ function setPalmFrondQuaternion(
   dummy.rotateY(twist);
 }
 
-function leafBladeGeometry(): THREE.BufferGeometry {
-  const g = new THREE.SphereGeometry(0.08, 8, 6);
-  g.scale(1.6, 0.18, 0.7);
+function outlineLeaf(pts: [number, number][]): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  shape.moveTo(pts[0]![0], pts[0]![1]);
+  for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i]![0], pts[i]![1]);
+  shape.closePath();
+  const g = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.01,
+    bevelEnabled: false,
+    steps: 1,
+  });
+  g.translate(0, 0, -0.005);
+  g.computeVertexNormals();
   return g;
 }
 
+function ovalOutline(widthFn: (t: number) => number, n = 14): [number, number][] {
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    pts.push([widthFn(t), t]);
+  }
+  for (let i = n - 1; i >= 1; i--) {
+    const t = i / n;
+    pts.push([-widthFn(t), t]);
+  }
+  return pts;
+}
+
+function leafGeometry(habit: LeafHabit): THREE.BufferGeometry {
+  if (habit === "oak") {
+    return outlineLeaf(
+      ovalOutline((t) => Math.pow(Math.sin(t * Math.PI), 0.72) * (0.16 + t * 0.14) * (1 + Math.sin(t * Math.PI * 7) * 0.04)),
+    );
+  }
+  if (habit === "large_glossy") {
+    return outlineLeaf(
+      ovalOutline((t) => Math.sin(t * Math.PI) * (0.22 + t * 0.08)),
+    );
+  }
+  if (habit === "round") {
+    const pts: [number, number][] = [];
+    const n = 16;
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+      pts.push([Math.cos(a) * 0.48, 0.5 + Math.sin(a) * 0.48]);
+    }
+    return outlineLeaf(pts);
+  }
+  if (habit === "palmate") {
+    return outlineLeaf([
+      [0, 0],
+      [0.1, 0.16],
+      [0.42, 0.38],
+      [0.22, 0.46],
+      [0.3, 0.84],
+      [0.1, 0.72],
+      [0, 1],
+      [-0.1, 0.72],
+      [-0.3, 0.84],
+      [-0.22, 0.46],
+      [-0.42, 0.38],
+      [-0.1, 0.16],
+    ]);
+  }
+  if (habit === "toothed") {
+    return outlineLeaf(
+      ovalOutline((t) => {
+        const base = Math.sin(t * Math.PI) * 0.3;
+        return base * (1 + Math.sin(t * Math.PI * 10) * 0.12);
+      }),
+    );
+  }
+  if (habit === "linear") {
+    return outlineLeaf(ovalOutline((t) => Math.sin(t * Math.PI) * 0.08));
+  }
+  if (habit === "needle") {
+    const parts: THREE.BufferGeometry[] = [];
+    for (const a of [-0.12, 0, 0.12]) {
+      const n = new THREE.CylinderGeometry(0.012, 0.008, 1, 4);
+      n.translate(0, 0.5, 0);
+      n.rotateZ(a);
+      parts.push(n);
+    }
+    return mergeGeoms(parts);
+  }
+  if (habit === "fern") {
+    const parts: THREE.BufferGeometry[] = [];
+    const rachis = new THREE.CylinderGeometry(0.006, 0.01, 1, 4);
+    rachis.translate(0, 0.5, 0);
+    parts.push(rachis);
+    for (let i = 0; i < 10; i++) {
+      const t = 0.12 + (i / 9) * 0.82;
+      const w = Math.sin((i / 9) * Math.PI) * 0.28;
+      for (const side of [-1, 1] as const) {
+        const leaflet = outlineLeaf(ovalOutline((u) => Math.sin(u * Math.PI) * 0.12, 6));
+        leaflet.scale(w, 0.14, 1);
+        leaflet.rotateZ(side * 0.85);
+        leaflet.translate(0, t, 0);
+        parts.push(leaflet);
+      }
+    }
+    return mergeGeoms(parts);
+  }
+  if (habit === "compound") {
+    const parts: THREE.BufferGeometry[] = [];
+    const rachis = new THREE.CylinderGeometry(0.008, 0.012, 1, 4);
+    rachis.translate(0, 0.5, 0);
+    parts.push(rachis);
+    const stations = [0.18, 0.38, 0.58, 0.78, 0.96];
+    for (let i = 0; i < stations.length; i++) {
+      const y = stations[i]!;
+      const tip = i === stations.length - 1;
+      const leaflet = outlineLeaf(ovalOutline((t) => Math.sin(t * Math.PI) * 0.22, 8));
+      leaflet.scale(0.55, 0.22, 1);
+      if (tip) {
+        leaflet.translate(0, y - 0.1, 0);
+        parts.push(leaflet);
+      } else {
+        for (const side of [-1, 1] as const) {
+          const g = leaflet.clone();
+          g.rotateZ(side * 0.7);
+          g.translate(0, y, 0);
+          parts.push(g);
+        }
+        leaflet.dispose();
+      }
+    }
+    return mergeGeoms(parts);
+  }
+  return outlineLeaf(ovalOutline((t) => Math.sin(t * Math.PI) * 0.28));
+}
+
 function paddleGeometry(): THREE.BufferGeometry {
-  const g = new THREE.SphereGeometry(0.22, 10, 8);
-  g.scale(0.55, 1.35, 0.08);
+  const g = new THREE.SphereGeometry(0.22, 12, 10);
+  g.scale(0.42, 1.28, 0.035);
   g.translate(0, 0.55, 0);
   return g;
 }
 
 function heartLeafGeometry(): THREE.BufferGeometry {
-  const g = new THREE.SphereGeometry(0.22, 10, 8);
-  g.scale(1.15, 1.25, 0.08);
-  g.translate(0, 0.4, 0);
+  const g = new THREE.SphereGeometry(0.22, 12, 10);
+  g.scale(1.05, 1.12, 0.04);
+  g.translate(0, 0.38, 0);
   return g;
 }
 
@@ -278,6 +496,7 @@ type ScatterSpec = {
   color: string;
   roughness?: number;
   doubleSide?: boolean;
+  map?: THREE.Texture | null;
   place: (i: number, rng: () => number, dummy: THREE.Object3D) => void;
 };
 
@@ -311,6 +530,7 @@ function InstancedParts({
     <instancedMesh ref={ref} args={[spec.geo, undefined, spec.count]} castShadow>
       <PlantMat
         color={spec.color}
+        map={spec.map}
         roughness={spec.roughness ?? 0.9}
         selected={selected}
         doubleSide={spec.doubleSide}
@@ -320,20 +540,20 @@ function InstancedParts({
 }
 
 function Trunk({
+  plant,
   y0,
   height,
   rBase,
   rTop,
-  color,
   selected,
   lean = 0,
   segments = 10,
 }: {
+  plant: FloridaPlant;
   y0: number;
   height: number;
   rBase: number;
   rTop: number;
-  color: string;
   selected: boolean;
   lean?: number;
   segments?: number;
@@ -346,12 +566,31 @@ function Trunk({
       receiveShadow
     >
       <cylinderGeometry args={[rTop, rBase, height, segments]} />
-      <PlantMat color={color} roughness={0.92} selected={selected} />
+      <BarkMat
+        plant={plant}
+        selected={selected}
+        along={Math.max(1.6, height / Math.max(0.04, rBase) * 0.18)}
+        fallback={plantCssColor(plant.trunk)}
+      />
     </mesh>
   );
 }
 
-function CanopyBlobs({
+function leafSizeFor(habit: LeafHabit, sx: number, sz: number): { w: number; l: number } {
+  const span = Math.max(sx, sz);
+  if (habit === "oak") return { w: span * 0.03, l: span * 0.05 };
+  if (habit === "large_glossy") return { w: span * 0.12, l: span * 0.22 };
+  if (habit === "round") return { w: span * 0.16, l: span * 0.16 };
+  if (habit === "palmate") return { w: span * 0.11, l: span * 0.14 };
+  if (habit === "needle") return { w: span * 0.035, l: span * 0.16 };
+  if (habit === "linear") return { w: span * 0.04, l: span * 0.14 };
+  if (habit === "fern") return { w: span * 0.09, l: span * 0.16 };
+  if (habit === "compound") return { w: span * 0.12, l: span * 0.2 };
+  if (habit === "toothed") return { w: span * 0.1, l: span * 0.14 };
+  return { w: span * 0.08, l: span * 0.13 };
+}
+
+function LeafCanopy({
   plant,
   y0,
   sx,
@@ -361,7 +600,7 @@ function CanopyBlobs({
   count,
   spreadY,
   yCenter,
-  blobScale = 1,
+  cone = false,
 }: {
   plant: FloridaPlant;
   y0: number;
@@ -372,48 +611,70 @@ function CanopyBlobs({
   count: number;
   spreadY: number;
   yCenter: number;
-  blobScale?: number;
+  cone?: boolean;
 }) {
-  const geo = useMemo(() => new THREE.SphereGeometry(0.5, 12, 10), []);
-  const alt = plant.foliageAlt ?? plant.foliage;
-  const specs = useMemo((): ScatterSpec[] => {
-    const place =
-      (colorIndex: number): ScatterSpec["place"] =>
-      (i, rng, dummy) => {
+  const habit = leafHabitFor(plant);
+  const geo = useMemo(() => leafGeometry(habit), [habit]);
+  const map = getSpeciesLeafTexture(plant);
+  const size = leafSizeFor(habit, sx, sz);
+  const glossy = habit === "large_glossy" || plant.form === "citrus" || plant.id === "gardenia";
+  const spec = useMemo((): ScatterSpec => {
+    return {
+      count,
+      geo,
+      color: map ? "#ffffff" : plantCssColor(plant.foliage),
+      map,
+      roughness: glossy ? 0.38 : habit === "needle" ? 0.72 : 0.7,
+      doubleSide: true,
+      place: (_i, rng, dummy) => {
         const a = rng() * Math.PI * 2;
-        const r = 0.18 + rng() * 0.38;
-        dummy.position.set(
-          Math.cos(a) * r * sx,
-          y0 + yCenter + (rng() - 0.45) * spreadY,
-          Math.sin(a) * r * sz,
+        if (cone) {
+          const t = rng();
+          const rad = (1 - t) * 0.48;
+          dummy.position.set(
+            Math.cos(a) * rad * sx,
+            y0 + sy * (0.32 + t * 0.62),
+            Math.sin(a) * rad * sz,
+          );
+        } else {
+          const elev = (rng() - 0.18) * Math.PI * 0.85;
+          const r = 0.12 + rng() * 0.42;
+          dummy.position.set(
+            Math.cos(a) * Math.cos(elev) * r * sx,
+            y0 + yCenter + Math.sin(elev) * spreadY * 0.55,
+            Math.sin(a) * Math.cos(elev) * r * sz,
+          );
+        }
+        dummy.rotation.set(
+          0.35 + rng() * 1.05,
+          a + (rng() - 0.5) * 0.7,
+          (rng() - 0.5) * 0.55,
         );
-        dummy.rotation.set(rng() * 0.5, rng() * Math.PI, rng() * 0.5);
-        const s = blobScale * (0.22 + rng() * 0.28) * Math.max(sx, sz);
-        dummy.scale.set(s * (0.85 + rng() * 0.3), s * (0.7 + rng() * 0.4), s * (0.85 + rng() * 0.3));
-        if (colorIndex === 1 && i % 3 !== 0) dummy.scale.set(0, 0, 0);
-      };
-    return [
-      {
-        count,
-        geo,
-        color: plantCssColor(plant.foliage),
-        place: place(0),
+        const s = 0.75 + rng() * 0.55;
+        dummy.scale.set(s * size.w, s * size.l, s);
       },
-      {
-        count: Math.max(3, Math.round(count * 0.35)),
-        geo,
-        color: plantCssColor(alt),
-        roughness: 0.86,
-        place: place(1),
-      },
-    ];
-  }, [alt, blobScale, count, geo, plant.foliage, spreadY, sx, sz, y0, yCenter]);
+    };
+  }, [cone, count, geo, glossy, habit, map, plant.foliage, size.l, size.w, spreadY, sx, sy, sz, y0, yCenter]);
   const seed = hashStr(plant.id) ^ Math.round(sx * 40);
+  const alt = plant.foliageAlt;
+  const altSpec = useMemo((): ScatterSpec | null => {
+    if (!alt || habit === "needle") return null;
+    const altCount = Math.max(4, Math.round(count * 0.22));
+    return {
+      count: altCount,
+      geo,
+      color: plantCssColor(alt),
+      roughness: glossy ? 0.42 : 0.72,
+      doubleSide: true,
+      place: spec.place,
+    };
+  }, [alt, count, geo, glossy, habit, spec.place]);
   return (
     <>
-      {specs.map((spec, i) => (
-        <InstancedParts key={i} spec={spec} seed={seed + i * 97} selected={selected} />
-      ))}
+      <InstancedParts spec={spec} seed={seed} selected={selected} />
+      {altSpec ? (
+        <InstancedParts spec={altSpec} seed={seed + 131} selected={selected} />
+      ) : null}
     </>
   );
 }
@@ -658,7 +919,8 @@ function PalmFronds({
     >
       <PlantMat
         color={plantCssColor(plant.foliage)}
-        roughness={silver ? 0.72 : 0.86}
+        map={getLeafVeinTexture("palm")}
+        roughness={silver ? 0.55 : 0.72}
         selected={selected}
         doubleSide
       />
@@ -717,11 +979,11 @@ function PalmPlant({
           return (
             <group key={i} position={[Math.cos(a) * rr, 0, Math.sin(a) * rr]}>
               <Trunk
+                plant={plant}
                 y0={y0}
                 height={h}
                 rBase={r * 0.028}
                 rTop={r * 0.02}
-                color={plantCssColor(plant.trunk)}
                 selected={selected}
                 segments={8}
               />
@@ -744,28 +1006,13 @@ function PalmPlant({
       <group rotation={[0, 0, lean]}>
         <mesh position={[0, trunkH / 2, 0]} castShadow receiveShadow>
           <cylinderGeometry args={[rTop, rBase, trunkH, canary ? 12 : 10]} />
-          <PlantMat
-            color={plantCssColor(plant.trunk)}
-            roughness={coconut ? 0.88 : 0.92}
+          <BarkMat
+            plant={plant}
             selected={selected}
+            along={Math.max(2.2, trunkH / Math.max(0.04, rBase) * 0.22)}
+            fallback={plantCssColor(plant.trunk)}
           />
         </mesh>
-        {coconut
-          ? Array.from({ length: 9 }, (_, i) => {
-              const y = trunkH * (0.18 + (i / 8) * 0.72);
-              const rr = rBase + (rTop - rBase) * (y / trunkH);
-              return (
-                <mesh key={`ring-${i}`} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                  <torusGeometry args={[rr * 1.02, rr * 0.08, 5, 12]} />
-                  <PlantMat
-                    color="#9a8868"
-                    roughness={0.95}
-                    selected={selected}
-                  />
-                </mesh>
-              );
-            })
-          : null}
         {royal ? (
           <mesh position={[0, trunkH + sy * 0.05, 0]} castShadow>
             <cylinderGeometry args={[r * 0.07, r * 0.085, sy * 0.1, 12]} />
@@ -820,11 +1067,14 @@ function TravelersPlant({
   const y0 = -sy / 2;
   const geo = useMemo(() => paddleGeometry(), []);
   const n = 11;
+  const leafMap = getSpeciesLeafTexture(plant);
   const spec = useMemo(
     (): ScatterSpec => ({
       count: n,
       geo,
-      color: plantCssColor(plant.foliage),
+      color: leafMap ? "#ffffff" : plantCssColor(plant.foliage),
+      map: leafMap,
+      roughness: 0.48,
       doubleSide: true,
       place: (i, rng, dummy) => {
         const t = i / (n - 1) - 0.5;
@@ -838,13 +1088,18 @@ function TravelersPlant({
         );
       },
     }),
-    [geo, n, plant.foliage, sx, sy, sz, y0],
+    [geo, n, leafMap, plant.foliage, sx, sy, sz, y0],
   );
   return (
     <group>
       <mesh position={[0, y0 + sy * 0.12, 0]} castShadow>
         <sphereGeometry args={[Math.min(sx, sz) * 0.12, 10, 8]} />
-        <PlantMat color={plantCssColor(plant.trunk)} roughness={0.8} selected={selected} />
+        <BarkMat
+          plant={plant}
+          selected={selected}
+          along={1.6}
+          fallback={plantCssColor(plant.trunk)}
+        />
       </mesh>
       <InstancedParts spec={spec} seed={hashStr(plant.id)} selected={selected} />
     </group>
@@ -889,18 +1144,32 @@ function TreePlant({
   const rBase = oak || gumbo ? r * 0.09 : pine ? r * 0.045 : cypress ? r * 0.1 : r * 0.055;
   const rTop = pine ? rBase * 0.7 : rBase * 0.62;
   const yCanopy = trunkH * (pine ? 1.15 : oak ? 1.35 : 1.2);
-  const blobN = oak ? 22 : jacaranda ? 18 : pine ? 10 : cypress ? 12 : sea ? 14 : 16;
+  const leafN = oak
+    ? 220
+    : jacaranda
+      ? 150
+      : pine
+        ? 110
+        : sea
+          ? 52
+          : magnolia
+            ? 72
+            : gumbo
+              ? 90
+              : citrus
+                ? 120
+                : 110;
 
   if (frangipani) {
     const arms = 6;
     return (
       <group>
         <Trunk
+          plant={plant}
           y0={y0}
           height={trunkH * 0.7}
           rBase={rBase * 1.3}
           rTop={rBase * 1.05}
-          color={plantCssColor(plant.trunk)}
           selected={selected}
           segments={8}
         />
@@ -919,21 +1188,25 @@ function TreePlant({
               castShadow
             >
               <cylinderGeometry args={[r * 0.028, r * 0.045, len, 7]} />
-              <PlantMat color={plantCssColor(plant.trunk)} roughness={0.78} selected={selected} />
+              <BarkMat
+                plant={plant}
+                selected={selected}
+                along={1.8}
+                fallback={plantCssColor(plant.trunk)}
+              />
             </mesh>
           );
         })}
-        <CanopyBlobs
+        <LeafCanopy
           plant={plant}
           y0={y0}
           sx={sx * 0.7}
           sy={sy}
           sz={sz * 0.7}
           selected={selected}
-          count={10}
+          count={40}
           yCenter={sy * 0.72}
-          spreadY={sy * 0.18}
-          blobScale={0.55}
+          spreadY={sy * 0.16}
         />
         <BloomScatter
           plant={plant}
@@ -956,27 +1229,26 @@ function TreePlant({
         {[-0.12, 0, 0.14].map((t, i) => (
           <Trunk
             key={i}
+            plant={plant}
             y0={y0}
             height={trunkH * (0.85 + i * 0.08)}
             rBase={rBase * 0.55}
             rTop={rBase * 0.35}
-            color={plantCssColor(plant.trunk)}
             selected={selected}
             lean={t * 0.8}
             segments={8}
           />
         ))}
-        <CanopyBlobs
+        <LeafCanopy
           plant={plant}
           y0={y0}
           sx={sx}
           sy={sy}
           sz={sz}
           selected={selected}
-          count={14}
+          count={100}
           yCenter={sy * 0.68}
           spreadY={sy * 0.28}
-          blobScale={0.7}
         />
         <BloomScatter
           plant={plant}
@@ -998,22 +1270,33 @@ function TreePlant({
       <group>
         <mesh position={[0, y0 + sy * 0.08, 0]} castShadow>
           <cylinderGeometry args={[r * 0.16, r * 0.28, sy * 0.16, 8]} />
-          <PlantMat color={plantCssColor(plant.trunk)} roughness={0.95} selected={selected} />
+          <BarkMat
+            plant={plant}
+            selected={selected}
+            along={1.4}
+            fallback={plantCssColor(plant.trunk)}
+          />
         </mesh>
         <Trunk
+          plant={plant}
           y0={y0 + sy * 0.08}
           height={trunkH}
           rBase={rBase}
           rTop={rTop * 0.5}
-          color={plantCssColor(plant.trunk)}
           selected={selected}
         />
-        {[0.38, 0.52, 0.66, 0.8, 0.92].map((t, i) => (
-          <mesh key={i} position={[0, y0 + sy * t, 0]} castShadow>
-            <sphereGeometry args={[r * (0.72 - i * 0.1), 12, 10]} />
-            <PlantMat color={plantCssColor(plant.foliage)} roughness={0.92} selected={selected} />
-          </mesh>
-        ))}
+        <LeafCanopy
+          plant={plant}
+          y0={y0}
+          sx={sx}
+          sy={sy}
+          sz={sz}
+          selected={selected}
+          count={130}
+          yCenter={sy * 0.62}
+          spreadY={sy * 0.55}
+          cone
+        />
       </group>
     );
   }
@@ -1021,25 +1304,25 @@ function TreePlant({
   return (
     <group>
       <Trunk
+        plant={plant}
         y0={y0}
         height={trunkH}
         rBase={rBase}
         rTop={rTop}
-        color={plantCssColor(plant.trunk)}
         selected={selected}
         lean={gumbo ? 0.08 : 0}
       />
-      <CanopyBlobs
+      <LeafCanopy
         plant={plant}
         y0={y0}
         sx={sx * (oak ? 1 : pine ? 0.7 : 0.92)}
         sy={sy}
         sz={sz * (oak ? 1 : pine ? 0.7 : 0.92)}
         selected={selected}
-        count={blobN}
+        count={leafN}
         yCenter={yCanopy}
-        spreadY={sy * (oak ? 0.38 : pine ? 0.22 : magnolia ? 0.32 : 0.28)}
-        blobScale={oak ? 0.85 : pine ? 0.55 : sea ? 0.7 : 0.72}
+        spreadY={sy * (oak ? 0.38 : pine ? 0.28 : magnolia ? 0.32 : 0.28)}
+        cone={pine}
       />
       {citrus ? (
         <FruitScatter
@@ -1104,19 +1387,23 @@ function ShrubPlant({
         <cylinderGeometry
           args={[Math.min(sx, sz) * 0.06, Math.min(sx, sz) * 0.08, sy * 0.16, 8]}
         />
-        <PlantMat color={plantCssColor(plant.trunk)} roughness={0.92} selected={selected} />
+        <BarkMat
+          plant={plant}
+          selected={selected}
+          along={1.5}
+          fallback={plantCssColor(plant.trunk)}
+        />
       </mesh>
-      <CanopyBlobs
+      <LeafCanopy
         plant={plant}
         y0={y0}
         sx={sx}
         sy={sy}
         sz={sz}
         selected={selected}
-        count={variegated ? 18 : hedge ? 12 : 14}
+        count={variegated ? 110 : hedge ? 90 : 100}
         yCenter={sy * (hedge ? 0.52 : 0.48)}
         spreadY={sy * (hedge ? 0.42 : 0.38)}
-        blobScale={hedge ? 0.62 : 0.72}
       />
       <BloomScatter
         plant={plant}
@@ -1157,7 +1444,11 @@ function RosettePlant({
     (): ScatterSpec => ({
       count: n,
       geo,
-      color: plantCssColor(plant.foliage),
+      color: cycad || !getSpeciesLeafTexture(plant)
+        ? plantCssColor(plant.foliage)
+        : "#ffffff",
+      map: cycad ? getLeafVeinTexture("palm") : getSpeciesLeafTexture(plant),
+      roughness: 0.62,
       doubleSide: true,
       place: (i, rng, dummy) => {
         const yaw = (i / n) * Math.PI * 2;
@@ -1170,7 +1461,7 @@ function RosettePlant({
         );
       },
     }),
-    [cycad, geo, n, plant.foliage, sx, sy, sz, y0],
+    [cycad, geo, n, plant, sx, sy, sz, y0],
   );
   return (
     <group>
@@ -1215,11 +1506,14 @@ function PaddleClump({
     [ear],
   );
   const n = banana ? 9 : ear ? 7 : phil ? 10 : 8;
+  const leafMap = getSpeciesLeafTexture(plant);
   const spec = useMemo(
     (): ScatterSpec => ({
       count: n,
       geo,
-      color: plantCssColor(plant.foliage),
+      color: leafMap ? "#ffffff" : plantCssColor(plant.foliage),
+      map: leafMap,
+      roughness: 0.45,
       doubleSide: true,
       place: (i, rng, dummy) => {
         const a = (i / n) * Math.PI * 2 + rng() * 0.2;
@@ -1241,7 +1535,7 @@ function PaddleClump({
         );
       },
     }),
-    [banana, ear, geo, n, phil, plant.foliage, sx, sy, sz, y0],
+    [banana, ear, geo, leafMap, n, phil, plant.foliage, sx, sy, sz, y0],
   );
   return (
     <group>
@@ -1254,7 +1548,12 @@ function PaddleClump({
             8,
           ]}
         />
-        <PlantMat color={plantCssColor(plant.trunk)} roughness={0.82} selected={selected} />
+        <BarkMat
+          plant={plant}
+          selected={selected}
+          along={banana ? 2.4 : 1.6}
+          fallback={plantCssColor(plant.trunk)}
+        />
       </mesh>
       <InstancedParts spec={spec} seed={hashStr(plant.id)} selected={selected} />
       {(() => {
@@ -1296,11 +1595,14 @@ function CordylinePlant({
 }) {
   const y0 = -sy / 2;
   const geo = useMemo(() => swordGeometry(), []);
+  const leafMap = getSpeciesLeafTexture(plant);
   const spec = useMemo(
     (): ScatterSpec => ({
       count: 22,
       geo,
-      color: plantCssColor(plant.foliage),
+      color: leafMap ? "#ffffff" : plantCssColor(plant.foliage),
+      map: leafMap,
+      roughness: 0.55,
       doubleSide: true,
       place: (i, rng, dummy) => {
         dummy.position.set(0, y0 + sy * 0.42, 0);
@@ -1312,16 +1614,16 @@ function CordylinePlant({
         );
       },
     }),
-    [geo, plant.foliage, sx, sy, sz, y0],
+    [geo, leafMap, plant.foliage, sx, sy, sz, y0],
   );
   return (
     <group>
       <Trunk
+        plant={plant}
         y0={y0}
         height={sy * 0.45}
         rBase={Math.min(sx, sz) * 0.045}
         rTop={Math.min(sx, sz) * 0.035}
-        color={plantCssColor(plant.trunk)}
         selected={selected}
         segments={7}
       />
@@ -1350,6 +1652,8 @@ function FernPlant({
       count: 18,
       geo,
       color: plantCssColor(plant.foliage),
+      map: getLeafVeinTexture("palm"),
+      roughness: 0.68,
       doubleSide: true,
       place: (i, rng, dummy) => {
         const yaw = (i / 18) * Math.PI * 2;
