@@ -14,6 +14,7 @@ import { ClipPlanesContext } from "@/lib/cad3d/clipContext";
 import {
   getLeafVeinTexture,
   getPlantBarkTexture,
+  getSeaGrapeLeafTexture,
   getSpeciesLeafTexture,
   leafHabitFor,
   plantBarkKind,
@@ -493,6 +494,49 @@ function leafGeometry(habit: LeafHabit): THREE.BufferGeometry {
     return mergeGeoms(parts);
   }
   return outlineLeaf(ovalOutline((t) => Math.sin(t * Math.PI) * 0.28));
+}
+
+function seaGrapeLeafGeometry(): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  const n = 20;
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+    const x = Math.cos(a) * 0.5;
+    const y = Math.max(0.26, 0.6 + Math.sin(a) * 0.46);
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  shape.closePath();
+  const blade = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.06,
+    bevelEnabled: true,
+    bevelThickness: 0.012,
+    bevelSize: 0.016,
+    bevelSegments: 1,
+    steps: 1,
+  });
+  blade.translate(0, 0, -0.036);
+  const pos = blade.getAttribute("position");
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const d = Math.hypot(x, y - 0.6);
+    pos.setZ(i, pos.getZ(i) - d * d * 0.14);
+  }
+  pos.needsUpdate = true;
+  const petiole = new THREE.CylinderGeometry(0.026, 0.038, 0.28, 6);
+  petiole.translate(0, 0.14, 0);
+  const rib = new THREE.CylinderGeometry(0.01, 0.018, 0.7, 5);
+  rib.translate(0, 0.58, 0.038);
+  const parts = [petiole, blade, rib];
+  for (const ang of [-0.62, -0.32, 0.32, 0.62]) {
+    const vein = new THREE.CylinderGeometry(0.005, 0.009, 0.36, 4);
+    vein.translate(0, 0.18, 0);
+    vein.rotateZ(ang);
+    vein.translate(0, 0.4, 0.032);
+    parts.push(vein);
+  }
+  return mergeGeoms(parts);
 }
 
 function paddleGeometry(): THREE.BufferGeometry {
@@ -1294,7 +1338,7 @@ function BranchedLeafTree({
   sy: number;
   sz: number;
   selected: boolean;
-  kind: "citrus" | "sea_grape";
+  kind: "citrus";
 }) {
   const y0 = -sy / 2;
   const r = Math.min(sx, sz) * 0.5;
@@ -1473,6 +1517,267 @@ function BranchedLeafTree({
   );
 }
 
+function SeaGrapePlant({
+  plant,
+  sx,
+  sy,
+  sz,
+  selected,
+}: {
+  plant: FloridaPlant;
+  sx: number;
+  sy: number;
+  sz: number;
+  selected: boolean;
+}) {
+  const y0 = -sy / 2;
+  const r = Math.min(sx, sz) * 0.5;
+  const trunkH = sy * 0.4;
+  const rBase = r * 0.1;
+  const rTop = rBase * 0.68;
+  const lean = 0.12;
+  const geo = useMemo(() => seaGrapeLeafGeometry(), []);
+  const grapeGeo = useMemo(() => {
+    const parts: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < 8; i++) {
+      const g = new THREE.SphereGeometry(0.028, 6, 5);
+      const a = (i / 8) * Math.PI * 2;
+      const row = i < 3 ? 0 : i < 6 ? 1 : 2;
+      g.translate(Math.cos(a) * (0.04 + row * 0.01), -row * 0.055, Math.sin(a) * 0.04);
+      parts.push(g);
+    }
+    return mergeGeoms(parts);
+  }, []);
+  const greenMap = getSeaGrapeLeafTexture(false);
+  const bronzeMap = getSeaGrapeLeafTexture(true);
+  const seed = hashStr(plant.id) ^ Math.round(sx * 17);
+  const limbs = useMemo(() => {
+    const rng = mulberry32(seed);
+    const out: {
+      ox: number;
+      oy: number;
+      oz: number;
+      yaw: number;
+      droop: number;
+      len: number;
+      r0: number;
+      r1: number;
+    }[] = [];
+    const n = 6;
+    for (let i = 0; i < n; i++) {
+      const yaw = (i / n) * Math.PI * 2 + rng() * 0.35;
+      const droop = 0.55 + rng() * 0.4;
+      const len = r * (0.42 + rng() * 0.16);
+      const attach = y0 + trunkH * (0.38 + rng() * 0.5);
+      const b = {
+        ox: Math.sin(yaw) * rTop * 0.4,
+        oy: attach,
+        oz: Math.cos(yaw) * rTop * 0.4,
+        yaw,
+        droop,
+        len,
+        r0: rBase * 0.48,
+        r1: rBase * 0.22,
+      };
+      out.push(b);
+      const tip = limbPoint(b, 1);
+      const yaw2 = yaw + (rng() - 0.5) * 0.7;
+      out.push({
+        ox: tip.x,
+        oy: tip.y,
+        oz: tip.z,
+        yaw: yaw2,
+        droop: droop + 0.28 + rng() * 0.22,
+        len: len * (0.7 + rng() * 0.2),
+        r0: rBase * 0.22,
+        r1: rBase * 0.06,
+      });
+    }
+    return out;
+  }, [r, rBase, rTop, seed, trunkH, y0]);
+
+  const greenPoses = useMemo(() => {
+    const rng = mulberry32(seed + 5);
+    const poses: {
+      x: number;
+      y: number;
+      z: number;
+      yaw: number;
+      droop: number;
+      twist: number;
+      s: number;
+    }[] = [];
+    for (let i = 0; i < limbs.length; i++) {
+      const b = limbs[i]!;
+      const nLeaf = 5;
+      for (let k = 0; k < nLeaf; k++) {
+        const t = 0.22 + (k / (nLeaf - 1)) * 0.72;
+        const p = limbPoint(b, t);
+        const side = k % 2 === 0 ? 1 : -1;
+        poses.push({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          yaw: b.yaw + side * (0.45 + rng() * 0.2),
+          droop: 0.72 + rng() * 0.38,
+          twist: (rng() - 0.5) * 0.25,
+          s: (0.88 + rng() * 0.22) * r * 0.2,
+        });
+      }
+    }
+    return poses;
+  }, [limbs, r, seed]);
+
+  const bronzePoses = useMemo(() => {
+    const rng = mulberry32(seed + 9);
+    return limbs
+      .filter((_, i) => i % 2 === 1)
+      .map((b) => {
+        const p = limbPoint(b, 0.92 + rng() * 0.06);
+        return {
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          yaw: b.yaw + (rng() - 0.5) * 0.4,
+          droop: 0.55 + rng() * 0.25,
+          twist: 0,
+          s: r * 0.14 * (0.85 + rng() * 0.2),
+        };
+      });
+  }, [limbs, r, seed]);
+
+  const grapePoses = useMemo(() => {
+    const rng = mulberry32(seed + 11);
+    return limbs.filter((_, i) => i % 3 === 0).map((b) => {
+      const p = limbPoint(b, 0.82);
+      return { ...p, s: 0.9 + rng() * 0.25 };
+    });
+  }, [limbs, seed]);
+
+  const greenRef = useRef<THREE.InstancedMesh>(null);
+  const bronzeRef = useRef<THREE.InstancedMesh>(null);
+
+  useLayoutEffect(() => {
+    const dummy = _palmDummy;
+    const write = (
+      mesh: THREE.InstancedMesh | null,
+      poses: typeof greenPoses,
+    ) => {
+      if (!mesh) return;
+      for (let i = 0; i < poses.length; i++) {
+        const p = poses[i]!;
+        dummy.position.set(p.x, p.y, p.z);
+        dummy.scale.set(p.s, p.s, p.s);
+        setPalmFrondQuaternion(dummy, p.yaw, p.droop, p.twist);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    write(greenRef.current, greenPoses);
+    write(bronzeRef.current, bronzePoses);
+  }, [bronzePoses, greenPoses]);
+
+  const grapeSpec = useMemo((): ScatterSpec => {
+    return {
+      count: grapePoses.length,
+      geo: grapeGeo,
+      color: "#6a4a78",
+      roughness: 0.4,
+      place: (i, rng, dummy) => {
+        const p = grapePoses[i]!;
+        dummy.position.set(p.x, p.y - r * 0.06, p.z);
+        dummy.rotation.set(0.2, rng() * Math.PI, 0);
+        dummy.scale.setScalar(p.s);
+      },
+    };
+  }, [grapeGeo, grapePoses, r]);
+
+  return (
+    <group>
+      <mesh position={[0, y0 + rBase * 0.45, 0]} castShadow>
+        <sphereGeometry args={[rBase * 1.15, 10, 8]} />
+        <BarkMat
+          plant={plant}
+          selected={selected}
+          along={1.2}
+          fallback={plantCssColor(plant.trunk)}
+        />
+      </mesh>
+      <Trunk
+        plant={plant}
+        y0={y0}
+        height={trunkH}
+        rBase={rBase}
+        rTop={rTop}
+        selected={selected}
+        lean={lean}
+      />
+      {limbs.map((b, i) => {
+        const mid = limbPoint(b, 0.5);
+        const tip = limbPoint(b, 1);
+        setPalmFrondQuaternion(_palmDummy, b.yaw, b.droop, 0);
+        const q = _palmDummy.quaternion;
+        return (
+          <group key={i}>
+            <mesh
+              position={[mid.x, mid.y, mid.z]}
+              quaternion={[q.x, q.y, q.z, q.w]}
+              castShadow
+            >
+              <cylinderGeometry args={[b.r1, b.r0, b.len, 7]} />
+              <BarkMat
+                plant={plant}
+                selected={selected}
+                along={1.4}
+                fallback={plantCssColor(plant.trunk)}
+              />
+            </mesh>
+            <mesh position={[tip.x, tip.y, tip.z]} castShadow>
+              <sphereGeometry args={[b.r1 * 1.05, 6, 5]} />
+              <BarkMat
+                plant={plant}
+                selected={selected}
+                along={1}
+                fallback={plantCssColor(plant.trunk)}
+              />
+            </mesh>
+          </group>
+        );
+      })}
+      <instancedMesh
+        ref={greenRef}
+        args={[geo, undefined, greenPoses.length]}
+        castShadow
+        frustumCulled={false}
+      >
+        <PlantMat
+          color={greenMap ? "#ffffff" : plantCssColor(plant.foliage)}
+          map={greenMap}
+          roughness={0.46}
+          selected={selected}
+          doubleSide
+        />
+      </instancedMesh>
+      <instancedMesh
+        ref={bronzeRef}
+        args={[geo, undefined, bronzePoses.length]}
+        castShadow
+        frustumCulled={false}
+      >
+        <PlantMat
+          color={bronzeMap ? "#ffffff" : "#b05a32"}
+          map={bronzeMap}
+          roughness={0.5}
+          selected={selected}
+          doubleSide
+        />
+      </instancedMesh>
+      <InstancedParts spec={grapeSpec} seed={seed + 21} selected={selected} />
+    </group>
+  );
+}
+
 function TreePlant({
   plant,
   sx,
@@ -1498,7 +1803,7 @@ function TreePlant({
   const citrus = plant.form === "citrus";
   const sea = plant.form === "sea_grape";
   const jacaranda = plant.form === "jacaranda";
-  if (citrus || sea) {
+  if (citrus) {
     return (
       <BranchedLeafTree
         plant={plant}
@@ -1506,8 +1811,13 @@ function TreePlant({
         sy={sy}
         sz={sz}
         selected={selected}
-        kind={citrus ? "citrus" : "sea_grape"}
+        kind="citrus"
       />
+    );
+  }
+  if (sea) {
+    return (
+      <SeaGrapePlant plant={plant} sx={sx} sy={sy} sz={sz} selected={selected} />
     );
   }
   const r = Math.min(sx, sz) * 0.5;

@@ -243,12 +243,13 @@ function drawBark(kind: PlantBarkKind): PlantBarkTex {
         rough = 72 + n * 35 + lent * 20;
         height = 130 + n * 30 + lent * 25;
       } else if (kind === "seagrape") {
-        const n = fbm(u * 4, v * 7, 15, 4);
-        r = 118 + n * 36;
-        g = 112 + n * 28;
-        b = 98 + n * 22;
-        rough = 80 + n * 40;
-        height = 140 + n * 25;
+        const n = fbm(u * 3, v * 6, 15, 4);
+        const plate = fbm(u * 8, v * 10, 21, 3);
+        r = 78 + n * 42 + plate * 16;
+        g = 72 + n * 32 + plate * 10;
+        b = 58 + n * 24;
+        rough = 95 + n * 50;
+        height = 100 + n * 70 + plate * 20;
       } else {
         const n = fbm(u * 8, v * 16, 2, 4);
         r = 86 + n * 40;
@@ -471,6 +472,75 @@ export function getSpeciesLeafTexture(plant: FloridaPlant): THREE.CanvasTexture 
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  leafCache.set(key, tex);
+  return tex;
+}
+
+/** Circular leathery blade with the red midrib and laterals of Coccoloba uvifera. */
+export function getSeaGrapeLeafTexture(bronze = false): THREE.CanvasTexture | null {
+  if (typeof document === "undefined") return null;
+  const key = `seagrape-leaf:${bronze ? "bronze" : "green"}`;
+  const hit = leafCache.get(key);
+  if (hit) return hit;
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const img = ctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x / size) * 2 - 1;
+      const v = y / size;
+      const n = fbm(x / 22, y / 22, 11, 3);
+      const cy = 0.6;
+      const dist = Math.hypot(u * 1.02, (v - cy) * 1.08);
+      const petiole = v < 0.26 && Math.abs(u) < 0.09;
+      let r: number;
+      let g: number;
+      let b: number;
+      if (bronze) {
+        r = 142 + n * 24;
+        g = 92 + n * 18;
+        b = 42 + n * 10;
+      } else {
+        r = 48 + n * 18;
+        g = 122 + n * 22;
+        b = 52 + n * 12;
+      }
+      if (petiole) {
+        r = mix(r, 168, 0.85);
+        g = mix(g, 58, 0.85);
+        b = mix(b, 42, 0.85);
+      } else if (dist < 0.5) {
+        const mid = Math.abs(u) < 0.045 && v > 0.24 ? 0.85 : 0;
+        let lat = 0;
+        const dy = v - 0.28;
+        if (dy > 0 && dist < 0.46) {
+          const ang = Math.atan2(u, dy);
+          lat = Math.abs(Math.sin(ang * 5.5)) < 0.16 ? 0.55 : 0;
+        }
+        const vein = Math.max(mid, lat);
+        if (vein > 0) {
+          r = mix(r, 176, vein);
+          g = mix(g, 48, vein);
+          b = mix(b, 38, vein);
+        }
+        if (dist > 0.42) {
+          const e = (dist - 0.42) / 0.08;
+          r = mix(r, r * 0.75, e);
+          g = mix(g, g * 0.82, e);
+          b = mix(b, b * 0.7, e);
+        }
+      }
+      setPx(img, x, y, r, g, b);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
   tex.needsUpdate = true;
   leafCache.set(key, tex);
   return tex;
