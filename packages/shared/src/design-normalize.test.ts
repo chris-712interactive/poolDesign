@@ -442,6 +442,36 @@ describe("flower beds", () => {
   });
 });
 
+describe("grade samples", () => {
+  it("gives duplicate ids unique values so each mark is independently selectable", () => {
+    const raw = {
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [],
+      poolBodies: [],
+      patios: [],
+      buildings: [],
+      patioCovers: [],
+      features: [],
+      objects: [],
+      plumbingRuns: [],
+      gradeSamples: [
+        { id: "ar_grade_0_3048", position: { x: 0, y: 0 }, dropMm: 304.8 },
+        { id: "ar_grade_0_3048", position: { x: 4000, y: 0 }, dropMm: 304.8 },
+        { id: "grade_ok", position: { x: 8000, y: 0 }, dropMm: 150 },
+      ],
+    } as unknown as DesignDocument;
+
+    const next = normalizeDesignDocument(raw);
+    const ids = (next.gradeSamples ?? []).map((s) => s.id);
+    assert.equal(ids.length, 3);
+    assert.equal(new Set(ids).size, 3);
+    assert.equal(ids.includes("grade_ok"), true);
+    assert.equal(ids.filter((id) => id === "ar_grade_0_3048").length, 1);
+  });
+});
+
 describe("presentation cameras", () => {
   it("sorts, names, and reindexes cameras", () => {
     const raw = {

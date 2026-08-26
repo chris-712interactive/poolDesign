@@ -385,6 +385,10 @@ type DragState =
       /** When moving several grade points, every id in the group. */
       ids?: string[];
       last: PointMm;
+      /** Pointer-down canvas coords — a click with no drag isolates this sample. */
+      startX?: number;
+      startY?: number;
+      isolateOnClick?: string;
     }
   | {
       mode: "marquee";
@@ -2670,11 +2674,14 @@ export function CadWorkspace({
         return { kind: "camera", id: camera.id };
       }
     }
-    for (let i = (design.gradeSamples ?? []).length - 1; i >= 0; i--) {
-      const sample = design.gradeSamples![i];
-      if (segmentLengthMm(point, sample.position) <= gradeHitMm) {
-        return { kind: "gradeSample", id: sample.id };
+    {
+      let best: { id: string; dist: number } | null = null;
+      for (const sample of design.gradeSamples ?? []) {
+        const dist = segmentLengthMm(point, sample.position);
+        if (dist > gradeHitMm) continue;
+        if (!best || dist < best.dist) best = { id: sample.id, dist };
       }
+      if (best) return { kind: "gradeSample", id: best.id };
     }
     for (let i = (design.objects ?? []).length - 1; i >= 0; i--) {
       const obj = design.objects[i];
@@ -3394,12 +3401,14 @@ export function CadWorkspace({
       if (hit?.kind === "gradeSample") {
         const existing = selectedGradeIds(selection);
         let ids: string[];
+        let isolateOnClick: string | undefined;
         if (e.shiftKey) {
           ids = existing.includes(hit.id)
             ? existing.filter((id) => id !== hit.id)
             : [...existing, hit.id];
         } else if (existing.includes(hit.id) && existing.length > 1) {
           ids = existing;
+          isolateOnClick = hit.id;
         } else {
           ids = [hit.id];
         }
@@ -3412,6 +3421,9 @@ export function CadWorkspace({
             id: hit.id,
             ids,
             last: point,
+            startX: local.x,
+            startY: local.y,
+            isolateOnClick,
           });
         }
         return;
@@ -4474,9 +4486,10 @@ export function CadWorkspace({
         const boxed = (designRef.current.gradeSamples ?? [])
           .filter((s) => pointInWorldRect(s.position, drag.start, drag.current))
           .map((s) => s.id);
+        const uniqueBoxed = [...new Set(boxed)];
         const ids = drag.additive
-          ? [...selectedGradeIds(selectionRef.current), ...boxed]
-          : boxed;
+          ? [...selectedGradeIds(selectionRef.current), ...uniqueBoxed]
+          : uniqueBoxed;
         setSelection(gradeSelectionFromIds(ids));
       } else if (!drag.additive) {
         setSelection(null);
@@ -4498,6 +4511,23 @@ export function CadWorkspace({
       drag?.mode === "infinityWeir" ||
       drag?.mode === "survey"
     ) {
+      if (
+        drag.mode === "move" &&
+        drag.kind === "gradeSample" &&
+        drag.isolateOnClick &&
+        drag.startX != null &&
+        drag.startY != null
+      ) {
+        const local = e
+          ? canvasLocal(e)
+          : { x: drag.startX, y: drag.startY };
+        if (
+          Math.hypot(local.x - drag.startX, local.y - drag.startY) <
+          MARQUEE_MIN_PX
+        ) {
+          setSelection({ kind: "gradeSample", id: drag.isolateOnClick });
+        }
+      }
       let next = designRef.current;
       // After reshaping a spa shell, reflow benches/equipment/plumbing inside.
       if (

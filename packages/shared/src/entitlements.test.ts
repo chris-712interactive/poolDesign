@@ -120,6 +120,23 @@ describe("grade-walk", () => {
     assert.equal(merged[0].id, "grade_manual");
     assert.equal(merged[1].id, "ar_grade_0_10");
   });
+
+  it("reassigns colliding imported ids so two walks stay independently selectable", () => {
+    const existing = [
+      { id: "ar_grade_0_10", position: { x: 0, y: 0 }, dropMm: 50 },
+    ];
+    const imported = [
+      { id: "ar_grade_0_10", position: { x: 10, y: 0 }, dropMm: 50 },
+    ];
+    const merged = mergeGradeWalkSamples({
+      existing,
+      imported,
+      replaceExisting: false,
+    });
+    assert.equal(merged.length, 2);
+    assert.equal(merged[0].id, "ar_grade_0_10");
+    assert.notEqual(merged[1].id, merged[0].id);
+  });
 });
 
 describe("quote-docs", () => {

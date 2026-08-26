@@ -863,30 +863,48 @@ function normalizePresentationCameras(
   }));
 }
 
+function uniquifyGradeSampleIds(samples: GradeSample[]): GradeSample[] {
+  const seen = new Set<string>();
+  return samples.map((s, i) => {
+    if (s.id && !seen.has(s.id)) {
+      seen.add(s.id);
+      return s;
+    }
+    let id: string;
+    do {
+      id = `grade_${i}_${Math.random().toString(36).slice(2, 10)}`;
+    } while (seen.has(id));
+    seen.add(id);
+    return { ...s, id };
+  });
+}
+
 function normalizeGradeSamples(
   samples: GradeSample[] | undefined,
 ): GradeSample[] {
   if (!Array.isArray(samples)) return [];
-  return samples
-    .filter(
-      (s) =>
-        s &&
-        typeof s.id === "string" &&
-        s.position &&
-        typeof s.position.x === "number" &&
-        typeof s.position.y === "number" &&
-        typeof s.dropMm === "number" &&
-        Number.isFinite(s.dropMm),
-    )
-    .map((s) => ({
-      id: s.id,
-      position: { x: s.position.x, y: s.position.y },
-      dropMm: s.dropMm,
-      rotationDeg:
-        typeof s.rotationDeg === "number" && Number.isFinite(s.rotationDeg)
-          ? ((s.rotationDeg % 360) + 360) % 360
-          : 0,
-    }));
+  return uniquifyGradeSampleIds(
+    samples
+      .filter(
+        (s) =>
+          s &&
+          typeof s.id === "string" &&
+          s.position &&
+          typeof s.position.x === "number" &&
+          typeof s.position.y === "number" &&
+          typeof s.dropMm === "number" &&
+          Number.isFinite(s.dropMm),
+      )
+      .map((s) => ({
+        id: s.id,
+        position: { x: s.position.x, y: s.position.y },
+        dropMm: s.dropMm,
+        rotationDeg:
+          typeof s.rotationDeg === "number" && Number.isFinite(s.rotationDeg)
+            ? ((s.rotationDeg % 360) + 360) % 360
+            : 0,
+      })),
+  );
 }
 
 function normalizeGradeOptions(

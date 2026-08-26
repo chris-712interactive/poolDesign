@@ -51,13 +51,14 @@ export function gradeWalkToSamples(input: GradeWalkImportInput): GradeSample[] {
   const prefix = input.idPrefix ?? "ar_grade";
   const samples: GradeSample[] = [];
   const sorted = [...input.points].sort((a, b) => a.distanceMm - b.distanceMm);
+  const used = new Set<string>();
 
   for (let i = 0; i < sorted.length; i++) {
     const p = sorted[i];
     if (!Number.isFinite(p.distanceMm) || p.distanceMm < 0) continue;
     if (!Number.isFinite(p.dropMm)) continue;
     samples.push({
-      id: `${prefix}_${i}_${Math.round(p.distanceMm)}`,
+      id: uniqueGradeSampleId(prefix, used),
       position: pointAlongBearing(input.origin, input.bearingDeg, p.distanceMm),
       dropMm: p.dropMm,
       rotationDeg: input.bearingDeg,
@@ -66,9 +67,20 @@ export function gradeWalkToSamples(input: GradeWalkImportInput): GradeSample[] {
   return samples;
 }
 
+function uniqueGradeSampleId(prefix: string, used: Set<string>): string {
+  let id: string;
+  do {
+    id = `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+  } while (used.has(id));
+  used.add(id);
+  return id;
+}
+
 /**
  * Merge imported samples into an existing list.
  * When replaceExisting is true, removes prior samples whose id starts with idPrefix.
+ * Imported ids that collide with remaining samples are reassigned so each
+ * grade mark stays independently selectable.
  */
 export function mergeGradeWalkSamples(opts: {
   existing: GradeSample[];
@@ -80,5 +92,13 @@ export function mergeGradeWalkSamples(opts: {
   const base = opts.replaceExisting
     ? opts.existing.filter((s) => !s.id.startsWith(prefix))
     : opts.existing;
-  return [...base, ...opts.imported];
+  const used = new Set(base.map((s) => s.id));
+  const imported = opts.imported.map((s) => {
+    if (s.id && !used.has(s.id)) {
+      used.add(s.id);
+      return s;
+    }
+    return { ...s, id: uniqueGradeSampleId(prefix, used) };
+  });
+  return [...base, ...imported];
 }
