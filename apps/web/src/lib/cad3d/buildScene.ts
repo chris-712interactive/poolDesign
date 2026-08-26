@@ -504,6 +504,8 @@ export type TriMeshDescriptor = {
   sidingId?: string;
   roofFinishId?: string;
   opacity?: number;
+  flowerBedSoilKind?: "tilled" | "mulch";
+  flowerBedWallFinish?: FlowerBedWallFinish;
 } & Selectable;
 
 export type MeshDescriptor =
@@ -540,31 +542,161 @@ function anyLayerVisible(design: DesignDocument, ...ids: string[]): boolean {
   return present.some((id) => layerVisible(design, id));
 }
 
-function flowerBedGradeY(
-  outline: PointMm[],
+const TILLED_SOIL_LIFT_M = 0.02;
+
+function planGradeY(
+  plan: PointMm,
   patios: { outline: PointMm[] }[],
   gradeSamples: Parameters<typeof existingGradeDropMm>[1],
 ): number {
-  const bb = outlineBounds(outline);
-  const center = { x: bb.cx, y: bb.cy };
   for (const patio of patios) {
-    if (patio.outline.length >= 3 && pointInPolygon(center, patio.outline)) {
+    if (patio.outline.length >= 3 && pointInPolygon(plan, patio.outline)) {
       return mmToMeters(PATIO_SLAB_THICKNESS_MM);
     }
   }
-  return -mmToMeters(existingGradeDropMm(center, gradeSamples));
+  return -mmToMeters(existingGradeDropMm(plan, gradeSamples));
 }
 
 function flowerBedSoilTopY(
   bed: FlowerBedRegion,
+  plan: PointMm,
   patios: { outline: PointMm[] }[],
   gradeSamples: Parameters<typeof existingGradeDropMm>[1],
 ): number {
-  const gradeY = flowerBedGradeY(bed.outline, patios, gradeSamples);
+  const gradeY = planGradeY(plan, patios, gradeSamples);
   if (bed.style === "raised") {
     return gradeY + mmToMeters(flowerBedHeightMm(bed)) - 0.05;
   }
-  return gradeY + 0.08;
+  return gradeY + TILLED_SOIL_LIFT_M;
+}
+
+type DrapedTris = {
+  positions: number[];
+  uvs: number[];
+  indices: number[];
+};
+
+function appendDrapedPolygon(
+  into: DrapedTris,
+  outline: PointMm[],
+  patios: { outline: PointMm[] }[],
+  gradeSamples: Parameters<typeof existingGradeDropMm>[1],
+  liftM: number,
+  hole?: PointMm[],
+): boolean {
+  const ring = flattenClosedOutline(outline);
+  if (ring.length < 3) return false;
+  const holeRing = hole && hole.length >= 3 ? flattenClosedOutline(hole) : null;
+  const bb = outlineBounds(ring);
+  if (bb.width < 40 || bb.height < 40) return false;
+  const span = Math.max(bb.width, bb.height);
+  const stepMm = Math.max(160, Math.min(360, span / 20));
+  const cols = Math.max(2, Math.ceil(bb.width / stepMm) + 1);
+  const rows = Math.max(2, Math.ceil(bb.height / stepMm) + 1);
+  const cellW = bb.width / (cols - 1);
+  const cellH = bb.height / (rows - 1);
+  const base = into.positions.length / 3;
+  const inside: boolean[] = [];
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const plan = { x: bb.minX + i * cellW, y: bb.minY + j * cellH };
+      const xz = planToWorldXZ(plan);
+      const y = planGradeY(plan, patios, gradeSamples) + liftM;
+      into.positions.push(xz.x, y, xz.z);
+      into.uvs.push(xz.x, xz.z);
+      const inOuter = pointInPolygon(plan, ring);
+      const inHole = holeRing ? pointInPolygon(plan, holeRing) : false;
+      inside.push(inOuter && !inHole);
+    }
+  }
+  let added = false;
+  for (let j = 0; j < rows - 1; j++) {
+    for (let i = 0; i < cols - 1; i++) {
+      const a = base + j * cols + i;
+      const b = a + 1;
+      const c = a + cols;
+      const d = c + 1;
+      const ia = inside[j * cols + i];
+      const ib = inside[j * cols + i + 1];
+      const ic = inside[(j + 1) * cols + i];
+      const id = inside[(j + 1) * cols + i + 1];
+      // Same winding as grass terrain. Keep a triangle when most of it is soil.
+      if ((ia ? 1 : 0) + (ib ? 1 : 0) + (ic ? 1 : 0) >= 2) {
+        into.indices.push(a, b, c);
+        added = true;
+      }
+      if ((ib ? 1 : 0) + (id ? 1 : 0) + (ic ? 1 : 0) >= 2) {
+        into.indices.push(b, d, c);
+        added = true;
+      }
+    }
+  }
+  return added;
+}
+
+function appendDrapedWallRing(
+  into: DrapedTris,
+  outline: PointMm[],
+  patios: { outline: PointMm[] }[],
+  gradeSamples: Parameters<typeof existingGradeDropMm>[1],
+  bottomInsetM: number,
+  heightM: number,
+  inward: boolean,
+): void {
+  const ring = flattenClosedOutline(outline);
+  if (ring.length < 2) return;
+  const n = ring.length;
+  const stepMm = 320;
+  type Node = { plan: PointMm; xz: { x: number; z: number }; y0: number };
+  const nodes: Node[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % n];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const segs = Math.max(1, Math.ceil(len / stepMm));
+    for (let s = 0; s < segs; s++) {
+      const t = s / segs;
+      const plan = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      const xz = planToWorldXZ(plan);
+      nodes.push({
+        plan,
+        xz,
+        y0: planGradeY(plan, patios, gradeSamples) - bottomInsetM,
+      });
+    }
+  }
+  if (nodes.length < 2) return;
+  for (let i = 0; i < nodes.length; i++) {
+    const a = nodes[i];
+    const b = nodes[(i + 1) % nodes.length];
+    const dx = b.xz.x - a.xz.x;
+    const dz = b.xz.z - a.xz.z;
+    const edge = Math.hypot(dx, dz);
+    if (edge < 1e-4) continue;
+    const y1a = a.y0 + heightM;
+    const y1b = b.y0 + heightM;
+    const u0 = i * 0.45;
+    const u1 = u0 + edge;
+    const base = into.positions.length / 3;
+    const verts = inward
+      ? [
+          [a.xz.x, a.y0, a.xz.z, u0, 0],
+          [b.xz.x, b.y0, b.xz.z, u1, 0],
+          [b.xz.x, y1b, b.xz.z, u1, heightM],
+          [a.xz.x, y1a, a.xz.z, u0, heightM],
+        ]
+      : [
+          [b.xz.x, b.y0, b.xz.z, u1, 0],
+          [a.xz.x, a.y0, a.xz.z, u0, 0],
+          [a.xz.x, y1a, a.xz.z, u0, heightM],
+          [b.xz.x, y1b, b.xz.z, u1, heightM],
+        ];
+    for (const v of verts) {
+      into.positions.push(v[0], v[1], v[2]);
+      into.uvs.push(v[3], v[4]);
+    }
+    into.indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
 }
 
 function closeOutline(outline: PointMm[]): PointMm[] {
@@ -2747,13 +2879,8 @@ export function buildSceneModel(
   const patioGrassHoles = patioClusters
     .map((c) => ringPoints(c.outline))
     .filter((h) => h.length >= 3 && isAxisAlignedRect(h, 80));
-  const flowerBedGrassHoles = anyLayerVisible(design, "furniture")
-    ? (design.flowerBeds ?? [])
-        .map((b) => ringPoints(b.outline))
-        .filter((h) => h.length >= 3 && isAxisAlignedRect(h, 80))
-    : [];
   const groundHoles = deckPunchHoles(
-    [...poolPitHoles, ...patioGrassHoles, ...flowerBedGrassHoles],
+    [...poolPitHoles, ...patioGrassHoles],
     infinityTroughCuts,
   );
   const groundRegions = subtractAabbHoles(groundOutline, groundHoles);
@@ -4575,51 +4702,114 @@ export function buildSceneModel(
 
   if (anyLayerVisible(design, "furniture")) {
     let bi = 0;
+    const patios = design.patios ?? [];
     for (const bed of design.flowerBeds ?? []) {
       if (bed.outline.length < 3) continue;
       const select: SceneSelection = { kind: "flowerBed", id: bed.id };
-      const gradeY = flowerBedGradeY(bed.outline, design.patios ?? [], gradeSamples);
       if (bed.style === "raised") {
-        const wallMm = flowerBedWallThicknessMm(
-          resolveFlowerBedWallFinish(bed.wallFinish),
-        );
+        const wallFinish = resolveFlowerBedWallFinish(bed.wallFinish);
+        const wallMm = flowerBedWallThicknessMm(wallFinish);
         const wallH = mmToMeters(flowerBedHeightMm(bed));
         const inner = insetClosedOutline(bed.outline, wallMm);
         const innerOk =
           inner.length >= 3 &&
-          Math.abs(polygonAreaMm2(inner)) > Math.abs(polygonAreaMm2(bed.outline)) * 0.15;
-        meshes.push({
-          kind: "extrude",
-          id: `flowerbed_wall_${bed.id}_${bi++}`,
-          material: "flowerBedWall",
-          outlineMm: bed.outline,
-          holeOutlineMm: innerOk ? inner : undefined,
-          bottomY: gradeY - 0.04,
-          height: wallH + 0.04,
-          flowerBedWallFinish: resolveFlowerBedWallFinish(bed.wallFinish),
-          select,
-        });
-        meshes.push({
-          kind: "extrude",
-          id: `flowerbed_soil_${bed.id}_${bi++}`,
-          material: "flowerBedSoil",
-          outlineMm: innerOk ? inner : bed.outline,
-          bottomY: gradeY + 0.01,
-          height: Math.max(0.06, wallH - 0.05),
-          flowerBedSoilKind: "mulch",
-          select,
-        });
+          Math.abs(polygonAreaMm2(inner)) >
+            Math.abs(polygonAreaMm2(bed.outline)) * 0.15;
+        const walls: DrapedTris = { positions: [], uvs: [], indices: [] };
+        appendDrapedWallRing(
+          walls,
+          bed.outline,
+          patios,
+          gradeSamples,
+          0.04,
+          wallH + 0.04,
+          false,
+        );
+        if (innerOk) {
+          appendDrapedWallRing(
+            walls,
+            inner,
+            patios,
+            gradeSamples,
+            0.04,
+            wallH + 0.04,
+            true,
+          );
+        }
+        const cap: DrapedTris = { positions: [], uvs: [], indices: [] };
+        appendDrapedPolygon(
+          cap,
+          bed.outline,
+          patios,
+          gradeSamples,
+          wallH,
+          innerOk ? inner : undefined,
+        );
+        if (walls.indices.length >= 3) {
+          meshes.push({
+            kind: "triMesh",
+            id: `flowerbed_wall_${bed.id}_${bi++}`,
+            material: "flowerBedWall",
+            positions: walls.positions,
+            uvs: walls.uvs,
+            indices: walls.indices,
+            flowerBedWallFinish: wallFinish,
+            select,
+          });
+        }
+        if (cap.indices.length >= 3) {
+          meshes.push({
+            kind: "triMesh",
+            id: `flowerbed_cap_${bed.id}_${bi++}`,
+            material: "flowerBedWall",
+            positions: cap.positions,
+            uvs: cap.uvs,
+            indices: cap.indices,
+            flowerBedWallFinish: wallFinish,
+            select,
+          });
+        }
+        const soil: DrapedTris = { positions: [], uvs: [], indices: [] };
+        appendDrapedPolygon(
+          soil,
+          innerOk ? inner : bed.outline,
+          patios,
+          gradeSamples,
+          Math.max(0.06, wallH - 0.05),
+        );
+        if (soil.indices.length >= 3) {
+          meshes.push({
+            kind: "triMesh",
+            id: `flowerbed_soil_${bed.id}_${bi++}`,
+            material: "flowerBedSoil",
+            positions: soil.positions,
+            uvs: soil.uvs,
+            indices: soil.indices,
+            flowerBedSoilKind: "mulch",
+            select,
+          });
+        }
       } else {
-        meshes.push({
-          kind: "extrude",
-          id: `flowerbed_soil_${bed.id}_${bi++}`,
-          material: "flowerBedSoil",
-          outlineMm: bed.outline,
-          bottomY: gradeY - 0.02,
-          height: 0.1,
-          flowerBedSoilKind: "tilled",
-          select,
-        });
+        const soil: DrapedTris = { positions: [], uvs: [], indices: [] };
+        appendDrapedPolygon(
+          soil,
+          bed.outline,
+          patios,
+          gradeSamples,
+          TILLED_SOIL_LIFT_M,
+        );
+        if (soil.indices.length >= 3) {
+          meshes.push({
+            kind: "triMesh",
+            id: `flowerbed_soil_${bed.id}_${bi++}`,
+            material: "flowerBedSoil",
+            positions: soil.positions,
+            uvs: soil.uvs,
+            indices: soil.indices,
+            flowerBedSoilKind: "tilled",
+            select,
+          });
+        }
       }
     }
   }
@@ -4691,7 +4881,7 @@ export function buildSceneModel(
       (b) => b.outline.length >= 3 && pointInPolygon(obj.position, b.outline),
     );
     const groundY = inBed
-      ? flowerBedSoilTopY(inBed, design.patios ?? [], gradeSamples)
+      ? flowerBedSoilTopY(inBed, obj.position, design.patios ?? [], gradeSamples)
       : onPatio
         ? mmToMeters(PATIO_SLAB_THICKNESS_MM)
         : -mmToMeters(existingGradeDropMm(obj.position, gradeSamples));

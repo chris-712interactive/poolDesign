@@ -769,6 +769,8 @@ function TriMesh({
         colorHex={desc.colorHex}
         houseSidingId={desc.sidingId}
         roofFinishId={desc.roofFinishId}
+        flowerBedSoilKind={desc.flowerBedSoilKind}
+        flowerBedWallFinish={desc.flowerBedWallFinish}
       />
     </mesh>
   );
