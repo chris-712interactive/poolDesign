@@ -1824,6 +1824,15 @@ function buildProfiledBasinSurface(opts: {
   for (let i = 0; i < sCount; i++) {
     sMarks.push(sMin + ((sMax - sMin) * i) / (sCount - 1));
   }
+  for (const p of open) {
+    const tt =
+      ((p.x - origin.x) * axis.x + (p.y - origin.y) * axis.y) / axisLen;
+    const ss = (p.x - origin.x) * perp.x + (p.y - origin.y) * perp.y;
+    if (Number.isFinite(tt) && Number.isFinite(ss)) {
+      tMarks.push(Math.min(1.02, Math.max(-0.02, tt)));
+      sMarks.push(ss);
+    }
+  }
 
   const shelves = (opts.shallowFootprints ?? [])
     .map((s) => ({
@@ -1921,10 +1930,7 @@ function buildProfiledBasinSurface(opts: {
             )));
       if (
         inPoly &&
-        holes.some(
-          (h) =>
-            pointInPolygon(plan, h) || distToPolygonBoundaryMm(plan, h) <= 40,
-        )
+        holes.some((h) => pointInPolygon(plan, h))
       ) {
         inPoly = false;
       }
@@ -1942,8 +1948,8 @@ function buildProfiledBasinSurface(opts: {
   }
 
   const indices: number[] = [];
-  const emitTri = (a: number, b: number, c: number) => {
-    if (!inside[a] || !inside[b] || !inside[c]) return;
+  const emitTri = (a: number, b: number, c: number, force = false) => {
+    if (!force && (!inside[a] || !inside[b] || !inside[c])) return;
     indices.push(a, b, c);
   };
 
@@ -1966,6 +1972,32 @@ function buildProfiledBasinSurface(opts: {
         else if (!inside[b]) emitTri(a, d, c);
         else if (!inside[c]) emitTri(a, b, d);
         else emitTri(a, b, c);
+      } else if (count >= 1) {
+        // Edge cells along the waterline often have 1–2 corners outside the
+        // polygon. If the quad sits in the basin, keep it so water meets the
+        // wall instead of leaving a dry frame.
+        const t0 = tSamples[ti];
+        const t1 = tSamples[ti + 1];
+        const s0 = sSamples[si];
+        const s1 = sSamples[si + 1];
+        const midPlan = {
+          x:
+            origin.x +
+            axis.x * axisLen * ((t0 + t1) / 2) +
+            perp.x * ((s0 + s1) / 2),
+          y:
+            origin.y +
+            axis.y * axisLen * ((t0 + t1) / 2) +
+            perp.y * ((s0 + s1) / 2),
+        };
+        const midIn =
+          pointInPolygon(midPlan, open) ||
+          distToPolygonBoundaryMm(midPlan, open) <= Math.max(edgePad, 25);
+        const midHole = holes.some((h) => pointInPolygon(midPlan, h));
+        if (midIn && !midHole) {
+          emitTri(a, b, d, true);
+          emitTri(a, d, c, true);
+        }
       }
     }
   }

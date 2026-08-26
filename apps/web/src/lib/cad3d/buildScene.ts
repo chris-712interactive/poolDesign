@@ -3905,13 +3905,14 @@ export function buildSceneModel(
             : outer;
         const wallOutline =
           wrapSpaJoin && clippedOuter.length >= 3 ? clippedOuter : outer;
-        const waterInner = insetClosedOutline(outer, wallT);
-        // Floor extends under the wall thickness so the shell seals (no light leaks).
-        const floorInner = insetClosedOutline(outer, wallT * 0.35);
+        // Water/floor follow the same shell: inset the wrapped L so the
+        // surface meets the inner wall face (including spa returns).
+        const waterInner = insetClosedOutline(wallOutline, wallT);
+        const floorInner = insetClosedOutline(wallOutline, wallT * 0.35);
         const floorOutline =
-          spaClippers.length > 0
-            ? clipOutlineByAabbs(floorInner, spaClippers)
-            : floorInner;
+          wrapSpaJoin || spaClippers.length === 0
+            ? floorInner
+            : clipOutlineByAabbs(floorInner, spaClippers);
 
         const floorY = -depthM;
         const infinityEdges = resolveInfinityEdges(body);
@@ -3919,9 +3920,9 @@ export function buildSceneModel(
         // Snap the vanishing edge out to the weir so wall inset does not leave
         // a dry cap across the spill.
         const waterOutline = snapOutlineToWeirFaces(
-          spaClippers.length > 0
-            ? clipOutlineByAabbs(waterInner, spaClippers)
-            : waterInner,
+          wrapSpaJoin || spaClippers.length === 0
+            ? waterInner
+            : clipOutlineByAabbs(waterInner, spaClippers),
           infinityEdges,
         );
         // Edge indexes come from the authorable pool outline, not spa-clipped walls.
@@ -4107,9 +4108,14 @@ export function buildSceneModel(
             waterTopY,
             select,
             waterMaterial: "poolWater",
-            // Punch spa only — a sunshelf hole left a dry gap at the ledge.
-            holeOutlinesMm: spaClippers.length > 0 ? spaClippers : undefined,
-            omitSides: spaClippers.length > 0,
+            // Raised spa: punch the spa out of the rectangular water.
+            // Waterline spa: the L inset already omits the spa — a second
+            // hole left a dry ring between water and the shared walls.
+            holeOutlinesMm:
+              wrapSpaJoin || spaClippers.length === 0
+                ? undefined
+                : spaClippers,
+            omitSides: !wrapSpaJoin && spaClippers.length > 0,
             shallowFootprints:
               shallowFootprints.length > 0 ? shallowFootprints : undefined,
             profile: profileFields,
