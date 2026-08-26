@@ -106,6 +106,7 @@ import {
   openingEndpoints,
   resolveOpeningEdge,
 } from "@/lib/cad/draw";
+import { drapePlanPolygon } from "@/lib/cad3d/drapeSurface";
 
 /** Mirrors CadWorkspace selection (non-null). */
 export type SceneSelection =
@@ -542,7 +543,7 @@ function anyLayerVisible(design: DesignDocument, ...ids: string[]): boolean {
   return present.some((id) => layerVisible(design, id));
 }
 
-const TILLED_SOIL_LIFT_M = 0.02;
+const TILLED_SOIL_LIFT_M = 0.03;
 
 function planGradeY(
   plan: PointMm,
@@ -584,54 +585,18 @@ function appendDrapedPolygon(
   liftM: number,
   hole?: PointMm[],
 ): boolean {
-  const ring = flattenClosedOutline(outline);
-  if (ring.length < 3) return false;
-  const holeRing = hole && hole.length >= 3 ? flattenClosedOutline(hole) : null;
-  const bb = outlineBounds(ring);
-  if (bb.width < 40 || bb.height < 40) return false;
-  const span = Math.max(bb.width, bb.height);
-  const stepMm = Math.max(160, Math.min(360, span / 20));
-  const cols = Math.max(2, Math.ceil(bb.width / stepMm) + 1);
-  const rows = Math.max(2, Math.ceil(bb.height / stepMm) + 1);
-  const cellW = bb.width / (cols - 1);
-  const cellH = bb.height / (rows - 1);
+  const draped = drapePlanPolygon(
+    outline,
+    hole,
+    (plan) => planGradeY(plan, patios, gradeSamples),
+    liftM,
+  );
+  if (!draped || draped.indices.length < 3) return false;
   const base = into.positions.length / 3;
-  const inside: boolean[] = [];
-  for (let j = 0; j < rows; j++) {
-    for (let i = 0; i < cols; i++) {
-      const plan = { x: bb.minX + i * cellW, y: bb.minY + j * cellH };
-      const xz = planToWorldXZ(plan);
-      const y = planGradeY(plan, patios, gradeSamples) + liftM;
-      into.positions.push(xz.x, y, xz.z);
-      into.uvs.push(xz.x, xz.z);
-      const inOuter = pointInPolygon(plan, ring);
-      const inHole = holeRing ? pointInPolygon(plan, holeRing) : false;
-      inside.push(inOuter && !inHole);
-    }
-  }
-  let added = false;
-  for (let j = 0; j < rows - 1; j++) {
-    for (let i = 0; i < cols - 1; i++) {
-      const a = base + j * cols + i;
-      const b = a + 1;
-      const c = a + cols;
-      const d = c + 1;
-      const ia = inside[j * cols + i];
-      const ib = inside[j * cols + i + 1];
-      const ic = inside[(j + 1) * cols + i];
-      const id = inside[(j + 1) * cols + i + 1];
-      // Same winding as grass terrain. Keep a triangle when most of it is soil.
-      if ((ia ? 1 : 0) + (ib ? 1 : 0) + (ic ? 1 : 0) >= 2) {
-        into.indices.push(a, b, c);
-        added = true;
-      }
-      if ((ib ? 1 : 0) + (id ? 1 : 0) + (ic ? 1 : 0) >= 2) {
-        into.indices.push(b, d, c);
-        added = true;
-      }
-    }
-  }
-  return added;
+  into.positions.push(...draped.positions);
+  into.uvs.push(...draped.uvs);
+  for (const i of draped.indices) into.indices.push(base + i);
+  return true;
 }
 
 function appendDrapedWallRing(

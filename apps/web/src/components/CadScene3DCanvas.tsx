@@ -631,9 +631,19 @@ function SelectableMaterial({
         clippingPlanes={clippingPlanes}
         clipShadows={clippingPlanes.length > 0}
         // Prefer tile over coplanar plaster when viewing the wet face.
-        polygonOffset={waterline}
-        polygonOffsetFactor={waterline ? -2 : 0}
-        polygonOffsetUnits={waterline ? -2 : 0}
+      polygonOffset={
+        waterline || material === "flowerBedSoil" || material === "flowerBedWall"
+      }
+      polygonOffsetFactor={
+        waterline || material === "flowerBedSoil" || material === "flowerBedWall"
+          ? -2
+          : 0
+      }
+      polygonOffsetUnits={
+        waterline || material === "flowerBedSoil" || material === "flowerBedWall"
+          ? -2
+          : 0
+      }
       />
     );
   }
@@ -667,6 +677,15 @@ function SelectableMaterial({
       emissiveIntensity={selected ? 0.28 : 0}
       clippingPlanes={clippingPlanes}
       clipShadows={clippingPlanes.length > 0}
+      polygonOffset={
+        material === "flowerBedSoil" || material === "flowerBedWall"
+      }
+      polygonOffsetFactor={
+        material === "flowerBedSoil" || material === "flowerBedWall" ? -2 : 0
+      }
+      polygonOffsetUnits={
+        material === "flowerBedSoil" || material === "flowerBedWall" ? -2 : 0
+      }
     />
   );
 }
@@ -761,7 +780,17 @@ function TriMesh({
   const handlers = useSelectHandlers(desc.select, onSelect);
 
   return (
-    <mesh geometry={geometry} castShadow receiveShadow {...handlers}>
+    <mesh
+      geometry={geometry}
+      castShadow
+      receiveShadow
+      renderOrder={
+        desc.material === "flowerBedSoil" || desc.material === "flowerBedWall"
+          ? 1
+          : 0
+      }
+      {...handlers}
+    >
       <SelectableMaterial
         material={desc.material}
         selected={selected}
