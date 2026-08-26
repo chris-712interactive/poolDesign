@@ -787,6 +787,7 @@ function LeafCanopy({
   spreadY,
   yCenter,
   cone = false,
+  bush = false,
 }: {
   plant: FloridaPlant;
   y0: number;
@@ -798,6 +799,7 @@ function LeafCanopy({
   spreadY: number;
   yCenter: number;
   cone?: boolean;
+  bush?: boolean;
 }) {
   const habit = leafHabitFor(plant);
   const geo = useMemo(() => leafGeometry(habit), [habit]);
@@ -814,7 +816,19 @@ function LeafCanopy({
       doubleSide: true,
       place: (_i, rng, dummy) => {
         const a = rng() * Math.PI * 2;
-        if (cone) {
+        let droop: number;
+        if (bush) {
+          const t = 0.12 + rng() * 0.84;
+          const flare = 0.2 + Math.pow(t, 0.65) * 0.58;
+          const u = rng();
+          const r = (0.04 + u * 0.4) * flare;
+          dummy.position.set(
+            Math.cos(a) * r * sx,
+            y0 + t * sy,
+            Math.sin(a) * r * sz,
+          );
+          droop = 0.42 + rng() * 0.9 + u * 0.12;
+        } else if (cone) {
           const t = rng();
           const rad = (1 - t) * 0.48;
           dummy.position.set(
@@ -822,6 +836,7 @@ function LeafCanopy({
             y0 + sy * (0.32 + t * 0.62),
             Math.sin(a) * rad * sz,
           );
+          droop = 0.95 + t * 0.45;
         } else {
           const elev = (rng() - 0.18) * Math.PI * 0.85;
           const r = 0.12 + rng() * 0.42;
@@ -830,17 +845,14 @@ function LeafCanopy({
             y0 + yCenter + Math.sin(elev) * spreadY * 0.55,
             Math.sin(a) * Math.cos(elev) * r * sz,
           );
+          droop = 0.65 + rng() * 0.75;
         }
-        dummy.rotation.set(
-          0.35 + rng() * 1.05,
-          a + (rng() - 0.5) * 0.7,
-          (rng() - 0.5) * 0.55,
-        );
+        setPalmFrondQuaternion(dummy, a + (rng() - 0.5) * 0.35, droop, (rng() - 0.5) * 0.45);
         const s = 0.75 + rng() * 0.55;
         dummy.scale.set(s * size.w, s * size.l, s);
       },
     };
-  }, [cone, count, geo, glossy, habit, map, plant.foliage, size.l, size.w, spreadY, sx, sy, sz, y0, yCenter]);
+  }, [bush, cone, count, geo, glossy, habit, map, plant.foliage, size.l, size.w, spreadY, sx, sy, sz, y0, yCenter]);
   const seed = hashStr(plant.id) ^ Math.round(sx * 40);
   const alt = plant.foliageAlt;
   const altSpec = useMemo((): ScatterSpec | null => {
@@ -875,6 +887,7 @@ function BloomScatter({
   yCenter,
   spreadY,
   count,
+  bush = false,
 }: {
   plant: FloridaPlant;
   y0: number;
@@ -885,6 +898,7 @@ function BloomScatter({
   yCenter: number;
   spreadY: number;
   count: number;
+  bush?: boolean;
 }) {
   const geo = useMemo(() => flowerGeometry(plant.bloom), [plant.bloom]);
   const spec = useMemo((): ScatterSpec | null => {
@@ -897,18 +911,29 @@ function BloomScatter({
       roughness: 0.55,
       place: (_i, rng, dummy) => {
         const a = rng() * Math.PI * 2;
-        const r = 0.15 + rng() * 0.42;
-        dummy.position.set(
-          Math.cos(a) * r * sx,
-          y0 + yCenter + (rng() - 0.3) * spreadY,
-          Math.sin(a) * r * sz,
-        );
+        if (bush) {
+          const t = 0.34 + rng() * 0.58;
+          const flare = 0.32 + t * 0.5;
+          const r = (0.18 + rng() * 0.34) * flare;
+          dummy.position.set(
+            Math.cos(a) * r * sx,
+            y0 + t * sy,
+            Math.sin(a) * r * sz,
+          );
+        } else {
+          const r = 0.15 + rng() * 0.42;
+          dummy.position.set(
+            Math.cos(a) * r * sx,
+            y0 + yCenter + (rng() - 0.3) * spreadY,
+            Math.sin(a) * r * sz,
+          );
+        }
         dummy.rotation.set(rng() * 0.8, rng() * Math.PI * 2, rng() * 0.6);
         const s = scale * (0.7 + rng() * 0.6) * Math.max(0.35, Math.min(sx, sz) * 0.12);
         dummy.scale.set(s, s, s);
       },
     };
-  }, [count, geo, plant.flower, plant.flowerSize, spreadY, sx, sz, y0, yCenter]);
+  }, [bush, count, geo, plant.flower, plant.flowerSize, spreadY, sx, sy, sz, y0, yCenter]);
   if (!spec) return null;
   return (
     <InstancedParts
@@ -2099,6 +2124,77 @@ function TreePlant({
   );
 }
 
+function ShrubStems({
+  plant,
+  y0,
+  sx,
+  sy,
+  sz,
+  selected,
+  hedge,
+}: {
+  plant: FloridaPlant;
+  y0: number;
+  sx: number;
+  sy: number;
+  sz: number;
+  selected: boolean;
+  hedge: boolean;
+}) {
+  const n = hedge ? 8 : 6;
+  const geo = useMemo(() => {
+    const g = new THREE.CylinderGeometry(0.55, 1, 1, 6);
+    g.translate(0, 0.5, 0);
+    return g;
+  }, []);
+  const ref = useRef<THREE.InstancedMesh>(null);
+  useLayoutEffect(() => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    const dummy = new THREE.Object3D();
+    const rng = mulberry32(hashStr(plant.id) ^ 91);
+    const span = Math.min(sx, sz);
+    for (let i = 0; i < n; i++) {
+      dummy.quaternion.identity();
+      const yaw = hedge
+        ? (rng() - 0.5) * 0.55
+        : (i / n) * Math.PI * 2 + rng() * 0.45;
+      const h = sy * (hedge ? 0.5 : 0.46) * (0.78 + rng() * 0.32);
+      const r = span * (hedge ? 0.014 : 0.02) * (0.85 + rng() * 0.3);
+      if (hedge) {
+        dummy.position.set(
+          ((i + 0.5) / n - 0.5) * sx * 0.82,
+          y0,
+          (rng() - 0.5) * sz * 0.2,
+        );
+      } else {
+        const rad = span * (0.02 + rng() * 0.11);
+        dummy.position.set(Math.cos(yaw) * rad, y0, Math.sin(yaw) * rad);
+      }
+      dummy.scale.set(r, h, r);
+      setPalmFrondQuaternion(
+        dummy,
+        yaw,
+        hedge ? 0.05 + rng() * 0.12 : 0.14 + rng() * 0.22,
+        0,
+      );
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [geo, hedge, n, plant.id, sx, sy, sz, y0]);
+  return (
+    <instancedMesh ref={ref} args={[geo, undefined, n]} castShadow>
+      <BarkMat
+        plant={plant}
+        selected={selected}
+        along={2.1}
+        fallback={plantCssColor(plant.trunk)}
+      />
+    </instancedMesh>
+  );
+}
+
 function ShrubPlant({
   plant,
   sx,
@@ -2117,17 +2213,15 @@ function ShrubPlant({
   const variegated = plant.form === "variegated_shrub";
   return (
     <group>
-      <mesh position={[0, y0 + sy * 0.08, 0]} castShadow>
-        <cylinderGeometry
-          args={[Math.min(sx, sz) * 0.06, Math.min(sx, sz) * 0.08, sy * 0.16, 8]}
-        />
-        <BarkMat
-          plant={plant}
-          selected={selected}
-          along={1.5}
-          fallback={plantCssColor(plant.trunk)}
-        />
-      </mesh>
+      <ShrubStems
+        plant={plant}
+        y0={y0}
+        sx={sx}
+        sy={sy}
+        sz={sz}
+        selected={selected}
+        hedge={hedge}
+      />
       <LeafCanopy
         plant={plant}
         y0={y0}
@@ -2136,8 +2230,9 @@ function ShrubPlant({
         sz={sz}
         selected={selected}
         count={variegated ? 110 : hedge ? 90 : 100}
-        yCenter={sy * (hedge ? 0.52 : 0.48)}
-        spreadY={sy * (hedge ? 0.42 : 0.38)}
+        yCenter={sy * 0.5}
+        spreadY={sy * 0.4}
+        bush
       />
       <BloomScatter
         plant={plant}
@@ -2149,6 +2244,7 @@ function ShrubPlant({
         yCenter={sy * 0.55}
         spreadY={sy * 0.32}
         count={plant.bloom === "none" ? 0 : plant.form === "flowering_shrub" ? 28 : 14}
+        bush
       />
     </group>
   );
