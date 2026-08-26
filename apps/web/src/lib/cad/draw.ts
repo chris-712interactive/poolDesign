@@ -48,6 +48,7 @@ import {
   type UnitSystem,
   resolveSpaSpillovers,
   listSpaSpilloverEdges,
+  spaJoinKind,
   resolveInfinityEdges,
   listInfinityEdgeCandidates,
   infinityTroughPolygon,
@@ -252,6 +253,10 @@ export function drawSpaSpillover(
   const spills = resolveSpaSpillovers(spa, pools);
   const candidates = listSpaSpilloverEdges(spa, pools);
   if (!candidates.length && !spills.length) return;
+  const join = spaJoinKind(spa.spillover);
+  const underWater = join === "waterline" || join === "submerged";
+  const strokeHi = underWater ? "#5aa8c4" : "#7ec8e3";
+  const strokeLo = underWater ? "#0a3d52" : "#0d4f66";
 
   const drawSeg = (a: PointMm, b: PointMm, width: number, color: string) => {
     const sa = worldToScreen(a, vp);
@@ -299,8 +304,8 @@ export function drawSpaSpillover(
   }
 
   for (const spill of spills) {
-    drawSeg(spill.a, spill.b, selected ? 6 : 5, "#7ec8e3");
-    drawSeg(spill.a, spill.b, selected ? 2.5 : 2, "#0d4f66");
+    drawSeg(spill.a, spill.b, selected ? 6 : 5, strokeHi);
+    drawSeg(spill.a, spill.b, selected ? 2.5 : 2, strokeLo);
 
     const len =
       Math.hypot(spill.b.x - spill.a.x, spill.b.y - spill.a.y) || 1;
@@ -314,7 +319,7 @@ export function drawSpaSpillover(
         { x: p.x - nx * tickMm, y: p.y - ny * tickMm },
         { x: p.x + nx * tickMm, y: p.y + ny * tickMm },
         2,
-        "#0d4f66",
+        strokeLo,
       );
     }
 

@@ -28,6 +28,8 @@ import {
   type SpaSpillover,
   type BuildingStoryExterior,
   isSpaSpilloverStyle,
+  isSpaJoinKind,
+  DEFAULT_SPA_SUBMERGE_MM,
   type SpaSpilloverWeir,
   type InfinityEdge,
   type InfinityEdgeWeir,
@@ -643,6 +645,15 @@ function normalizeSpaSpillover(
   }
   if (raw.notchDepthMm != null) {
     out.notchDepthMm = clampFinite(raw.notchDepthMm, 1.5 * IN, 5, 600);
+  }
+  if (isSpaJoinKind(raw.join)) out.join = raw.join;
+  if (raw.submergeMm != null) {
+    out.submergeMm = clampFinite(
+      raw.submergeMm,
+      DEFAULT_SPA_SUBMERGE_MM,
+      6,
+      102,
+    );
   }
   if (style) out.style = style;
   if (raw.scupperCount != null) {

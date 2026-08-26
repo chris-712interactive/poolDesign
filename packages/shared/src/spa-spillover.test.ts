@@ -6,6 +6,10 @@ import {
   patchSpaSpilloverWeir,
   resolveSpaSpillover,
   resolveSpaSpillovers,
+  spaJoinKind,
+  spaSharesPoolWaterline,
+  spaSharedWallCrestY,
+  spaSubmergeMm,
   spilloverWeirFromDrag,
   splitScupperOpenings,
   wallSegmentsMinusIntervals,
@@ -262,5 +266,89 @@ describe("spa spillover", () => {
     assert.equal(keep.length, 2);
     assert.ok(keep[0].b.x <= 310);
     assert.ok(keep[1].a.x >= 690);
+  });
+
+  it("submerged join uses the full pool-facing overlap by default", () => {
+    const pool = poolBody("pool_1", rect(0, 0, 20 * FT, 40 * FT));
+    const spa = spaBody("spa_1", rect(20 * FT, 10 * FT, 28 * FT, 20 * FT), {
+      enabled: true,
+      join: "submerged",
+    });
+    const edges = listSpaSpilloverEdges(spa, [pool]);
+    const resolved = resolveSpaSpillover(spa, [pool]);
+    assert.ok(resolved);
+    assert.equal(resolved!.join, "submerged");
+    assert.equal(resolved!.openings.length, 1);
+    assert.ok(
+      Math.abs(resolved!.widthMm - edges[0].overlapLenMm) < 2,
+      `expected full overlap, got ${resolved!.widthMm} vs ${edges[0].overlapLenMm}`,
+    );
+  });
+
+  it("does not treat a deck-facing coping edge as submerged", () => {
+    const pool = poolBody("pool_1", rect(0, 0, 8000, 4000));
+    const spa = spaBody(
+      "spa_1",
+      rect(5500, 2500, 8000, 5000),
+      { enabled: true, join: "submerged" },
+    );
+    const edges = listSpaSpilloverEdges(spa, [pool]);
+    const rightEdge = edges.find((e) => {
+      const midX = (e.edgeA.x + e.edgeB.x) / 2;
+      return Math.abs(midX - 8000) < 1;
+    });
+    assert.equal(rightEdge, undefined);
+  });
+});
+
+describe("spa shared-wall crest", () => {
+  it("keeps raised spillover at or above spa water", () => {
+    const y = spaSharedWallCrestY({
+      join: "raised_spillover",
+      wallTopY: 0.557,
+      spaWaterTopY: 0.5,
+      poolWaterTopY: -0.152,
+      notchDepthMm: 38.1,
+      submergeMm: 25.4,
+      floorY: -1.1,
+    });
+    assert.ok(y >= 0.49, `raised crest ${y} should stay near spa water`);
+    assert.ok(y < 0.557);
+  });
+
+  it("places waterline and submerged crests at or under pool water", () => {
+    const waterline = spaSharedWallCrestY({
+      join: "waterline",
+      wallTopY: 0.557,
+      spaWaterTopY: -0.152,
+      poolWaterTopY: -0.152,
+      notchDepthMm: 38.1,
+      submergeMm: 25.4,
+      floorY: -1.1,
+    });
+    const submerged = spaSharedWallCrestY({
+      join: "submerged",
+      wallTopY: 0.557,
+      spaWaterTopY: -0.152,
+      poolWaterTopY: -0.152,
+      notchDepthMm: 38.1,
+      submergeMm: 25.4,
+      floorY: -1.1,
+    });
+    assert.ok(Math.abs(waterline - -0.152) < 0.002);
+    assert.ok(submerged < -0.152);
+    assert.ok(Math.abs(submerged - (-0.152 - 0.0254)) < 0.002);
+  });
+
+  it("ignores join when spillover is disabled", () => {
+    assert.equal(
+      spaJoinKind({ enabled: false, join: "submerged" }),
+      "raised_spillover",
+    );
+    assert.equal(
+      spaSharesPoolWaterline({ enabled: false, join: "submerged" }),
+      false,
+    );
+    assert.equal(spaSubmergeMm({ enabled: true, submergeMm: 12 }), 12);
   });
 });

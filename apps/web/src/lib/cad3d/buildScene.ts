@@ -69,6 +69,10 @@ import {
   subtractPolygonAabbHoles,
   aabbUnionRing,
   resolveSpaSpillovers,
+  spaJoinKind,
+  spaSharesPoolWaterline,
+  spaSharedWallCrestY,
+  spaSubmergeMm,
   spilloverOmitIntervals,
   wallSegmentsMinusIntervals,
   waterBodiesConnected,
@@ -1381,6 +1385,8 @@ function pushSpaSpilloverWater(
   },
 ) {
   if (!opts.spills.length) return;
+  // Waterline / submerged joins sit at or under pool water — no cascade drop.
+  if (opts.crestY <= opts.poolWaterTopY + 0.012) return;
   const pts = ringPoints(opts.spaOutline);
   const n = pts.length;
   if (n < 3) return;
@@ -1633,10 +1639,14 @@ function spaElevations(
     shellHMm <= 0
       ? POOL_WATER_FREEBOARD_MM
       : Math.min(75, Math.max(20, shellHMm * 0.12));
-  const spaWaterTop = Math.max(
-    poolWaterTopY,
-    wallTopY - mmToMeters(spaFreeboardMm),
-  );
+  const shareWater =
+    joinsPool && spaSharesPoolWaterline(body.spillover);
+  const spaWaterTop = shareWater
+    ? poolWaterTopY
+    : Math.max(
+        poolWaterTopY,
+        wallTopY - mmToMeters(spaFreeboardMm),
+      );
   const needsPit = spaNeedsDeckPit(body) || joinsPool;
   let floorY: number;
   if (needsPit) {
@@ -3702,15 +3712,17 @@ export function buildSceneModel(
             })
           : undefined;
         const notchDepthMm = spills[0]?.notchDepthMm ?? 0;
-        // Crest of the weir notch (below rim, at/above spa water).
+        const join = spaJoinKind(body.spillover);
         const crestY = spills.length
-          ? Math.min(
-              wallTopY - 0.01,
-              Math.max(
-                spaWaterTop - 0.005,
-                wallTopY - mmToMeters(notchDepthMm),
-              ),
-            )
+          ? spaSharedWallCrestY({
+              join,
+              wallTopY,
+              spaWaterTopY: spaWaterTop,
+              poolWaterTopY: waterTopY,
+              notchDepthMm,
+              submergeMm: spaSubmergeMm(body.spillover),
+              floorY,
+            })
           : wallTopY;
 
         const pushSpaShell = (bottomY: number, topY: number) => {
@@ -3816,7 +3828,7 @@ export function buildSceneModel(
         pushSpaSpilloverWater(meshes, {
           spills,
           spaOutline: outer,
-          crestY: Math.max(crestY, spaWaterTop),
+          crestY,
           poolWaterTopY: waterTopY,
           wallThicknessMm: wallT,
           select,

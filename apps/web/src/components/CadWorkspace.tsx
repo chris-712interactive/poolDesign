@@ -211,6 +211,9 @@ import {
   type GateKind,
   type SpaSpillover,
   type SpaSpilloverStyle,
+  type SpaJoinKind,
+  spaJoinKind,
+  spaSubmergeMm,
   type InfinityEdge,
   type InfinityEdgeStyle,
   type PatioCover,
@@ -9033,6 +9036,7 @@ function SpaShellFields({
   const canSpill = edges.length > 0;
   const spillCfg: SpaSpillover = body.spillover ?? { enabled: true };
   const enabled = canSpill && spillCfg.enabled !== false;
+  const join = spaJoinKind({ ...spillCfg, enabled: true });
   const resolved = resolveSpaSpillover(
     { ...body, spillover: { ...spillCfg, enabled } },
     pools,
@@ -9107,6 +9111,49 @@ function SpaShellFields({
           {enabled && (
             <>
               <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
+                Only edges that face pool water can sit at or under the pool
+                waterline. Patio-facing walls stay at the shell height.
+              </p>
+              <div className="field">
+                <label htmlFor="spa-join">Pool-facing wall</label>
+                <select
+                  id="spa-join"
+                  value={join}
+                  onChange={(e) =>
+                    patchSpillover({
+                      join: e.target.value as SpaJoinKind,
+                    })
+                  }
+                >
+                  <option value="raised_spillover">
+                    Raised spillover (weir below spa rim)
+                  </option>
+                  <option value="waterline">At pool waterline</option>
+                  <option value="submerged">Just under pool waterline</option>
+                </select>
+              </div>
+              {join === "submerged" && (
+                <div className="field">
+                  <label htmlFor="spa-submerge">
+                    Below pool waterline
+                  </label>
+                  <input
+                    id="spa-submerge"
+                    key={`spa-submerge-${body.id}-${spillCfg.submergeMm ?? 0}`}
+                    defaultValue={formatLength(
+                      spaSubmergeMm(spillCfg),
+                      unitSystem,
+                    )}
+                    onBlur={(e) => {
+                      const mm = parseLengthToMm(e.target.value, unitSystem);
+                      if (mm != null && mm >= 6) {
+                        patchSpillover({ submergeMm: mm });
+                      }
+                    }}
+                  />
+                </div>
+              )}
+              <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
                 On the 2D plan, select the spa and drag weir end handles to
                 resize, or the middle handle to slide along each pool-facing
                 edge.
@@ -9165,6 +9212,8 @@ function SpaShellFields({
                   );
                 })}
               </div>
+              {join === "raised_spillover" && (
+                <>
               <div className="field">
                 <label htmlFor="spa-spill-style">Style</label>
                 <select
@@ -9240,6 +9289,8 @@ function SpaShellFields({
                       }}
                     />
                   </div>
+                </>
+              )}
                 </>
               )}
             </>

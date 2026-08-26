@@ -253,6 +253,53 @@ describe("normalizeDesignDocument", () => {
     assert.ok((s.scupperGapMm ?? 0) >= 10);
   });
 
+  it("clamps spa pool-join fields", () => {
+    const raw = {
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [],
+      poolBodies: [
+        {
+          id: "spa_1",
+          name: "Spa",
+          kind: "spa",
+          outline: [
+            { x: 0, y: 0 },
+            { x: 1000, y: 0 },
+            { x: 1000, y: 1000 },
+            { x: 0, y: 1000 },
+          ],
+          depthShallowMm: 900,
+          depthDeepMm: 900,
+          spillover: {
+            enabled: true,
+            join: "submerged",
+            submergeMm: 500,
+          },
+        },
+      ],
+      plumbingRuns: [],
+    } as unknown as DesignDocument;
+
+    const next = normalizeDesignDocument(raw);
+    const s = next.poolBodies[0].spillover!;
+    assert.equal(s.join, "submerged");
+    assert.ok((s.submergeMm ?? 0) <= 102);
+    assert.ok((s.submergeMm ?? 0) >= 6);
+
+    const invalid = normalizeDesignDocument({
+      ...raw,
+      poolBodies: [
+        {
+          ...raw.poolBodies[0],
+          spillover: { enabled: true, join: "baja" },
+        },
+      ],
+    } as unknown as DesignDocument);
+    assert.equal(invalid.poolBodies[0].spillover!.join, undefined);
+  });
+
   it("clamps pool infinity-edge fields", () => {
     const raw = {
       version: 1,

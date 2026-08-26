@@ -92,6 +92,30 @@ export const SPA_SPILLOVER_STYLES: SpaSpilloverStyle[] = [
   "sheer",
 ];
 
+/**
+ * How pool-facing spa walls meet the pool water.
+ * Deck / patio-facing walls always stay at `shellHeightMm` and never go
+ * below the waterline.
+ *
+ * - raised_spillover: weir notch below the spa rim (classic spillover)
+ * - waterline: shared wall top at the pool water surface
+ * - submerged: shared wall top just under the pool waterline
+ */
+export type SpaJoinKind = "raised_spillover" | "waterline" | "submerged";
+
+export const SPA_JOIN_KINDS: SpaJoinKind[] = [
+  "raised_spillover",
+  "waterline",
+  "submerged",
+];
+
+export function isSpaJoinKind(v: unknown): v is SpaJoinKind {
+  return v === "raised_spillover" || v === "waterline" || v === "submerged";
+}
+
+/** Default drop below pool water when join is `submerged` (~1″). */
+export const DEFAULT_SPA_SUBMERGE_MM = 25.4;
+
 /** Authorable weir on one pool-facing spa edge. */
 export type SpaSpilloverWeir = {
   edgeIndex: number;
@@ -119,6 +143,16 @@ export type SpaSpillover = {
   offsetMm?: number;
   /** Notch depth below spa rim (mm) — shared across weirs */
   notchDepthMm?: number;
+  /**
+   * How pool-facing walls meet pool water. Deck-facing sides are never
+   * dropped. Defaults to raised spillover.
+   */
+  join?: SpaJoinKind;
+  /**
+   * How far below the pool waterline a submerged shared wall sits (mm).
+   * Only used when `join` is `submerged`.
+   */
+  submergeMm?: number;
   style?: SpaSpilloverStyle;
   /** Scuppers only: number of openings (2–8) */
   scupperCount?: number;

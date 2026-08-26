@@ -4,10 +4,13 @@
  */
 
 import {
+  DEFAULT_SPA_SUBMERGE_MM,
+  isSpaJoinKind,
   pointInPolygon,
   segmentLengthMm,
   type PointMm,
   type PoolBody,
+  type SpaJoinKind,
   type SpaSpillover,
   type SpaSpilloverStyle,
   type SpaSpilloverWeir,
@@ -26,6 +29,8 @@ const DEFAULT_SCUPPER_COUNT = 3;
 const DEFAULT_SCUPPER_GAP_MM = 4 * IN;
 const DEFAULT_WIDTH_FRAC = 0.6;
 const MIN_WEIR_WIDTH_MM = 24 * IN;
+const MIN_SPA_SUBMERGE_MM = 6;
+const MAX_SPA_SUBMERGE_MM = 102;
 /** Probe distance outside the spa shell to test "faces pool". */
 const FACE_PROBE_MM = 80;
 
@@ -51,17 +56,76 @@ export type ResolvedSpaSpillover = {
   poolId: string;
   edgeIndex: number;
   style: SpaSpilloverStyle;
+  join: SpaJoinKind;
   /** Full weir span along the spa edge */
   a: PointMm;
   b: PointMm;
   widthMm: number;
   notchDepthMm: number;
+  /** Drop below pool water when `join` is submerged (mm). */
+  submergeMm: number;
   /** Openings after style expansion (sheet/sheer = 1, scuppers = N) */
   openings: SpilloverOpening[];
   /** Shared overlap used for clamping */
   overlapT0: number;
   overlapT1: number;
 };
+
+/** Resolved join kind; missing/invalid values are raised spillover. */
+export function spaJoinKind(spillover?: SpaSpillover | null): SpaJoinKind {
+  if (spillover?.enabled === false) return "raised_spillover";
+  const join = spillover?.join;
+  return isSpaJoinKind(join) ? join : "raised_spillover";
+}
+
+/** True when pool-facing walls sit at or under the pool waterline. */
+export function spaSharesPoolWaterline(
+  spillover?: SpaSpillover | null,
+): boolean {
+  if (spillover?.enabled === false) return false;
+  const join = spaJoinKind(spillover);
+  return join === "waterline" || join === "submerged";
+}
+
+export function spaSubmergeMm(spillover?: SpaSpillover | null): number {
+  const raw = spillover?.submergeMm;
+  if (raw != null && Number.isFinite(raw)) {
+    return Math.min(MAX_SPA_SUBMERGE_MM, Math.max(MIN_SPA_SUBMERGE_MM, raw));
+  }
+  return DEFAULT_SPA_SUBMERGE_MM;
+}
+
+/**
+ * World Y of the pool-facing shared-wall crest (meters).
+ * Deck-facing spa walls stay at `wallTopY` and are not passed through here.
+ */
+export function spaSharedWallCrestY(opts: {
+  join: SpaJoinKind;
+  wallTopY: number;
+  spaWaterTopY: number;
+  poolWaterTopY: number;
+  notchDepthMm: number;
+  submergeMm: number;
+  floorY: number;
+}): number {
+  const minY = opts.floorY + 0.05;
+  const maxY = opts.wallTopY - 0.01;
+  let crest: number;
+  if (opts.join === "waterline") {
+    crest = opts.poolWaterTopY;
+  } else if (opts.join === "submerged") {
+    crest = opts.poolWaterTopY - opts.submergeMm / 1000;
+  } else {
+    crest = Math.min(
+      maxY,
+      Math.max(
+        opts.spaWaterTopY - 0.005,
+        opts.wallTopY - opts.notchDepthMm / 1000,
+      ),
+    );
+  }
+  return Math.max(minY, Math.min(maxY, crest));
+}
 
 function edgePoint(a: PointMm, b: PointMm, tMm: number): PointMm {
   const len = segmentLengthMm(a, b) || 1;
@@ -314,7 +378,10 @@ export function splitScupperOpenings(
   return out;
 }
 
-function defaultWidthMm(overlapLenMm: number): number {
+function defaultWidthMm(overlapLenMm: number, join: SpaJoinKind): number {
+  if (join === "waterline" || join === "submerged") {
+    return overlapLenMm;
+  }
   return Math.min(
     overlapLenMm,
     Math.max(MIN_WEIR_WIDTH_MM, overlapLenMm * DEFAULT_WIDTH_FRAC),
@@ -380,10 +447,12 @@ function resolveOneWeir(
   weir: { widthMm?: number; offsetMm?: number },
   cfg: SpaSpillover | undefined,
 ): ResolvedSpaSpillover | null {
+  const join = spaJoinKind(cfg);
+  const shareWater = join === "waterline" || join === "submerged";
   const widthRaw =
     weir.widthMm != null && Number.isFinite(weir.widthMm)
       ? weir.widthMm
-      : defaultWidthMm(edge.overlapLenMm);
+      : defaultWidthMm(edge.overlapLenMm, join);
   const offsetMm =
     weir.offsetMm != null && Number.isFinite(weir.offsetMm) ? weir.offsetMm : 0;
   const span = clampWeirSpan(
@@ -396,14 +465,18 @@ function resolveOneWeir(
 
   const a = edgePoint(edge.edgeA, edge.edgeB, span.t0);
   const b = edgePoint(edge.edgeA, edge.edgeB, span.t1);
-  const style: SpaSpilloverStyle =
-    cfg?.style === "scuppers" || cfg?.style === "sheer" ? cfg.style : "sheet";
+  const style: SpaSpilloverStyle = shareWater
+    ? "sheet"
+    : cfg?.style === "scuppers" || cfg?.style === "sheer"
+      ? cfg.style
+      : "sheet";
   const notchDepthMm = Math.max(
     5,
     cfg?.notchDepthMm != null && Number.isFinite(cfg.notchDepthMm)
       ? cfg.notchDepthMm
       : DEFAULT_NOTCH_MM,
   );
+  const submergeMm = spaSubmergeMm(cfg);
 
   let openings: SpilloverOpening[];
   if (style === "scuppers") {
@@ -422,10 +495,12 @@ function resolveOneWeir(
     poolId: edge.poolId,
     edgeIndex: edge.edgeIndex,
     style,
+    join,
     a,
     b,
     widthMm: span.t1 - span.t0,
     notchDepthMm,
+    submergeMm,
     openings,
     overlapT0: edge.overlapT0,
     overlapT1: edge.overlapT1,
