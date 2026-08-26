@@ -1634,6 +1634,79 @@ function pushSpilloverCascades(
   }
 }
 
+/**
+ * Water covering a pool-facing spa wall whose crest sits at or under the
+ * pool waterline (Baja / in-pool). A cascade ribbon has no drop to draw.
+ */
+function pushSubmergedWeirCaps(
+  meshes: MeshDescriptor[],
+  opts: {
+    spills: ResolvedSpaSpillover[];
+    spaOutline: PointMm[];
+    wallThicknessMm: number;
+    crestY: number;
+    waterTopY: number;
+    select: SceneSelection;
+    idPrefix: string;
+  },
+) {
+  if (!opts.spills.length) return;
+  const overH = opts.waterTopY - opts.crestY;
+  if (overH < 0.004) return;
+  const coverH = overH + 0.01;
+  const pts = ringPoints(opts.spaOutline);
+  if (pts.length < 3) return;
+  let i = 0;
+  for (const spill of opts.spills) {
+    for (const opening of spill.openings) {
+      const len = Math.hypot(
+        opening.b.x - opening.a.x,
+        opening.b.y - opening.a.y,
+      );
+      if (len < 40) continue;
+      const tx = (opening.b.x - opening.a.x) / len;
+      const ty = (opening.b.y - opening.a.y) / len;
+      let nx = -ty;
+      let ny = tx;
+      const mid = {
+        x: (opening.a.x + opening.b.x) / 2,
+        y: (opening.a.y + opening.b.y) / 2,
+      };
+      const probe = { x: mid.x + nx * 40, y: mid.y + ny * 40 };
+      // Cover the wall thickness toward the spa interior.
+      if (!pointInPolygon(probe, pts)) {
+        nx = -nx;
+        ny = -ny;
+      }
+      const centerPlan = {
+        x: mid.x + nx * (opts.wallThicknessMm / 2),
+        y: mid.y + ny * (opts.wallThicknessMm / 2),
+      };
+      const xz = planToWorldXZ(centerPlan);
+      meshes.push({
+        kind: "box",
+        id: `${opts.idPrefix}_weircap_${spill.edgeIndex}_${i++}`,
+        material: "spaWater",
+        position: {
+          x: xz.x,
+          y: opts.crestY + coverH / 2,
+          z: xz.z,
+        },
+        size: {
+          x: mmToMeters(len + 40),
+          y: coverH,
+          z: mmToMeters(opts.wallThicknessMm) * 1.12,
+        },
+        rotationY: 0,
+        axisX: planDirToWorldXZ(tx, ty),
+        axisZ: planDirToWorldXZ(nx, ny),
+        opacity: 0.5,
+        select: opts.select,
+      });
+    }
+  }
+}
+
 /** Spa floor / water / rim elevations — shared by shell meshes and fixtures. */
 function spaElevations(
   body: Parameters<typeof spaShellParams>[0],
@@ -3797,19 +3870,22 @@ export function buildSceneModel(
             inward: true,
             onlyEdgeIndexes: spillIdx,
           });
-          const upperH = Math.max(0.015, topY - crestY);
-          pushWallRing(meshes, {
-            outlineMm: outer,
-            bottomY: crestY,
-            height: upperH,
-            thicknessMm: wallT,
-            material: "spaShell",
-            select,
-            idPrefix: `spa_wall_${body.id}_rim`,
-            inward: true,
-            onlyEdgeIndexes: spillIdx,
-            edgeOmits,
-          });
+          // Waterline / submerged: no dry lip above the sill — water sits over it.
+          if (join !== "waterline" && join !== "submerged") {
+            const upperH = Math.max(0.015, topY - crestY);
+            pushWallRing(meshes, {
+              outlineMm: outer,
+              bottomY: crestY,
+              height: upperH,
+              thicknessMm: wallT,
+              material: "spaShell",
+              select,
+              idPrefix: `spa_wall_${body.id}_rim`,
+              inward: true,
+              onlyEdgeIndexes: spillIdx,
+              edgeOmits,
+            });
+          }
         };
 
         if (needsPit) {
@@ -3859,6 +3935,15 @@ export function buildSceneModel(
           select,
           idPrefix: `spa_${body.id}`,
         });
+        pushSubmergedWeirCaps(meshes, {
+          spills,
+          spaOutline: outer,
+          wallThicknessMm: wallT,
+          crestY,
+          waterTopY: spaWaterTop,
+          select,
+          idPrefix: `spa_${body.id}`,
+        });
       } else {
         const profile = depthProfileForBody(body);
         const maxDepth = Math.max(maxDepthMmFromProfile(body), 900);
@@ -3905,14 +3990,21 @@ export function buildSceneModel(
             : outer;
         const wallOutline =
           wrapSpaJoin && clippedOuter.length >= 3 ? clippedOuter : outer;
-        // Water/floor follow the same shell: inset the wrapped L so the
-        // surface meets the inner wall face (including spa returns).
-        const waterInner = insetClosedOutline(wallOutline, wallT);
-        const floorInner = insetClosedOutline(wallOutline, wallT * 0.35);
+        // Inset the authored pool, then bite the spa out. Insetting the L
+        // itself pulled water a full wall-thickness away from the spa face.
+        const authoredWaterInner = insetClosedOutline(outer, wallT);
+        const authoredFloorInner = insetClosedOutline(outer, wallT * 0.35);
+        const waterClippers = wrapSpaJoin
+          ? waterlineSpas.map((s) => pitHoleOutline(s.outline))
+          : spaClippers;
+        const waterInner =
+          waterClippers.length > 0
+            ? clipOutlineByAabbs(authoredWaterInner, waterClippers)
+            : authoredWaterInner;
         const floorOutline =
-          wrapSpaJoin || spaClippers.length === 0
-            ? floorInner
-            : clipOutlineByAabbs(floorInner, spaClippers);
+          waterClippers.length > 0
+            ? clipOutlineByAabbs(authoredFloorInner, waterClippers)
+            : authoredFloorInner;
 
         const floorY = -depthM;
         const infinityEdges = resolveInfinityEdges(body);
@@ -3920,9 +4012,7 @@ export function buildSceneModel(
         // Snap the vanishing edge out to the weir so wall inset does not leave
         // a dry cap across the spill.
         const waterOutline = snapOutlineToWeirFaces(
-          wrapSpaJoin || spaClippers.length === 0
-            ? waterInner
-            : clipOutlineByAabbs(waterInner, spaClippers),
+          waterInner,
           infinityEdges,
         );
         // Edge indexes come from the authorable pool outline, not spa-clipped walls.
