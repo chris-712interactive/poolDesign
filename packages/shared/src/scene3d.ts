@@ -135,6 +135,9 @@ export function designBoundsMm(design: DesignDocument): DesignBoundsMm {
   for (const g of design.gradeSamples ?? []) {
     include([g.position]);
   }
+  for (const c of design.presentationCameras ?? []) {
+    include([c.position]);
+  }
   for (const f of design.fences ?? []) {
     include(f.points);
   }

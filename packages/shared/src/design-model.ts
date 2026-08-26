@@ -324,6 +324,94 @@ export type GradeSample = {
   rotationDeg?: number;
 };
 
+/**
+ * Presentation viewpoint for the 3D orbit tour.
+ * `0°` faces drawing-up (−Y), same convention as grade samples / person_scale.
+ */
+export type PresentationCamera = {
+  id: string;
+  name: string;
+  position: PointMm;
+  rotationDeg: number;
+  /** Cycle order in 3D (0-based). Lower plays first. */
+  sortIndex: number;
+  /** Plan distance to the orbit look-at point (mm). */
+  lookDistanceMm?: number;
+  /** Eye height above existing grade (mm). */
+  eyeHeightMm?: number;
+};
+
+/** Default look-at distance: 40′. */
+export const DEFAULT_PRESENTATION_LOOK_DISTANCE_MM = 12192;
+/** Default eye height: 5′6″. */
+export const DEFAULT_PRESENTATION_EYE_HEIGHT_MM = 1676.4;
+export const MIN_PRESENTATION_LOOK_DISTANCE_MM = 3048;
+export const MAX_PRESENTATION_LOOK_DISTANCE_MM = 45720;
+export const MIN_PRESENTATION_EYE_HEIGHT_MM = 914.4;
+export const MAX_PRESENTATION_EYE_HEIGHT_MM = 9144;
+
+export function clampPresentationLookDistanceMm(value: unknown): number {
+  const n =
+    typeof value === "number" && Number.isFinite(value)
+      ? value
+      : DEFAULT_PRESENTATION_LOOK_DISTANCE_MM;
+  return Math.min(
+    MAX_PRESENTATION_LOOK_DISTANCE_MM,
+    Math.max(MIN_PRESENTATION_LOOK_DISTANCE_MM, n),
+  );
+}
+
+export function clampPresentationEyeHeightMm(value: unknown): number {
+  const n =
+    typeof value === "number" && Number.isFinite(value)
+      ? value
+      : DEFAULT_PRESENTATION_EYE_HEIGHT_MM;
+  return Math.min(
+    MAX_PRESENTATION_EYE_HEIGHT_MM,
+    Math.max(MIN_PRESENTATION_EYE_HEIGHT_MM, n),
+  );
+}
+
+export function presentationLookDistanceMm(cam: PresentationCamera): number {
+  return cam.lookDistanceMm != null
+    ? clampPresentationLookDistanceMm(cam.lookDistanceMm)
+    : DEFAULT_PRESENTATION_LOOK_DISTANCE_MM;
+}
+
+export function presentationEyeHeightMm(cam: PresentationCamera): number {
+  return cam.eyeHeightMm != null
+    ? clampPresentationEyeHeightMm(cam.eyeHeightMm)
+    : DEFAULT_PRESENTATION_EYE_HEIGHT_MM;
+}
+
+export function sortedPresentationCameras(
+  cameras: PresentationCamera[],
+): PresentationCamera[] {
+  return [...cameras].sort((a, b) => {
+    if (a.sortIndex !== b.sortIndex) return a.sortIndex - b.sortIndex;
+    const byName = a.name.localeCompare(b.name);
+    if (byName !== 0) return byName;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+/** Swap `id` one slot toward `dir` (−1 earlier, +1 later) and reindex 0..n-1. */
+export function reorderPresentationCameras(
+  cameras: PresentationCamera[],
+  id: string,
+  dir: -1 | 1,
+): PresentationCamera[] {
+  const sorted = sortedPresentationCameras(cameras);
+  const i = sorted.findIndex((c) => c.id === id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= sorted.length) return cameras;
+  const next = [...sorted];
+  const a = next[i]!;
+  next[i] = next[j]!;
+  next[j] = a;
+  return next.map((c, idx) => ({ ...c, sortIndex: idx }));
+}
+
 export type DesignGradeOptions = {
   /**
    * Drop (mm) above which retaining is assumed when strategy includes it.
@@ -828,6 +916,8 @@ export type DesignDocument = {
   estimate?: DesignEstimate;
   /** Spot elevations relative to house FFE */
   gradeSamples?: GradeSample[];
+  /** Ordered 3D orbit viewpoints placed on the 2D plan. */
+  presentationCameras?: PresentationCamera[];
   gradeOptions?: DesignGradeOptions;
   /**
    * True north relative to the 2D plan, in degrees clockwise from drawing-up.
@@ -900,6 +990,7 @@ export function emptyDesignDocument(
     siteLines: [],
     estimate: { removedLineKeys: [], customLines: [] },
     gradeSamples: [],
+    presentationCameras: [],
     gradeOptions: { retainingTriggerMm: DEFAULT_RETAINING_TRIGGER_MM },
     northDeg: 0,
   };

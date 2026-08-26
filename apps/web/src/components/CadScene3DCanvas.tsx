@@ -13,7 +13,6 @@ import type { CadScene3DHandle } from "@/lib/cad3d/cadScene3dHandle";
 import { Canvas, ThreeEvent, useThree } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
-import type { DesignDocument, FlowerBedWallFinish, PointMm } from "@pool-design/shared";
 import {
   depthMmAtT,
   depthTAtPlanPoint,
@@ -25,8 +24,13 @@ import {
   planToWorldXZ,
   pointInPolygon,
   distToPolygonBoundaryMm,
+  presentationCameraToPose,
   segmentHitsFootprint,
   resolveHouseSidingId,
+  sortedPresentationCameras,
+  type DesignDocument,
+  type FlowerBedWallFinish,
+  type PointMm,
 } from "@pool-design/shared";
 import {
   basinCutPlaneConstant,
@@ -2826,6 +2830,7 @@ function CameraRig({
   presetToken,
   section,
   enabled = true,
+  presentationPose = null,
 }: {
   projectId: string;
   center: { x: number; z: number };
@@ -2836,6 +2841,7 @@ function CameraRig({
   section: BasinSectionFrame | null;
   /** When false (walk mode), orbit is disabled and pose is not applied. */
   enabled?: boolean;
+  presentationPose?: CameraPose3D | null;
 }) {
   const { camera, controls } = useThree();
   const dist = Math.max(12, groundSize * 0.45);
@@ -2871,7 +2877,8 @@ function CameraRig({
       }
     }
 
-    const pose = presetPose(viewPreset, center, dist, section);
+    const pose =
+      presentationPose ?? presetPose(viewPreset, center, dist, section);
     camera.position.set(...pose.position);
     target.set(...pose.target);
     camera.lookAt(target);
@@ -2892,6 +2899,7 @@ function CameraRig({
     section,
     target,
     viewPreset,
+    presentationPose,
   ]);
 
   if (!enabled) return null;
@@ -3026,6 +3034,7 @@ type Props = {
   onDelete?: () => void;
   /** Optional handle for parent Share / capture flows. */
   exportHandleRef?: MutableRefObject<CadScene3DHandle | null>;
+  focusCameraId?: string | null;
 };
 
 export function CadScene3DCanvas({
@@ -3036,6 +3045,7 @@ export function CadScene3DCanvas({
   onSelect,
   onDelete,
   exportHandleRef,
+  focusCameraId = null,
 }: Props) {
   const [showPlumbing, setShowPlumbing] = useState(false);
   const [showSiteLines, setShowSiteLines] = useState(true);
@@ -3046,6 +3056,7 @@ export function CadScene3DCanvas({
   const [walkSpawnToken, setWalkSpawnToken] = useState(0);
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>("noon");
   const [presetToken, setPresetToken] = useState(0);
+  const [tourIndex, setTourIndex] = useState<number | null>(null);
   const [cutOffset, setCutOffset] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
   const exportApi = useRef<ExportApi | null>(null);
@@ -3107,15 +3118,88 @@ export function CadScene3DCanvas({
   const applyPreset = (id: ViewPresetId) => {
     setWalkMode(false);
     setWalkLocked(false);
+    setTourIndex(null);
     setViewPreset(id);
     setPresetToken((t) => t + 1);
     if (id === "basin") setCutOffset(0);
   };
 
+  const cameras = useMemo(
+    () => sortedPresentationCameras(design.presentationCameras ?? []),
+    [design.presentationCameras],
+  );
+  const applyTour = (index: number) => {
+    if (!cameras.length) return;
+    const i = ((index % cameras.length) + cameras.length) % cameras.length;
+    setWalkMode(false);
+    setWalkLocked(false);
+    setViewPreset("default");
+    setTourIndex(i);
+    setPresetToken((t) => t + 1);
+  };
+  const presentationPose =
+    tourIndex != null && cameras[tourIndex]
+      ? presentationCameraToPose(cameras[tourIndex]!, design.gradeSamples ?? [])
+      : null;
+  const lastFocusCamera = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!focusCameraId || !cameras.length) return;
+    if (lastFocusCamera.current === focusCameraId) return;
+    const idx = cameras.findIndex((c) => c.id === focusCameraId);
+    if (idx < 0) return;
+    lastFocusCamera.current = focusCameraId;
+    setWalkMode(false);
+    setWalkLocked(false);
+    setViewPreset("default");
+    setTourIndex(idx);
+    setPresetToken((t) => t + 1);
+  }, [cameras, focusCameraId]);
+
+  const camerasRef = useRef(cameras);
+  camerasRef.current = cameras;
+  const tourIndexRef = useRef(tourIndex);
+  tourIndexRef.current = tourIndex;
+  const walkModeRef = useRef(walkMode);
+  walkModeRef.current = walkMode;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const list = camerasRef.current;
+      if (!list.length || walkModeRef.current) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key !== "[" && e.key !== "]") return;
+      e.preventDefault();
+      const cur = tourIndexRef.current;
+      const next =
+        e.key === "["
+          ? (cur ?? 0) - 1
+          : (cur ?? -1) + 1;
+      const i = ((next % list.length) + list.length) % list.length;
+      setWalkMode(false);
+      setWalkLocked(false);
+      setViewPreset("default");
+      setTourIndex(i);
+      setPresetToken((tok) => tok + 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const enterWalk = () => {
     setWalkMode(true);
     setWalkLocked(false);
     setWalkSpawnToken((t) => t + 1);
+    setTourIndex(null);
     if (viewPreset === "basin") setViewPreset("default");
   };
 
@@ -3136,7 +3220,7 @@ export function CadScene3DCanvas({
         <div className="cad-scene3d-toolbar-group">
           <button
             type="button"
-            className={`btn secondary cad-scene3d-tool-btn ${!walkMode && viewPreset === "default" ? "active" : ""}`}
+            className={`btn secondary cad-scene3d-tool-btn ${!walkMode && viewPreset === "default" && tourIndex == null ? "active" : ""}`}
             onClick={() => applyPreset("default")}
           >
             Orbit
@@ -3171,6 +3255,37 @@ export function CadScene3DCanvas({
             Top
           </button>
         </div>
+        {cameras.length > 0 ? (
+          <div
+            className="cad-scene3d-toolbar-group"
+            role="group"
+            aria-label="Presentation cameras"
+          >
+            <button
+              type="button"
+              className="btn secondary cad-scene3d-tool-btn"
+              onClick={() => applyTour((tourIndex ?? 0) - 1)}
+              title="Previous camera ([)"
+              aria-label="Previous camera"
+            >
+              Prev
+            </button>
+            <span className="cad-scene3d-tour-label" title="Orbit from this camera, then step to the next">
+              {tourIndex == null
+                ? `${cameras.length} cameras`
+                : `${tourIndex + 1} / ${cameras.length} · ${cameras[tourIndex]?.name ?? "Camera"}`}
+            </span>
+            <button
+              type="button"
+              className="btn secondary cad-scene3d-tool-btn"
+              onClick={() => applyTour((tourIndex ?? -1) + 1)}
+              title="Next camera (])"
+              aria-label="Next camera"
+            >
+              Next
+            </button>
+          </div>
+        ) : null}
         <div className="cad-scene3d-toolbar-group" role="group" aria-label="Time of day">
           {TIME_OF_DAY_ORDER.map((id) => (
             <button
@@ -3358,6 +3473,7 @@ export function CadScene3DCanvas({
                     viewPreset={viewPreset}
                     presetToken={presetToken}
                     section={section}
+                    presentationPose={presentationPose}
                     enabled
                   />
                 )}

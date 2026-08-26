@@ -181,6 +181,8 @@ export function CadToolPalette({
               ? tool.includes("poly")
                 ? "Trace the bed. Hold Shift for 90°. Close near the start."
                 : "Click first corner of one side, then second, then depth."
+            : tool === "camera"
+              ? "Click to place a camera. Drag the handle to set which way it looks. Order is the 3D tour sequence."
             : toolHelp;
 
   return (
@@ -405,6 +407,21 @@ export function CadToolPalette({
                         </button>
                       </div>
                     </>
+                  )}
+
+                  {group.id === "cameras" && (
+                    <div className="cad-icon-toolbar">
+                      <button
+                        type="button"
+                        className={`tool-icon-btn ${tool === "camera" ? "active" : ""}`}
+                        title="Camera angle"
+                        aria-label="Camera angle"
+                        onClick={() => activateDraw("camera")}
+                      >
+                        {toolMeta("camera").icon}
+                        <ToolTooltip label="Camera angle" />
+                      </button>
+                    </div>
                   )}
 
                   {group.id === "cover" && (

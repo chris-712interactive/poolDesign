@@ -37,6 +37,10 @@ import {
   resolveFlowerBedWallFinish,
   clampFlowerBedHeightMm,
   type FlowerBedRegion,
+  type PresentationCamera,
+  clampPresentationLookDistanceMm,
+  clampPresentationEyeHeightMm,
+  sortedPresentationCameras,
 } from "./design-model";
 import {
   isWallWaterFixtureId,
@@ -435,6 +439,7 @@ export function normalizeDesignDocument(
         };
       }),
     gradeSamples: normalizeGradeSamples(doc.gradeSamples),
+    presentationCameras: normalizePresentationCameras(doc.presentationCameras),
     gradeOptions: normalizeGradeOptions(doc.gradeOptions),
     northDeg: normalizeNorthDeg(doc.northDeg),
     surveyUnderlay: normalizeSurveyUnderlay(doc.surveyUnderlay),
@@ -812,6 +817,50 @@ function normalizeFenceGates(
             : undefined,
       };
     });
+}
+
+function normalizePresentationCameras(
+  cameras: PresentationCamera[] | undefined,
+): PresentationCamera[] {
+  if (!Array.isArray(cameras)) return [];
+  const valid = cameras.filter(
+    (c): c is PresentationCamera =>
+      !!c &&
+      typeof c.id === "string" &&
+      c.position &&
+      typeof c.position.x === "number" &&
+      typeof c.position.y === "number",
+  );
+  const named = valid.map((c, i) => {
+    const look =
+      typeof c.lookDistanceMm === "number" && Number.isFinite(c.lookDistanceMm)
+        ? clampPresentationLookDistanceMm(c.lookDistanceMm)
+        : undefined;
+    const eye =
+      typeof c.eyeHeightMm === "number" && Number.isFinite(c.eyeHeightMm)
+        ? clampPresentationEyeHeightMm(c.eyeHeightMm)
+        : undefined;
+    return {
+      id: c.id,
+      name: typeof c.name === "string" ? c.name.trim() : "",
+      position: { x: c.position.x, y: c.position.y },
+      rotationDeg:
+        typeof c.rotationDeg === "number" && Number.isFinite(c.rotationDeg)
+          ? ((c.rotationDeg % 360) + 360) % 360
+          : 0,
+      sortIndex:
+        typeof c.sortIndex === "number" && Number.isFinite(c.sortIndex)
+          ? c.sortIndex
+          : i,
+      lookDistanceMm: look,
+      eyeHeightMm: eye,
+    };
+  });
+  return sortedPresentationCameras(named).map((c, i) => ({
+    ...c,
+    sortIndex: i,
+    name: c.name || `Camera ${i + 1}`,
+  }));
 }
 
 function normalizeGradeSamples(

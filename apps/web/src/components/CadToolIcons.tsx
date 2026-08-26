@@ -21,6 +21,7 @@ export type DrawToolId =
   | "flowerbed_raised_rect"
   | "flowerbed_raised_poly"
   | "grade_point"
+  | "camera"
   | "property_line"
   | "easement"
   | "cover_rect"
@@ -48,6 +49,7 @@ export type ToolGroupId =
   | "landscaping"
   | "patio"
   | "site"
+  | "cameras"
   | "cover"
   | "fence"
   | "pool"
@@ -141,6 +143,19 @@ export const TOOL_GROUPS: {
       <Svg>
         <path d="M5 5h14v14H5z" />
         <path d="M5 12h14M12 5v14" strokeDasharray="3 2" />
+      </Svg>
+    ),
+  },
+  {
+    id: "cameras",
+    realm: "land",
+    label: "Cameras",
+    hint: "Presentation viewpoints for the 3D orbit tour",
+    icon: (
+      <Svg>
+        <path d="M4 8h11v10H4z" />
+        <path d="M15 12l5-3v8l-5-3z" />
+        <circle cx="9.5" cy="13" r="2" />
       </Svg>
     ),
   },
@@ -411,6 +426,17 @@ export const TOOL_META: {
     ),
   },
   {
+    id: "camera",
+    label: "Camera angle",
+    icon: (
+      <Svg>
+        <path d="M4 8h11v10H4z" />
+        <path d="M15 12l5-3v8l-5-3z" />
+        <circle cx="9.5" cy="13" r="2" />
+      </Svg>
+    ),
+  },
+  {
     id: "property_line",
     label: "Property line",
     icon: (
@@ -617,6 +643,7 @@ export function toolGroupForTool(
   if (isPadEquipTool(tool)) return "pad";
   if (tool === "patio" || tool === "patio_rect" || tool === "grade_point")
     return "patio";
+  if (tool === "camera") return "cameras";
   if (isFlowerBedTool(tool)) return "landscaping";
   if (tool === "property_line" || tool === "easement") return "site";
   if (tool === "cover_rect") return "cover";

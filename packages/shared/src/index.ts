@@ -39,6 +39,7 @@ export * from "./waterline-tiles";
 export * from "./entitlements";
 export * from "./billing";
 export * from "./grade-walk";
+export * from "./presentation-camera";
 export * from "./live-session";
 export * from "./design-review";
 export * from "./quote-docs";

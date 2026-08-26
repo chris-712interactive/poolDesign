@@ -40,6 +40,7 @@ describe("normalizeDesignDocument", () => {
     assert.equal(next.surveyUnderlay, undefined);
     assert.deepEqual(next.fences, []);
     assert.deepEqual(next.siteLines, []);
+    assert.deepEqual(next.presentationCameras, []);
     assert.equal(next.northDeg, 0);
   });
 
@@ -438,5 +439,53 @@ describe("flower beds", () => {
     assert.equal(next.flowerBeds?.[1].wallFinish, "timber");
     assert.ok((next.flowerBeds?.[1].heightMm ?? 0) <= 914.4);
     assert.ok((next.flowerBeds?.[1].heightMm ?? 0) >= 152.4);
+  });
+});
+
+describe("presentation cameras", () => {
+  it("sorts, names, and reindexes cameras", () => {
+    const raw = {
+      version: 1,
+      designLevel: "residential",
+      unitSystem: "imperial",
+      layers: [],
+      poolBodies: [],
+      patios: [],
+      buildings: [],
+      patioCovers: [],
+      features: [],
+      objects: [],
+      plumbingRuns: [],
+      presentationCameras: [
+        {
+          id: "cam_b",
+          name: "  ",
+          position: { x: 1000, y: 0 },
+          rotationDeg: 400,
+          sortIndex: 5,
+        },
+        {
+          id: "cam_a",
+          name: "Lanai",
+          position: { x: 0, y: 0 },
+          rotationDeg: -90,
+          sortIndex: 1,
+          lookDistanceMm: 50,
+        },
+        { id: "skip" },
+      ],
+    } as unknown as DesignDocument;
+
+    const next = normalizeDesignDocument(raw);
+    assert.equal(next.presentationCameras?.length, 2);
+    assert.equal(next.presentationCameras?.[0].id, "cam_a");
+    assert.equal(next.presentationCameras?.[0].name, "Lanai");
+    assert.equal(next.presentationCameras?.[0].sortIndex, 0);
+    assert.equal(next.presentationCameras?.[0].rotationDeg, 270);
+    assert.ok((next.presentationCameras?.[0].lookDistanceMm ?? 0) >= 3048);
+    assert.equal(next.presentationCameras?.[1].id, "cam_b");
+    assert.equal(next.presentationCameras?.[1].name, "Camera 2");
+    assert.equal(next.presentationCameras?.[1].sortIndex, 1);
+    assert.equal(next.presentationCameras?.[1].rotationDeg, 40);
   });
 });

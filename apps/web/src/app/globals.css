@@ -1395,6 +1395,18 @@ textarea {
   padding: 0.28rem 0.45rem;
 }
 
+.cad-scene3d-tour-label {
+  align-self: center;
+  max-width: 14rem;
+  padding: 0 0.2rem;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  color: var(--panel-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cad-scene3d .btn.cad-scene3d-tool-btn {
   padding: 0.28rem 0.55rem;
   font-size: 0.78rem;

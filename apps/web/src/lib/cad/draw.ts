@@ -28,6 +28,7 @@ import {
   plantCssColor,
   vineCssColor,
   vineDisplayName,
+  presentationLookDistanceMm,
   type Building,
   type BuildingOpening,
   type FenceGate,
@@ -36,6 +37,7 @@ import {
   type GradeSample,
   type PatioCover,
   type FlowerBedRegion,
+  type PresentationCamera,
   type PlacedObject,
   type PlumbingRun,
   type PointMm,
@@ -1427,6 +1429,100 @@ export function drawGradeSample(
       y: c.y + heading.y * dist,
     };
     ctx.strokeStyle = "#1a5a6a";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y);
+    ctx.lineTo(handle.x, handle.y);
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(handle.x, handle.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+export function drawPresentationCamera(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  camera: PresentationCamera,
+  order: number,
+  selected: boolean,
+  showRotateHandle = selected,
+) {
+  const c = worldToScreen(camera.position, vp);
+  const heading = bearingToUnitVector(camera.rotationDeg || 0);
+  const lookMm = presentationLookDistanceMm(camera);
+  const lookPx = Math.min(92, Math.max(36, lookMm * vp.scale * 0.12));
+  const halfFov = 0.42;
+  const left = {
+    x: heading.x * Math.cos(halfFov) - heading.y * Math.sin(halfFov),
+    y: heading.x * Math.sin(halfFov) + heading.y * Math.cos(halfFov),
+  };
+  const right = {
+    x: heading.x * Math.cos(-halfFov) - heading.y * Math.sin(-halfFov),
+    y: heading.x * Math.sin(-halfFov) + heading.y * Math.cos(-halfFov),
+  };
+  const fill = selected ? "rgba(90, 58, 150, 0.28)" : "rgba(90, 58, 150, 0.16)";
+  const stroke = selected ? "#3d2a78" : "#5a3a96";
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(c.x, c.y);
+  ctx.lineTo(c.x + left.x * lookPx, c.y + left.y * lookPx);
+  ctx.lineTo(c.x + right.x * lookPx, c.y + right.y * lookPx);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = selected ? 1.8 : 1.2;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(c.x, c.y);
+  ctx.lineTo(c.x + heading.x * lookPx, c.y + heading.y * lookPx);
+  ctx.stroke();
+  const tipX = c.x + heading.x * lookPx;
+  const tipY = c.y + heading.y * lookPx;
+  const px = -heading.y;
+  const py = heading.x;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX - heading.x * 8 + px * 5, tipY - heading.y * 8 + py * 5);
+  ctx.lineTo(tipX - heading.x * 8 - px * 5, tipY - heading.y * 8 - py * 5);
+  ctx.closePath();
+  ctx.fillStyle = stroke;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, selected ? 11 : 10, 0, Math.PI * 2);
+  ctx.fillStyle = selected ? "#5a3a96" : "#6d4eaa";
+  ctx.fill();
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 11px Source Sans 3, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(order), c.x, c.y + 0.5);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+
+  if (camera.name) {
+    ctx.fillStyle = "rgba(20,32,41,0.85)";
+    ctx.font = "11px Source Sans 3, sans-serif";
+    ctx.fillText(camera.name, c.x + 14, c.y - 10);
+  }
+
+  if (showRotateHandle) {
+    const dist = 600 * vp.scale;
+    const handle = {
+      x: c.x + heading.x * dist,
+      y: c.y + heading.y * dist,
+    };
+    ctx.strokeStyle = stroke;
     ctx.lineWidth = 1.4;
     ctx.beginPath();
     ctx.moveTo(c.x, c.y);

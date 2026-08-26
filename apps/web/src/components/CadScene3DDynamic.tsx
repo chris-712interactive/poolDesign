@@ -27,6 +27,8 @@ type Props = {
   onSelect: (sel: SceneSelection | null) => void;
   onDelete?: () => void;
   exportHandleRef?: MutableRefObject<CadScene3DHandle | null>;
+  /** When set, jump the orbit camera to this presentation viewpoint. */
+  focusCameraId?: string | null;
 };
 
 export function CadScene3DDynamic(props: Props) {

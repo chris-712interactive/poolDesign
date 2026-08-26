@@ -110,6 +110,13 @@ import {
   type GradeSample,
   type PatioGradeStrategy,
   type PatioEdgeGrade,
+  type PresentationCamera,
+  presentationLookDistanceMm,
+  presentationEyeHeightMm,
+  sortedPresentationCameras,
+  reorderPresentationCameras,
+  clampPresentationLookDistanceMm,
+  clampPresentationEyeHeightMm,
   outlineBounds,
   parseLengthToMm,
   normalizeNorthDeg,
@@ -268,6 +275,7 @@ import {
   drawFeature,
   drawFence,
   drawGradeSample,
+  drawPresentationCamera,
   drawGrid,
   drawMeasure,
   drawPatioCover,
@@ -308,6 +316,7 @@ type Selection =
   | { kind: "feature"; id: string }
   | { kind: "gradeSample"; id: string }
   | { kind: "gradeSamples"; ids: string[] }
+  | { kind: "camera"; id: string }
   | null;
 
 type DragState =
@@ -370,7 +379,8 @@ type DragState =
         | "siteLine"
         | "object"
         | "feature"
-        | "gradeSample";
+        | "gradeSample"
+        | "camera";
       id: string;
       /** When moving several grade points, every id in the group. */
       ids?: string[];
@@ -523,6 +533,7 @@ type DesignClipboard = {
   pasteCount: number;
   payload:
     | { kind: "gradeSamples"; samples: GradeSample[] }
+    | { kind: "camera"; camera: PresentationCamera }
     | { kind: "object"; object: PlacedObject }
     | { kind: "feature"; feature: PoolFeature }
     | { kind: "pool"; body: PoolBody }
@@ -607,6 +618,7 @@ function selectionOnVisibleLayer(
     }
     case "gradeSample":
     case "gradeSamples":
+    case "camera":
       return true;
     default:
       return true;
@@ -629,6 +641,15 @@ function gradeRotationHandleWorld(sample: GradeSample): PointMm {
   return {
     x: sample.position.x - Math.sin(rad) * dist,
     y: sample.position.y - Math.cos(rad) * dist,
+  };
+}
+
+function cameraRotationHandleWorld(camera: PresentationCamera): PointMm {
+  const rad = ((camera.rotationDeg || 0) * Math.PI) / 180;
+  const dist = 600;
+  return {
+    x: camera.position.x - Math.sin(rad) * dist,
+    y: camera.position.y - Math.cos(rad) * dist,
   };
 }
 
@@ -880,6 +901,18 @@ export function CadWorkspace({
     const samples = (design.gradeSamples ?? []).filter((s) => ids.has(s.id));
     return samples.length > 1 ? samples : null;
   }, [design.gradeSamples, selection]);
+  const selectedCamera = useMemo(
+    () =>
+      selection?.kind === "camera"
+        ? (design.presentationCameras ?? []).find((c) => c.id === selection.id) ??
+          null
+        : null,
+    [design.presentationCameras, selection],
+  );
+  const presentationCameras = useMemo(
+    () => sortedPresentationCameras(design.presentationCameras ?? []),
+    [design.presentationCameras],
+  );
   const guideSteps = useMemo(() => designGuideSteps(design), [design]);
 
   useEffect(() => {
@@ -1182,6 +1215,16 @@ export function CadWorkspace({
         selected && selection?.kind === "gradeSample",
       );
     }
+
+    presentationCameras.forEach((camera, i) => {
+      drawPresentationCamera(
+        ctx,
+        vp,
+        camera,
+        i + 1,
+        selection?.kind === "camera" && selection.id === camera.id,
+      );
+    });
 
     if (layerVisible(design, "covers")) {
       for (const cover of design.patioCovers ?? []) {
@@ -2609,6 +2652,10 @@ export function CadWorkspace({
       const handle = gradeRotationHandleWorld(selectedGradeSample);
       if (segmentLengthMm(point, handle) <= tol) return selectedGradeSample.id;
     }
+    if (selectedCamera) {
+      const handle = cameraRotationHandleWorld(selectedCamera);
+      if (segmentLengthMm(point, handle) <= tol) return selectedCamera.id;
+    }
     return null;
   }
 
@@ -2616,6 +2663,13 @@ export function CadWorkspace({
     const objectHitMm = Math.max(180, 12 / vp.scale);
     const openingHitMm = Math.max(220, 14 / vp.scale);
     const gradeHitMm = Math.max(220, 14 / vp.scale);
+    const cameras = design.presentationCameras ?? [];
+    for (let i = cameras.length - 1; i >= 0; i--) {
+      const camera = cameras[i]!;
+      if (segmentLengthMm(point, camera.position) <= gradeHitMm) {
+        return { kind: "camera", id: camera.id };
+      }
+    }
     for (let i = (design.gradeSamples ?? []).length - 1; i >= 0; i--) {
       const sample = design.gradeSamples![i];
       if (segmentLengthMm(point, sample.position) <= gradeHitMm) {
@@ -2854,6 +2908,13 @@ export function CadWorkspace({
         ...d,
         gradeSamples: (d.gradeSamples ?? []).filter((s) => !ids.has(s.id)),
       });
+    } else if (sel.kind === "camera") {
+      commitDesign({
+        ...d,
+        presentationCameras: sortedPresentationCameras(
+          (d.presentationCameras ?? []).filter((c) => c.id !== sel.id),
+        ).map((c, i) => ({ ...c, sortIndex: i })),
+      });
     }
     selectionRef.current = null;
     setSelection(null);
@@ -2871,6 +2932,13 @@ export function CadWorkspace({
       clipboardRef.current = {
         pasteCount: 0,
         payload: { kind: "gradeSamples", samples: structuredClone(samples) },
+      };
+    } else if (sel.kind === "camera") {
+      const camera = (d.presentationCameras ?? []).find((c) => c.id === sel.id);
+      if (!camera) return;
+      clipboardRef.current = {
+        pasteCount: 0,
+        payload: { kind: "camera", camera: structuredClone(camera) },
       };
     } else if (sel.kind === "object") {
       const object = d.objects.find((o) => o.id === sel.id);
@@ -3002,6 +3070,20 @@ export function CadWorkspace({
         gradeSamples: [...(d.gradeSamples ?? []), ...copies],
       };
       nextSel = gradeSelectionFromIds(copies.map((s) => s.id));
+    } else if (payload.kind === "camera") {
+      const existing = d.presentationCameras ?? [];
+      const camera: PresentationCamera = {
+        ...payload.camera,
+        id: newId("cam"),
+        name: copyName(payload.camera.name),
+        position: offsetPointMm(payload.camera.position, n),
+        sortIndex: existing.length,
+      };
+      next = {
+        ...d,
+        presentationCameras: [...existing, camera],
+      };
+      nextSel = { kind: "camera", id: camera.id };
     } else if (payload.kind === "object") {
       const object: PlacedObject = {
         ...payload.object,
@@ -3368,7 +3450,8 @@ export function CadWorkspace({
           hit.kind === "fence" ||
           hit.kind === "siteLine" ||
           hit.kind === "object" ||
-          hit.kind === "feature")
+          hit.kind === "feature" ||
+          hit.kind === "camera")
       ) {
         dragOriginRef.current = structuredClone(design);
         setDrag({ mode: "move", kind: hit.kind, id: hit.id, last: point });
@@ -3458,6 +3541,23 @@ export function CadWorkspace({
         gradeSamples: [...(design.gradeSamples ?? []), sample],
       });
       setSelection({ kind: "gradeSample", id: sample.id });
+      return;
+    }
+
+    if (tool === "camera") {
+      const existing = design.presentationCameras ?? [];
+      const camera: PresentationCamera = {
+        id: newId("cam"),
+        name: `Camera ${existing.length + 1}`,
+        position: point,
+        rotationDeg: 0,
+        sortIndex: existing.length,
+      };
+      commitDesign({
+        ...design,
+        presentationCameras: [...existing, camera],
+      });
+      setSelection({ kind: "camera", id: camera.id });
       return;
     }
 
@@ -3777,6 +3877,27 @@ export function CadWorkspace({
           ...d,
           gradeSamples: (d.gradeSamples ?? []).map((s) =>
             s.id === drag.id ? { ...s, rotationDeg: snapped } : s,
+          ),
+        }));
+        return;
+      }
+      const camera = (designRef.current.presentationCameras ?? []).find(
+        (c) => c.id === drag.id,
+      );
+      if (camera) {
+        const angle =
+          (Math.atan2(
+            raw.y - camera.position.y,
+            raw.x - camera.position.x,
+          ) *
+            180) /
+            Math.PI +
+          90;
+        const snapped = Math.round(angle / 15) * 15;
+        setDesign((d) => ({
+          ...d,
+          presentationCameras: (d.presentationCameras ?? []).map((c) =>
+            c.id === drag.id ? { ...c, rotationDeg: ((snapped % 360) + 360) % 360 } : c,
           ),
         }));
         return;
@@ -4511,6 +4632,21 @@ export function CadWorkspace({
       });
       return;
     }
+    if ((e.key === "r" || e.key === "R") && selectedCamera) {
+      e.preventDefault();
+      commitDesign({
+        ...design,
+        presentationCameras: (design.presentationCameras ?? []).map((c) =>
+          c.id === selectedCamera.id
+            ? {
+                ...c,
+                rotationDeg: ((c.rotationDeg || 0) + 15) % 360,
+              }
+            : c,
+        ),
+      });
+      return;
+    }
     if (e.key === "Enter") {
       if (
         tool === "survey_calibrate" &&
@@ -4639,6 +4775,8 @@ export function CadWorkspace({
                     ? `Trace the ${flowerBedStyleForTool(tool) === "raised" ? "raised planter" : "tilled bed"}. Hold Shift for 90°. Close near the start.`
                   : tool === "grade_point"
                     ? "Click to place a grade point. Set drop/rise from house FFE in Properties."
+                  : tool === "camera"
+                    ? "Click to place a camera. Drag the handle (or press R) to set facing. Numbers are the 3D tour order."
                   : tool === "fence"
                     ? `Draw ${fenceKindLabel(fenceKind).toLowerCase()} fence path. Hold Shift for 90°. Finish draft when done. Set color in Properties.`
                     : tool === "property_line"
@@ -4802,9 +4940,13 @@ export function CadWorkspace({
                   selection={
                     selection?.kind === "gradeSample" ||
                     selection?.kind === "gradeSamples" ||
+                    selection?.kind === "camera" ||
                     selection?.kind === "siteLine"
                       ? null
                       : selection
+                  }
+                  focusCameraId={
+                    selection?.kind === "camera" ? selection.id : null
                   }
                   onSelect={(sel) => {
                     setSelection(sel);
@@ -5804,6 +5946,225 @@ export function CadWorkspace({
                       Drag moves the group. Copy/paste duplicates the whole
                       row.
                     </p>
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={deleteSelection}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+                {selectedCamera && (
+                  <div className="stack">
+                    <strong>Camera {presentationCameras.findIndex((c) => c.id === selectedCamera.id) + 1}</strong>
+                    <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>
+                      Faces the arrow on the plan. In 3D Orbit, step through
+                      cameras in this numbered order — you can still orbit from
+                      each view.
+                    </p>
+                    <div className="field">
+                      <label htmlFor="camera-name">Name</label>
+                      <input
+                        id="camera-name"
+                        key={`camera-name-${selectedCamera.id}-${selectedCamera.name}`}
+                        defaultValue={selectedCamera.name}
+                        onBlur={(e) => {
+                          const name = e.target.value.trim() || selectedCamera.name;
+                          commitDesign({
+                            ...design,
+                            presentationCameras: (design.presentationCameras ?? []).map(
+                              (c) =>
+                                c.id === selectedCamera.id ? { ...c, name } : c,
+                            ),
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="camera-rot">Facing (0° = up)</label>
+                      <input
+                        id="camera-rot"
+                        type="number"
+                        step={15}
+                        key={`camera-rot-${selectedCamera.id}-${selectedCamera.rotationDeg}`}
+                        defaultValue={Math.round(selectedCamera.rotationDeg || 0)}
+                        onBlur={(e) => {
+                          const n = Number(e.target.value);
+                          if (!Number.isFinite(n)) return;
+                          commitDesign({
+                            ...design,
+                            presentationCameras: (design.presentationCameras ?? []).map(
+                              (c) =>
+                                c.id === selectedCamera.id
+                                  ? {
+                                      ...c,
+                                      rotationDeg: ((n % 360) + 360) % 360,
+                                    }
+                                  : c,
+                            ),
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        onClick={() =>
+                          commitDesign({
+                            ...design,
+                            presentationCameras: (design.presentationCameras ?? []).map(
+                              (c) =>
+                                c.id === selectedCamera.id
+                                  ? {
+                                      ...c,
+                                      rotationDeg:
+                                        (((c.rotationDeg || 0) - 15) % 360 + 360) %
+                                        360,
+                                    }
+                                  : c,
+                            ),
+                          })
+                        }
+                      >
+                        −15°
+                      </button>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        onClick={() =>
+                          commitDesign({
+                            ...design,
+                            presentationCameras: (design.presentationCameras ?? []).map(
+                              (c) =>
+                                c.id === selectedCamera.id
+                                  ? {
+                                      ...c,
+                                      rotationDeg: ((c.rotationDeg || 0) + 15) % 360,
+                                    }
+                                  : c,
+                            ),
+                          })
+                        }
+                      >
+                        +15°
+                      </button>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="camera-look">Look distance</label>
+                      <input
+                        id="camera-look"
+                        key={`camera-look-${selectedCamera.id}-${presentationLookDistanceMm(selectedCamera)}`}
+                        defaultValue={formatLength(
+                          presentationLookDistanceMm(selectedCamera),
+                          unitSystem,
+                        )}
+                        onBlur={(e) => {
+                          const mm = parseLengthToMm(e.target.value, unitSystem);
+                          if (mm == null || mm <= 0) return;
+                          commitDesign({
+                            ...design,
+                            presentationCameras: (design.presentationCameras ?? []).map(
+                              (c) =>
+                                c.id === selectedCamera.id
+                                  ? { ...c, lookDistanceMm: clampPresentationLookDistanceMm(mm) }
+                                  : c,
+                            ),
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="camera-eye">Eye height</label>
+                      <input
+                        id="camera-eye"
+                        key={`camera-eye-${selectedCamera.id}-${presentationEyeHeightMm(selectedCamera)}`}
+                        defaultValue={formatLength(
+                          presentationEyeHeightMm(selectedCamera),
+                          unitSystem,
+                        )}
+                        onBlur={(e) => {
+                          const mm = parseLengthToMm(e.target.value, unitSystem);
+                          if (mm == null || mm <= 0) return;
+                          commitDesign({
+                            ...design,
+                            presentationCameras: (design.presentationCameras ?? []).map(
+                              (c) =>
+                                c.id === selectedCamera.id
+                                  ? { ...c, eyeHeightMm: clampPresentationEyeHeightMm(mm) }
+                                  : c,
+                            ),
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        disabled={
+                          presentationCameras[0]?.id === selectedCamera.id
+                        }
+                        onClick={() =>
+                          commitDesign({
+                            ...design,
+                            presentationCameras: reorderPresentationCameras(
+                              design.presentationCameras ?? [],
+                              selectedCamera.id,
+                              -1,
+                            ),
+                          })
+                        }
+                      >
+                        Earlier
+                      </button>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        disabled={
+                          presentationCameras[presentationCameras.length - 1]
+                            ?.id === selectedCamera.id
+                        }
+                        onClick={() =>
+                          commitDesign({
+                            ...design,
+                            presentationCameras: reorderPresentationCameras(
+                              design.presentationCameras ?? [],
+                              selectedCamera.id,
+                              1,
+                            ),
+                          })
+                        }
+                      >
+                        Later
+                      </button>
+                    </div>
+                    {presentationCameras.length > 1 ? (
+                      <ol
+                        style={{
+                          margin: 0,
+                          paddingLeft: "1.2rem",
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        {presentationCameras.map((c) => (
+                          <li
+                            key={c.id}
+                            style={{
+                              fontWeight:
+                                c.id === selectedCamera.id ? 650 : 400,
+                              cursor: "pointer",
+                            }}
+                            onClick={() =>
+                              setSelection({ kind: "camera", id: c.id })
+                            }
+                          >
+                            {c.name}
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
                     <button
                       type="button"
                       className="btn danger"
@@ -9488,7 +9849,8 @@ function translateDesign(
     | "siteLine"
     | "object"
     | "feature"
-    | "gradeSample",
+    | "gradeSample"
+    | "camera",
   id: string,
   dx: number,
   dy: number,
@@ -9610,6 +9972,14 @@ function translateDesign(
       ...d,
       gradeSamples: (d.gradeSamples ?? []).map((s) =>
         ids.includes(s.id) ? { ...s, position: shift(s.position) } : s,
+      ),
+    };
+  }
+  if (kind === "camera") {
+    return {
+      ...d,
+      presentationCameras: (d.presentationCameras ?? []).map((c) =>
+        c.id === id ? { ...c, position: shift(c.position) } : c,
       ),
     };
   }
