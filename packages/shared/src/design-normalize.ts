@@ -217,6 +217,9 @@ export function normalizeDesignDocument(
   if (!layers.some((l) => l.id === "survey")) {
     layers = [...layers, { id: "survey", name: "survey", visible: true }];
   }
+  if (!layers.some((l) => l.id === "grade")) {
+    layers = [...layers, { id: "grade", name: "grade", visible: true }];
+  }
   const siteLayer = layers.find((l) => l.id === "site");
   const siteVisible = siteLayer ? siteLayer.visible !== false : true;
   if (!layers.some((l) => l.id === "property")) {

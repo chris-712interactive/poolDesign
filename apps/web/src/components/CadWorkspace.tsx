@@ -622,6 +622,7 @@ function selectionOnVisibleLayer(
     }
     case "gradeSample":
     case "gradeSamples":
+      return layerVisible(design, "grade");
     case "camera":
       return true;
     default:
@@ -1208,16 +1209,18 @@ export function CadWorkspace({
       }
     }
 
-    for (const sample of design.gradeSamples ?? []) {
-      const selected = selectedGradeIds(selection).includes(sample.id);
-      drawGradeSample(
-        ctx,
-        vp,
-        sample,
-        selected,
-        unitSystem,
-        selected && selection?.kind === "gradeSample",
-      );
+    if (layerVisible(design, "grade")) {
+      for (const sample of design.gradeSamples ?? []) {
+        const selected = selectedGradeIds(selection).includes(sample.id);
+        drawGradeSample(
+          ctx,
+          vp,
+          sample,
+          selected,
+          unitSystem,
+          selected && selection?.kind === "gradeSample",
+        );
+      }
     }
 
     presentationCameras.forEach((camera, i) => {
@@ -2652,7 +2655,7 @@ export function CadWorkspace({
       const handle = rotationHandleWorld(selectedObject);
       if (segmentLengthMm(point, handle) <= tol) return selectedObject.id;
     }
-    if (selectedGradeSample) {
+    if (selectedGradeSample && layerVisible(design, "grade")) {
       const handle = gradeRotationHandleWorld(selectedGradeSample);
       if (segmentLengthMm(point, handle) <= tol) return selectedGradeSample.id;
     }
@@ -2674,7 +2677,7 @@ export function CadWorkspace({
         return { kind: "camera", id: camera.id };
       }
     }
-    {
+    if (layerVisible(design, "grade")) {
       let best: { id: string; dist: number } | null = null;
       for (const sample of design.gradeSamples ?? []) {
         const dist = segmentLengthMm(point, sample.position);
@@ -3548,8 +3551,14 @@ export function CadWorkspace({
         dropMm: 304.8, // default 1′ drop — edit in Properties
         rotationDeg: 0,
       };
+      const layers = layerVisible(design, "grade")
+        ? design.layers
+        : design.layers.map((l) =>
+            l.id === "grade" ? { ...l, visible: true } : l,
+          );
       commitDesign({
         ...design,
+        layers,
         gradeSamples: [...(design.gradeSamples ?? []), sample],
       });
       setSelection({ kind: "gradeSample", id: sample.id });
@@ -4483,9 +4492,13 @@ export function CadWorkspace({
       const dx = local.x - drag.startX;
       const dy = local.y - drag.startY;
       if (Math.hypot(dx, dy) >= MARQUEE_MIN_PX) {
-        const boxed = (designRef.current.gradeSamples ?? [])
-          .filter((s) => pointInWorldRect(s.position, drag.start, drag.current))
-          .map((s) => s.id);
+        const boxed = layerVisible(designRef.current, "grade")
+          ? (designRef.current.gradeSamples ?? [])
+              .filter((s) =>
+                pointInWorldRect(s.position, drag.start, drag.current),
+              )
+              .map((s) => s.id)
+          : [];
         const uniqueBoxed = [...new Set(boxed)];
         const ids = drag.additive
           ? [...selectedGradeIds(selectionRef.current), ...uniqueBoxed]

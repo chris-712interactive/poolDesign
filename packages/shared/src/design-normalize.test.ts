@@ -31,6 +31,7 @@ describe("normalizeDesignDocument", () => {
     assert.ok(next.layers.some((l) => l.id === "covers"));
     assert.ok(next.layers.some((l) => l.id === "fence"));
     assert.ok(next.layers.some((l) => l.id === "survey"));
+    assert.ok(next.layers.some((l) => l.id === "grade"));
     assert.ok(next.layers.some((l) => l.id === "property"));
     assert.ok(next.layers.some((l) => l.id === "easement"));
     assert.equal(

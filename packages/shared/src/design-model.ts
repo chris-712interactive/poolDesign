@@ -967,6 +967,7 @@ export function emptyDesignDocument(
     "equipment",
     "notes",
     "survey",
+    "grade",
   ],
 ): DesignDocument {
   return {
