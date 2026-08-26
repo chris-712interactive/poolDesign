@@ -2406,12 +2406,12 @@ function patioPunchHoles(
   const pits = [
     ...poolPits
       .filter((h) => h.length >= 3)
-      .map((h) => paddedAabbRing(asAabbRing(h), 80)),
-    // Spa pits sit flush with the shell — a large pad left dirt slits around
-    // waterline / submerged spas whose walls no longer hide the extra cut.
+      // Pad 0: coping grows inward from the shell, so the deck must meet the
+      // outer coping face. An 80mm pad left a dirt slit around the basin.
+      .map((h) => paddedAabbRing(asAabbRing(h), 0)),
     ...spaPits
       .filter((h) => h.length >= 3)
-      .map((h) => paddedAabbRing(asAabbRing(h), 4)),
+      .map((h) => paddedAabbRing(asAabbRing(h), 0)),
   ];
   const buildingHoles = buildingOutlines.filter((h) => {
     if (h.length < 3) return false;
