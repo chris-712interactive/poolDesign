@@ -3822,6 +3822,11 @@ export function buildSceneModel(
               floorY,
             })
           : wallTopY;
+        const spillIdx = edgeOmits?.map((e) => e.edgeIndex) ?? [];
+        const nEdge = pts.length;
+        const deckFacingIdx = Array.from({ length: nEdge }, (_, i) => i).filter(
+          (i) => !spillIdx.includes(i),
+        );
 
         const pushSpaShell = (bottomY: number, topY: number) => {
           const h = Math.max(0.02, topY - bottomY);
@@ -3840,12 +3845,7 @@ export function buildSceneModel(
           }
           // Only the weir edge is split at crest height. Splitting every wall
           // left a dark horizontal seam through the spa shell.
-          const spillIdx = edgeOmits.map((e) => e.edgeIndex);
-          const nEdge = pts.length;
-          const otherIdx = Array.from({ length: nEdge }, (_, i) => i).filter(
-            (i) => !spillIdx.includes(i),
-          );
-          if (otherIdx.length) {
+          if (deckFacingIdx.length) {
             pushWallRing(meshes, {
               outlineMm: outer,
               bottomY,
@@ -3855,7 +3855,7 @@ export function buildSceneModel(
               select,
               idPrefix: `spa_wall_${body.id}`,
               inward: true,
-              onlyEdgeIndexes: otherIdx,
+              onlyEdgeIndexes: deckFacingIdx,
             });
           }
           const lowerH = Math.max(0.02, crestY - bottomY);
@@ -3912,6 +3912,27 @@ export function buildSceneModel(
             waterTopY: spaWaterTop,
             select,
             waterMaterial: "spaWater",
+          });
+        }
+
+        // Coping on deck-facing spa sides. Pool leftover coping does not cover
+        // spa edges that sit outside the original pool outline.
+        const spaCopeH = mmToMeters(POOL_LIP_THICKNESS_MM) * 0.85;
+        const spaCopeTop = Math.max(
+          wallTopY,
+          mmToMeters(POOL_LIP_THICKNESS_MM),
+        );
+        if (deckFacingIdx.length) {
+          pushWallRing(meshes, {
+            outlineMm: outer,
+            bottomY: spaCopeTop - spaCopeH,
+            height: spaCopeH,
+            thicknessMm: wallT * 1.15,
+            material: "coping",
+            select,
+            idPrefix: `spa_coping_${body.id}`,
+            inward: true,
+            onlyEdgeIndexes: deckFacingIdx,
           });
         }
 
