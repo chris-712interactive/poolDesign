@@ -932,6 +932,13 @@ function pushWallRing(
     inward: boolean;
     /** Open wall segments that join these footprints (shared waterline). */
     openAgainst?: PointMm[][];
+    /** Overlap tolerance (mm) for `openAgainst`. Default 120. */
+    openTolMm?: number;
+    /**
+     * Skip a panel whose midpoint is within this distance of a blocker
+     * (mm). 0 = only skip when the midpoint is inside the blocker.
+     */
+    nearBlockerSkipMm?: number;
     /**
      * Omit intervals along specific outline edges (edge index → mm ranges
      * from edge start). Used for spa spillover weir notches.
@@ -964,6 +971,8 @@ function pushWallRing(
   if (pts.length < 3) return;
   const thickM = mmToMeters(opts.thicknessMm);
   const biasMm = opts.normalBiasMm ?? 0;
+  const openTolMm = opts.openTolMm ?? 120;
+  const nearSkipMm = opts.nearBlockerSkipMm ?? 40;
   const only =
     opts.onlyEdgeIndexes && opts.onlyEdgeIndexes.length > 0
       ? new Set(opts.onlyEdgeIndexes)
@@ -975,7 +984,7 @@ function pushWallRing(
     const b = pts[(i + 1) % pts.length];
     let segments =
       opts.openAgainst && opts.openAgainst.length > 0
-        ? openWallSegments(a, b, opts.openAgainst)
+        ? openWallSegments(a, b, opts.openAgainst, openTolMm)
         : Math.hypot(b.x - a.x, b.y - a.y) >= 40
           ? [{ a, b }]
           : [];
@@ -983,7 +992,7 @@ function pushWallRing(
     let skipWeirEdge = false;
     for (const weir of opts.omitAgainst ?? []) {
       const iv = colinearOverlapInterval(a, b, weir.a, weir.b, 320);
-      if (iv && iv[1] - iv[0] > edgeLenMm * 0.35) {
+      if (iv && iv[1] - iv[0] > edgeLenMm * 0.82) {
         skipWeirEdge = true;
         break;
       }
@@ -1045,12 +1054,14 @@ function pushWallRing(
         y: mid.y + ny * (opts.thicknessMm / 2 + biasMm),
       };
       if (
-        opts.openAgainst?.some(
-          (poly) =>
-            pointInPolygon(mid, poly) ||
-            pointInPolygon(centerPlan, poly) ||
-            distToPolygonBoundaryMm(mid, poly) <= 40,
-        )
+        opts.openAgainst?.some((poly) => {
+          if (pointInPolygon(mid, poly) || pointInPolygon(centerPlan, poly)) {
+            return true;
+          }
+          return (
+            nearSkipMm > 0 && distToPolygonBoundaryMm(mid, poly) <= nearSkipMm
+          );
+        })
       ) {
         continue;
       }
@@ -1093,6 +1104,8 @@ function pushWaterlineTileBand(
     openAgainst?: PointMm[][];
     edgeOmits?: { edgeIndex: number; intervals: [number, number][] }[];
     omitAgainst?: { a: PointMm; b: PointMm }[];
+    openTolMm?: number;
+    nearBlockerSkipMm?: number;
   },
 ) {
   if (opts.waterlineOutlineMm.length < 3) return;
@@ -1115,6 +1128,8 @@ function pushWaterlineTileBand(
     openAgainst: opts.openAgainst,
     edgeOmits: opts.edgeOmits,
     omitAgainst: opts.omitAgainst,
+    openTolMm: opts.openTolMm,
+    nearBlockerSkipMm: opts.nearBlockerSkipMm,
     // Slightly proud of the plaster so the tile wins depth tests.
     normalBiasMm: -6,
   });
@@ -2313,10 +2328,18 @@ function patioPunchHoles(
   patioOutline: PointMm[],
   edges: ResolvedInfinityEdge[],
   buildingOutlines: PointMm[][] = [],
+  spaPits: PointMm[][] = [],
 ): PointMm[][] {
-  const pits = poolPits
-    .filter((h) => h.length >= 3)
-    .map((h) => paddedAabbRing(asAabbRing(h), 80));
+  const pits = [
+    ...poolPits
+      .filter((h) => h.length >= 3)
+      .map((h) => paddedAabbRing(asAabbRing(h), 80)),
+    // Spa pits sit flush with the shell — a large pad left dirt slits around
+    // waterline / submerged spas whose walls no longer hide the extra cut.
+    ...spaPits
+      .filter((h) => h.length >= 3)
+      .map((h) => paddedAabbRing(asAabbRing(h), 4)),
+  ];
   const buildingHoles = buildingOutlines.filter((h) => {
     if (h.length < 3) return false;
     return approximateIntersectionAreaMm2(patioOutline, h) > 10_000;
@@ -2821,6 +2844,10 @@ export function buildSceneModel(
   for (const p of pools) {
     if (p.outline.length >= 3) poolPitHoles.push(pitHoleOutline(p.outline));
   }
+  const spaPitHoles: PointMm[][] = [];
+  for (const s of spas) {
+    if (s.outline.length >= 3) spaPitHoles.push(pitHoleOutline(s.outline));
+  }
   const infinityTroughCuts: PointMm[][] = [];
   const infinityEdgesAll: ResolvedInfinityEdge[] = [];
   for (const p of pools) {
@@ -2830,10 +2857,6 @@ export function buildSceneModel(
       infinityTroughCuts.push(closeOutline(infinityTroughPolygon(edge)));
     }
   }
-  for (const s of spas) {
-    if (s.outline.length >= 3) poolPitHoles.push(pitHoleOutline(s.outline));
-  }
-
   const waterTopY = -mmToMeters(POOL_WATER_FREEBOARD_MM);
   const gradeSamples = design.gradeSamples ?? [];
   const hasGradeSamples = gradeSamples.length > 0;
@@ -2855,7 +2878,7 @@ export function buildSceneModel(
     .map((c) => ringPoints(c.outline))
     .filter((h) => h.length >= 3 && isAxisAlignedRect(h, 80));
   const groundHoles = deckPunchHoles(
-    [...poolPitHoles, ...patioGrassHoles],
+    [...poolPitHoles, ...spaPitHoles, ...patioGrassHoles],
     infinityTroughCuts,
   );
   const groundRegions = subtractAabbHoles(groundOutline, groundHoles);
@@ -3341,6 +3364,7 @@ export function buildSceneModel(
         p.outline,
         infinityEdgesAll,
         buildingPunchOutlines,
+        spaPitHoles,
       );
       const holesAabb = punchHoles.map(asAabbRing);
       // Always cover with AABB-subtracted regions. ExtrudeGeometry + Earcut
@@ -3380,6 +3404,7 @@ export function buildSceneModel(
         p.outline,
         infinityEdgesAll,
         buildingPunchOutlines,
+        spaPitHoles,
       );
       const holesAabb = punchHoles.map(asAabbRing);
       const strategy = resolveGradeStrategy(p.gradeStrategy);
@@ -3839,24 +3864,47 @@ export function buildSceneModel(
         const maxDepth = Math.max(maxDepthMmFromProfile(body), 900);
         const depthM = mmToMeters(maxDepth);
         const lip = mmToMeters(POOL_LIP_THICKNESS_MM);
-        const spaClippers = spas
+        const attachedSpas = spas.filter(
+          (s) =>
+            s.outline.length >= 3 &&
+            (waterBodiesConnected(body.outline, s.outline) ||
+              approximateIntersectionAreaMm2(body.outline, s.outline) >
+                5_000 ||
+              outlinesAabbTouch(body.outline, s.outline, 80)),
+        );
+        const waterlineSpas = attachedSpas.filter((s) =>
+          spaSharesPoolWaterline(s.spillover),
+        );
+        const wrapSpaJoin = waterlineSpas.length > 0;
+        const spaWeirFaces = waterlineSpas.flatMap((s) =>
+          resolveSpaSpillovers(s, [body]).map((sp) => ({ a: sp.a, b: sp.b })),
+        );
+        const spaClippers = attachedSpas.map((s) =>
+          spaSharesPoolWaterline(s.spillover)
+            ? paddedAabbRing(pitHoleOutline(s.outline), 2)
+            : paddedAabbRing(s.outline, 40),
+        );
+        const raisedSpaBlockers = spas
           .filter(
-            (s) =>
-              s.outline.length >= 3 &&
-              (waterBodiesConnected(body.outline, s.outline) ||
-                approximateIntersectionAreaMm2(body.outline, s.outline) >
-                  5_000 ||
-                outlinesAabbTouch(body.outline, s.outline, 80)),
+            (s) => s.outline.length >= 3 && !spaSharesPoolWaterline(s.spillover),
           )
-          .map((s) => paddedAabbRing(s.outline, 40));
-        const spaBlockers = spas
-          .filter((s) => s.outline.length >= 3)
           .flatMap((s) => [s.outline, outlineBoundsRect(s.outline)]);
+        const spaBlockers = wrapSpaJoin
+          ? raisedSpaBlockers
+          : spas
+              .filter((s) => s.outline.length >= 3)
+              .flatMap((s) => [s.outline, outlineBoundsRect(s.outline)]);
         const outer = body.outline;
         const wallT = poolWallThicknessMm(body);
-        // Keep the authorable pool outline for walls/coping. Wrapping into an L
-        // drew pool walls through the spa overlap; spa owns that shell.
-        const wallOutline = outer;
+        // Waterline / submerged spas: wrap the pool shell around the spa
+        // (L / bite) so walls + tile meet the spa. Raised spillover still
+        // uses the authored rectangle and omits the shared edge (spa owns it).
+        const clippedOuter =
+          wrapSpaJoin && spaClippers.length > 0
+            ? clipOutlineByAabbs(outer, spaClippers)
+            : outer;
+        const wallOutline =
+          wrapSpaJoin && clippedOuter.length >= 3 ? clippedOuter : outer;
         const waterInner = insetClosedOutline(outer, wallT);
         // Floor extends under the wall thickness so the shell seals (no light leaks).
         const floorInner = insetClosedOutline(outer, wallT * 0.35);
@@ -3898,6 +3946,14 @@ export function buildSceneModel(
           a: e.edgeA,
           b: e.edgeB,
         }));
+        const joinOmitFaces = wrapSpaJoin
+          ? [...spaWeirFaces, ...weirFaces]
+          : weirFaces;
+        const joinOpenAgainst =
+          spaBlockers.length > 0 ? spaBlockers : undefined;
+        // L-wrapped shells don't share the authored pool edge indexes.
+        const joinEdgeOmits = wrapSpaJoin ? undefined : infinityOmits;
+        const tileOutline = wrapSpaJoin ? waterOutline : waterInner;
 
         if (infinityEdges.length && infinityOmits && crestY < lip - 0.005) {
           // Solid shell up to weir crest, vanishing edge omitted so the wall
@@ -3911,9 +3967,11 @@ export function buildSceneModel(
             select,
             idPrefix: `pool_wall_${body.id}_low`,
             inward: true,
-            openAgainst: spaBlockers.length > 0 ? spaBlockers : undefined,
-            edgeOmits: infinityOmits,
-            omitAgainst: weirFaces,
+            openAgainst: joinOpenAgainst,
+            openTolMm: wrapSpaJoin ? 24 : undefined,
+            nearBlockerSkipMm: wrapSpaJoin ? 0 : undefined,
+            edgeOmits: joinEdgeOmits,
+            omitAgainst: joinOmitFaces,
           });
           // Upper rim notched at vanishing openings (spa-style edge omit).
           pushWallRing(meshes, {
@@ -3925,9 +3983,11 @@ export function buildSceneModel(
             select,
             idPrefix: `pool_wall_${body.id}_rim`,
             inward: true,
-            openAgainst: spaBlockers.length > 0 ? spaBlockers : undefined,
-            edgeOmits: infinityOmits,
-            omitAgainst: weirFaces,
+            openAgainst: joinOpenAgainst,
+            openTolMm: wrapSpaJoin ? 24 : undefined,
+            nearBlockerSkipMm: wrapSpaJoin ? 0 : undefined,
+            edgeOmits: joinEdgeOmits,
+            omitAgainst: joinOmitFaces,
           });
         } else {
           pushWallRing(meshes, {
@@ -3939,8 +3999,11 @@ export function buildSceneModel(
             select,
             idPrefix: `pool_wall_${body.id}`,
             inward: true,
-            // Drop pool walls on spa-facing edges; spa draws the spillover.
-            openAgainst: spaBlockers.length > 0 ? spaBlockers : undefined,
+            // Raised spa: drop shared edges. Waterline spa: L-wrap + weir omit.
+            openAgainst: joinOpenAgainst,
+            openTolMm: wrapSpaJoin ? 24 : undefined,
+            nearBlockerSkipMm: wrapSpaJoin ? 0 : undefined,
+            omitAgainst: wrapSpaJoin ? joinOmitFaces : undefined,
           });
         }
 
@@ -3970,8 +4033,14 @@ export function buildSceneModel(
           axisOriginMm: profileFields.originMm,
           axisLengthMm: profileFields.axisLengthMm,
           thicknessM: BASIN_FLOOR_THICKNESS_M,
-          omitPerimeterAgainst:
-            spaBlockers.length > 0 ? spaBlockers : undefined,
+          omitPerimeterAgainst: wrapSpaJoin
+            ? [
+                ...waterlineSpas.map((s) => s.outline),
+                ...raisedSpaBlockers,
+              ]
+            : spaBlockers.length > 0
+              ? spaBlockers
+              : undefined,
           holeOutlinesMm: spaClippers.length > 0 ? spaClippers : undefined,
           select,
         });
@@ -3986,23 +4055,27 @@ export function buildSceneModel(
           select,
           idPrefix: `pool_coping_${body.id}`,
           inward: true,
-          openAgainst: spaBlockers.length > 0 ? spaBlockers : undefined,
-          edgeOmits: infinityOmits,
-          omitAgainst: weirFaces,
+          openAgainst: joinOpenAgainst,
+          openTolMm: wrapSpaJoin ? 24 : undefined,
+          nearBlockerSkipMm: wrapSpaJoin ? 0 : undefined,
+          edgeOmits: joinEdgeOmits,
+          omitAgainst: joinOmitFaces,
         });
 
         // Waterline tile band on the wet face (inside waterline), not the
         // outer shell — old placement sat in the wall and flickered outside.
         pushWaterlineTileBand(meshes, {
-          waterlineOutlineMm: waterInner,
+          waterlineOutlineMm: tileOutline,
           wallThicknessMm: wallT,
           waterTopY,
           waterlineTileId: body.waterlineTileId,
           select,
           idPrefix: `pool_tile_${body.id}`,
-          openAgainst: spaBlockers.length > 0 ? spaBlockers : undefined,
-          edgeOmits: infinityOmits,
-          omitAgainst: weirFaces,
+          openAgainst: joinOpenAgainst,
+          openTolMm: wrapSpaJoin ? 24 : undefined,
+          nearBlockerSkipMm: wrapSpaJoin ? 0 : undefined,
+          edgeOmits: joinEdgeOmits,
+          omitAgainst: joinOmitFaces,
         });
 
         // Catch trough + fall sheets for infinity edges.

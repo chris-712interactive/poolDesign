@@ -8,6 +8,7 @@ import {
   clipOutlineByAabbs,
   mergePitHoles,
   openWallSegments,
+  paddedAabbRing,
   shouldOmitPoolWallEdge,
   segmentHitsFootprint,
   spaBelowDeckMm,
@@ -62,6 +63,18 @@ describe("water-geometry", () => {
     const area = parts.reduce((s, p) => s + polygonAreaMm2(p), 0);
     // Pool 32e6 minus overlap 2e6 * 2e6 wait: overlap is 2000x2000 = 4e6
     assert.ok(Math.abs(area - (32_000_000 - 4_000_000)) < 1e5);
+  });
+
+  it("clips a side-attached spa without a 40mm water gap", () => {
+    const pool = rect(0, 0, 8000, 4000);
+    const spa = rect(6000, 1000, 10000, 3000);
+    const tight = clipOutlineByAabbs(pool, [spa]);
+    const padded = clipOutlineByAabbs(pool, [paddedAabbRing(spa, 40)]);
+    const tightArea = polygonAreaMm2(tight);
+    const paddedArea = polygonAreaMm2(padded);
+    assert.ok(tight.length >= 6, `expected L wrap, got ${tight.length} pts`);
+    // Padded clip removes extra pool area that shows as a dirt gap.
+    assert.ok(tightArea > paddedArea + 100_000);
   });
 
   it("clips a rectangular pool to one polygon wrapping a corner spa", () => {
