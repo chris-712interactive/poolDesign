@@ -2546,14 +2546,24 @@ function SceneMeshes({
   meshes,
   selection,
   onSelect,
+  hideCatalog = false,
 }: {
   meshes: MeshDescriptor[];
   selection: SceneSelection | null;
   onSelect?: (sel: SceneSelection | null) => void;
+  hideCatalog?: boolean;
 }) {
   return (
     <>
       {meshes.map((m) => {
+        if (
+          hideCatalog &&
+          m.kind === "box" &&
+          "catalogItemId" in m &&
+          m.catalogItemId
+        ) {
+          return null;
+        }
         const selected =
           "select" in m ? selectionEquals(m.select, selection) : false;
         if (m.kind === "terrain") {
@@ -2783,16 +2793,21 @@ function presetPose(
   section: BasinSectionFrame | null,
 ): { position: [number, number, number]; target: [number, number, number] } {
   if (id === "basin" && section) {
-    // Sit on the clipped-away side, looking into the open longitudinal section.
+    // From the kept side, looking into the open cut — far enough and
+    // narrow FOV so the floor profile reads as a side elevation.
     const d = section.distance;
     const n = section.cutNormal;
     return {
       position: [
-        section.center.x + n.x * d * 0.62,
-        Math.max(0.9, d * 0.06),
-        section.center.z + n.z * d * 0.62,
+        section.center.x + n.x * d,
+        Math.max(1.45, section.maxDepthM * 0.55),
+        section.center.z + n.z * d,
       ],
-      target: [section.center.x, section.targetY, section.center.z],
+      target: [
+        section.center.x,
+        -section.maxDepthM * 0.38,
+        section.center.z,
+      ],
     };
   }
   if (id === "basin") {
@@ -2914,6 +2929,9 @@ function CameraRig({
     camera.position.set(...pose.position);
     target.set(...pose.target);
     camera.lookAt(target);
+    if (camera instanceof THREE.PerspectiveCamera) {
+      camera.fov = viewPreset === "basin" ? 32 : 45;
+    }
     camera.updateProjectionMatrix();
     const ctrl = controls as unknown as { target: THREE.Vector3; update?: () => void } | null;
     if (ctrl?.target) {
@@ -3269,6 +3287,7 @@ export function CadScene3DCanvas({
             type="button"
             className={`btn secondary cad-scene3d-tool-btn ${!walkMode && viewPreset === "basin" ? "active" : ""}`}
             onClick={() => applyPreset("basin")}
+            title="Longitudinal cross-section — see the pool-bottom slope from shallow to deep"
           >
             Into basin
           </button>
@@ -3403,7 +3422,7 @@ export function CadScene3DCanvas({
       {cutaway ? (
         <div className="cad-scene3d-cut-slider">
           <label htmlFor="cut-offset">
-            Cut position
+            Cut through pool
             <input
               id="cut-offset"
               type="range"
@@ -3442,7 +3461,9 @@ export function CadScene3DCanvas({
                   sunDir={lighting.sunDir}
                 />
                 <color attach="background" args={[tod.background]} />
-                <fog attach="fog" args={[tod.fog, tod.fogNear, tod.fogFar]} />
+                {cutaway ? null : (
+                  <fog attach="fog" args={[tod.fog, tod.fogNear, tod.fogFar]} />
+                )}
                 <WorldBackdrop
                   center={model.center}
                   lotPadHalfM={lotPadHalfM}
@@ -3482,9 +3503,14 @@ export function CadScene3DCanvas({
                   meshes={model.meshes}
                   selection={selection}
                   onSelect={onSelect}
+                  hideCatalog={cutaway}
                 />
                 {cutaway && section ? (
-                  <SectionCapMesh section={section} cutOffset={cutOffset} />
+                  <SectionCapMesh
+                    section={section}
+                    cutOffset={cutOffset}
+                    unitSystem={design.unitSystem}
+                  />
                 ) : null}
                 {labels.map((lbl) => (
                   <SceneLabel key={lbl.id} desc={lbl} />
@@ -3554,7 +3580,7 @@ export function CadScene3DCanvas({
             ? "WASD move · Shift sprint · Esc release mouse · Walk again to respawn inside"
             : "Click the scene to start walking · Esc anytime to release the mouse"
           : cutaway
-            ? "Basin cutaway — slide Cut position · drag to orbit · PNG / Orbit clip to share"
+            ? "Cross-section along shallow → deep · slide Cut position · drag to orbit"
             : "Click to select · drag to orbit · PNG / Orbit clip to export · edit in 2D"}
       </div>
     </div>

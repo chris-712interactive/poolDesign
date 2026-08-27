@@ -1455,6 +1455,43 @@ textarea {
   user-select: none;
 }
 
+.cad-scene3d-section-label {
+  padding: 0.18rem 0.42rem;
+  border-radius: 4px;
+  background: rgba(15, 118, 110, 0.92);
+  color: #f4fffc;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+  user-select: none;
+}
+
+.cad-scene3d-section-label.is-dropoff {
+  background: rgba(180, 83, 9, 0.92);
+}
+
+.cad-scene3d-section-end {
+  padding: 0.12rem 0.38rem;
+  border-radius: 4px;
+  background: rgba(20, 32, 41, 0.82);
+  color: #f4f7f8;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.cad-scene3d-section-end.is-muted {
+  background: rgba(90, 82, 72, 0.72);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: none;
+}
+
 .cad-scene3d-cut-slider {
   position: absolute;
   left: 0.65rem;

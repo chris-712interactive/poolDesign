@@ -434,6 +434,10 @@ export type BasinSectionFrame = {
   distance: number;
   waterTopY: number;
   lipY: number;
+  /** Structural wall thickness in the section drawing (m). */
+  wallThicknessM: number;
+  /** Deepest station, meters below grade (positive). */
+  maxDepthM: number;
   depthStations: {
     t: number;
     depthMm: number;
@@ -2237,23 +2241,32 @@ export function basinSectionFrame(
   }
   const halfSpan = Math.max(0.5, (maxN - minN) / 2);
   const spanM = mmToMeters(Math.max(bb.width, bb.height, 6000));
-  const midDepthMm =
-    (profile.stations[0].depthMm +
-      profile.stations[profile.stations.length - 1].depthMm) /
-    2;
   const waterTopY = -mmToMeters(POOL_WATER_FREEBOARD_MM);
+  const maxDepthMm = Math.max(
+    ...profile.stations.map((s) => s.depthMm),
+    body.depthDeepMm,
+    900,
+  );
+  const wallThicknessM = mmToMeters(poolWallThicknessMm(body));
+  const maxDepthM = mmToMeters(maxDepthMm);
+  const halfLength = Math.max(1, lengthM / 2);
+  // Pull back far enough that the full shallow→deep profile fills the frame.
+  const profileH = mmToMeters(POOL_LIP_THICKNESS_MM) + maxDepthM;
+  const distance = Math.max(halfLength * 1.45, profileH * 3.4, spanM * 0.7, 8);
   return {
     center,
-    targetY: -mmToMeters(midDepthMm) * 0.55,
+    targetY: -maxDepthM * 0.42,
     cutNormal: { x: cutX, z: cutZ },
     depthDir: { x: depthX, z: depthZ },
     halfSpan,
-    halfLength: Math.max(1, lengthM / 2),
+    halfLength,
     // THREE.Plane: normal·x + constant = 0
     planeConstant: -(cutX * center.x + cutZ * center.z),
-    distance: Math.max(8, spanM * 0.85),
+    distance,
     waterTopY,
     lipY: mmToMeters(POOL_LIP_THICKNESS_MM),
+    wallThicknessM,
+    maxDepthM,
     depthStations: profile.stations.map((s) => ({
       t: s.t,
       depthMm: s.depthMm,
