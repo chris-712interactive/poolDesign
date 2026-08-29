@@ -1,4 +1,4 @@
-import { prisma } from "@pool-design/db";
+import { ensureOnboardingMilestoneCatalog, prisma } from "@pool-design/db";
 import bcrypt from "bcryptjs";
 import {
   slugifyCompanyName,
@@ -72,6 +72,7 @@ export async function createTrialCompany(
   const trialEndsAt = trialEndsAtFrom();
 
   const result = await prisma.$transaction(async (tx) => {
+    await ensureOnboardingMilestoneCatalog(tx);
     const company = await tx.company.create({
       data: {
         name: companyName,

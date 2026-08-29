@@ -1,6 +1,10 @@
 import Link from "next/link";
+import { supportEmail, supportMailto } from "@/lib/support";
 
 export function MarketingFooter() {
+  const email = supportEmail();
+  const mailto = supportMailto();
+
   return (
     <footer className="mkt-footer">
       <div className="mkt-footer-inner">
@@ -23,6 +27,7 @@ export function MarketingFooter() {
           <Link href="/#plans">Plans</Link>
           <Link href="/terms">Terms</Link>
           <Link href="/privacy">Privacy</Link>
+          {email && mailto ? <a href={mailto}>Support</a> : null}
           <Link href="/login">Sign in</Link>
         </nav>
       </div>

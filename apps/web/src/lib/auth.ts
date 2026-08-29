@@ -13,8 +13,21 @@ export type SessionUser = User & {
   roleGrants: UserRoleGrant[];
 };
 
+const DEV_SESSION_SECRET = "dev-session-secret-change-me";
+const PLACEHOLDER_SECRETS = new Set([
+  "",
+  DEV_SESSION_SECRET,
+  "change-me-in-production-use-a-long-random-string",
+]);
+
 function secret() {
-  return process.env.SESSION_SECRET || "dev-session-secret-change-me";
+  const value = process.env.SESSION_SECRET?.trim() ?? "";
+  if (process.env.NODE_ENV === "production" && PLACEHOLDER_SECRETS.has(value)) {
+    throw new Error(
+      "SESSION_SECRET must be a long random string in production (see .env.example).",
+    );
+  }
+  return value || DEV_SESSION_SECRET;
 }
 
 function sign(value: string): string {

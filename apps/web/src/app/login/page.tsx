@@ -89,6 +89,9 @@ export default async function LoginPage({
               Sign in
             </button>
           </form>
+          <p className="muted">
+            <Link href="/forgot-password">Forgot password?</Link>
+          </p>
           {showDemo ? (
             <div className="muted" style={{ fontSize: "0.9rem" }}>
               <div>Demo (development only)</div>

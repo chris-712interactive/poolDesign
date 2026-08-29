@@ -44,6 +44,7 @@ If the dashboard overrides `vercel.json`, paste the Install/Build commands above
 |------|--------|
 | `DATABASE_URL` | Neon/Vercel Postgres URL (use pooled + `sslmode=require`) |
 | `SESSION_SECRET` | Long random string |
+| `SUPPORT_EMAIL` | Mailbox you read (footer, terms, forgot-password) |
 | `NEXT_PUBLIC_APP_URL` | `https://your-domain.com` |
 | `NEXT_PUBLIC_ROOT_DOMAIN` | `your-domain.com` (no protocol) |
 | `BLOB_READ_WRITE_TOKEN` | **Required in production** — Vercel Blob for 3D stills (do not store images in Postgres) |
@@ -54,14 +55,24 @@ If the dashboard overrides `vercel.json`, paste the Install/Build commands above
 | `STRIPE_PRICE_DESIGNER_SEAT_MONTHLY` | Extra designer seat ($40/mo) |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Publishable key |
 
-6. After first deploy, run migrate/push against production DB:
+6. After first deploy, push the schema. **Do not load demo users into production.**
 
 ```bash
 DATABASE_URL="postgresql://..." pnpm db:push
 DATABASE_URL="postgresql://..." pnpm db:seed
+# Production seed writes the onboarding milestone catalog only.
+# Demo logins (password123) are skipped unless SEED_DEMO=1.
 ```
 
-Then open `https://your-deployment.vercel.app/api/health` — you should see `"ok": true` and `users` &gt; 0. If health fails, login will fail too (usually missing env, wrong URL, schema not pushed, or Prisma engine not traced — see below).
+Staging / local demo accounts:
+
+```bash
+SEED_DEMO=1 DATABASE_URL="postgresql://..." pnpm db:seed
+# To reset those demo passwords back to password123:
+SEED_DEMO=1 SEED_RESET_DEMO_PASSWORDS=1 DATABASE_URL="postgresql://..." pnpm db:seed
+```
+
+Then open `https://your-deployment.vercel.app/api/health` — you should see `"ok": true`. Production responses omit user counts. If health fails, login will fail too (usually missing env, wrong URL, schema not pushed, or Prisma engine not traced — see below).
 
 ### Prisma query engine on Vercel
 

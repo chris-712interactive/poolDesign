@@ -1,32 +1,35 @@
 import { PrismaClient } from "../src/generated/client";
 import bcrypt from "bcryptjs";
 import {
-  DEFAULT_ONBOARDING_MILESTONES,
   DESIGN_LEVEL_CONFIG,
   emptyDesignDocument,
 } from "@pool-design/shared";
+import { ensureOnboardingMilestoneCatalog } from "../src/milestones";
 
 const prisma = new PrismaClient();
 
+function allowDemoSeed(): boolean {
+  if (process.env.SEED_DEMO === "1") return true;
+  if (process.env.SEED_DEMO === "0") return false;
+  return process.env.NODE_ENV !== "production";
+}
+
+function resetDemoPasswords(): boolean {
+  return process.env.SEED_RESET_DEMO_PASSWORDS === "1";
+}
+
 async function main() {
-  for (const m of DEFAULT_ONBOARDING_MILESTONES) {
-    await prisma.onboardingMilestone.upsert({
-      where: { key: m.key },
-      create: {
-        key: m.key,
-        title: m.title,
-        description: m.description,
-        sortOrder: m.sortOrder,
-      },
-      update: {
-        title: m.title,
-        description: m.description,
-        sortOrder: m.sortOrder,
-      },
-    });
+  await ensureOnboardingMilestoneCatalog(prisma);
+
+  if (!allowDemoSeed()) {
+    console.log(
+      "Seed complete (milestone catalog only). Demo users were skipped — set SEED_DEMO=1 to load Acme Pools.",
+    );
+    return;
   }
 
   const passwordHash = await bcrypt.hash("password123", 10);
+  const overwritePassword = resetDemoPasswords();
 
   // Migrate legacy demo owner email if present
   await prisma.user.updateMany({
@@ -43,7 +46,10 @@ async function main() {
       role: "platform_owner",
       unitSystem: "imperial",
     },
-    update: { passwordHash, name: "Platform Owner" },
+    update: {
+      name: "Platform Owner",
+      ...(overwritePassword ? { passwordHash } : {}),
+    },
   });
 
   const company = await prisma.company.upsert({
@@ -72,9 +78,6 @@ async function main() {
       state: "AZ",
       postalCode: "85251",
       country: "US",
-      subscriptionStatus: "trialing",
-      setupCompletedAt: new Date(),
-      designerSeatsPaid: 1,
     },
   });
 
@@ -115,7 +118,11 @@ async function main() {
       companyId: company.id,
       unitSystem: "imperial",
     },
-    update: { passwordHash, companyId: company.id, alsoDesigner: true },
+    update: {
+      companyId: company.id,
+      alsoDesigner: true,
+      ...(overwritePassword ? { passwordHash } : {}),
+    },
   });
   await prisma.userRoleGrant.deleteMany({ where: { userId: admin.id } });
   await prisma.userRoleGrant.createMany({
@@ -135,7 +142,10 @@ async function main() {
       companyId: company.id,
       unitSystem: "imperial",
     },
-    update: { passwordHash, companyId: company.id },
+    update: {
+      companyId: company.id,
+      ...(overwritePassword ? { passwordHash } : {}),
+    },
   });
   await prisma.userRoleGrant.deleteMany({ where: { userId: designer.id } });
   await prisma.userRoleGrant.createMany({
@@ -185,6 +195,11 @@ async function main() {
   console.log("  owner@poolshape.com / password123");
   console.log("  admin@acme-pools.test / password123");
   console.log("  designer@acme-pools.test / password123");
+  if (!overwritePassword) {
+    console.log(
+      "  Existing demo passwords were left unchanged. Set SEED_RESET_DEMO_PASSWORDS=1 to reset them.",
+    );
+  }
 }
 
 main()

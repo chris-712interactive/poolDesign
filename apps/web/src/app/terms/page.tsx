@@ -1,15 +1,19 @@
 import Link from "next/link";
 import { MarketingFooter } from "@/components/MarketingFooter";
 import { MarketingHeader } from "@/components/MarketingHeader";
+import { supportEmail, supportMailto } from "@/lib/support";
 
 export default function TermsPage() {
+  const email = supportEmail();
+  const mailto = supportMailto();
+
   return (
     <div className="mkt">
       <MarketingHeader user={null} />
       <main className="mkt-doc">
         <div className="panel stack">
           <h1>Terms of use</h1>
-          <p className="muted">Last updated August 14, 2026</p>
+          <p className="muted">Last updated August 29, 2026</p>
           <p>
             PoolShape is software for pool companies to design, estimate, and
             share projects with clients. It is not a substitute for a licensed
@@ -29,8 +33,14 @@ export default function TermsPage() {
             the law.
           </p>
           <p>
-            Questions: contact the operator of this deployment from your
-            company admin profile.
+            Questions:{" "}
+            {email && mailto ? (
+              <>
+                email <a href={mailto}>{email}</a>
+              </>
+            ) : (
+              "contact the operator of this deployment from your company admin profile."
+            )}
           </p>
           <p>
             <Link href="/">Back to PoolShape</Link>
