@@ -1,15 +1,19 @@
 import Link from "next/link";
 import { MarketingFooter } from "@/components/MarketingFooter";
 import { MarketingHeader } from "@/components/MarketingHeader";
+import { supportEmail, supportMailto } from "@/lib/support";
 
 export default function PrivacyPage() {
+  const email = supportEmail();
+  const mailto = supportMailto();
+
   return (
     <div className="mkt">
       <MarketingHeader user={null} />
       <main className="mkt-doc">
         <div className="panel stack">
           <h1>Privacy policy</h1>
-          <p className="muted">Last updated August 14, 2026</p>
+          <p className="muted">Last updated August 29, 2026</p>
           <p>
             We collect the account information you provide at signup (company
             name, your name, email) and the project data your team stores in
@@ -29,6 +33,11 @@ export default function PrivacyPage() {
             product. We do not sell personal information or resell homeowner
             leads.
           </p>
+          {email && mailto ? (
+            <p>
+              Privacy questions: <a href={mailto}>{email}</a>.
+            </p>
+          ) : null}
           <p>
             <Link href="/">Back to PoolShape</Link>
           </p>

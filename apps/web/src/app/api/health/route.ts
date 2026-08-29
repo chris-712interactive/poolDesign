@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@pool-design/db";
 
+function isProduction() {
+  return process.env.NODE_ENV === "production";
+}
+
 /** Public health check — use this to verify DB connectivity on Vercel. */
 export async function GET() {
   try {
+    await prisma.$queryRaw`SELECT 1`;
+    if (isProduction()) {
+      return NextResponse.json({ ok: true });
+    }
     const users = await prisma.user.count();
     const companies = await prisma.company.count();
     return NextResponse.json({
@@ -18,6 +26,9 @@ export async function GET() {
     });
   } catch (err) {
     console.error("health check failed", err);
+    if (isProduction()) {
+      return NextResponse.json({ ok: false }, { status: 500 });
+    }
     return NextResponse.json(
       {
         ok: false,

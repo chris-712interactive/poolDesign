@@ -42,6 +42,8 @@ Open [http://localhost:3000](http://localhost:3000) (or the port shown in the te
 - **Object library**: furniture/amenities filtered by design level; counts roll into the BOM
 - **Deploy:** Vercel + Postgres — [docs/deploy.md](docs/deploy.md)
 - **Roadmap:** [docs/product-roadmap.md](docs/product-roadmap.md)
+- **Launch gaps:** [docs/launch-readiness.md](docs/launch-readiness.md)
+- **Implementation plan:** [docs/launch-implementation-plan.md](docs/launch-implementation-plan.md)
 
 ### Seed logins
 

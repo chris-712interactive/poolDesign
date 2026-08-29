@@ -18,16 +18,18 @@ Filtered competitive plan: ship sales-cycle speed and construction-doc value wit
 
 ---
 
-## Implementation status (in progress)
+## Implementation status
 
 | Phase | Status |
 |-------|--------|
 | 0 Foundations / entitlements | **Done** — `entitlements.ts`, designRevision, Sales/Builder labeling |
-| 1 PDF quote + CSV + gating | **Done** — Estimate panel exports; Stripe Sales/Builder CTAs |
+| 1 PDF quote + CSV + gating | **Done (print HTML)** — Estimate panel print quote + CSV; Stripe Sales/Builder CTAs |
 | 2 Live client sessions | **Done (v1)** — DB-polled host/guest finish swaps + approvals |
 | 3 AR grade walk | **Done (web import)** — Grade walk panel + `/grade-walk` API; native ARKit companion later |
 | 4 Draft permit packet | **Done** — multi-sheet HTML draft with disclaimer |
 | 5 Field performance | Deferred / ongoing |
+
+Launch blockers (email, password reset, Stripe live, seed safety, CI) are tracked in [docs/launch-readiness.md](launch-readiness.md).
 
 ---
 
@@ -37,13 +39,15 @@ Filtered competitive plan: ship sales-cycle speed and construction-doc value wit
 |------------|--------|----------|
 | Browser 3D (WebGL / R3F) | Shipped | `apps/web/src/components/CadScene3DCanvas.tsx`, `lib/cad3d/` |
 | Excavation / material takeoffs | Shipped | `packages/shared/src/takeoff.ts`, `site-grade.ts` |
-| Grade samples (manual) | Shipped | `DesignDocument.gradeSamples` (`dropMm` vs FFE) |
+| Grade samples (manual / web import) | Shipped | `DesignDocument.gradeSamples`, `/grade-walk` |
 | Client proposal share | Shipped (read-only) | `/p/[token]`, `ProjectShare` |
+| Live finish session | Shipped (DB poll) | `ProjectLiveSession`, `/api/p/[token]/live` |
 | Company Stripe plans | Shipped (`starter` / `pro`) | `Company.planKey`, Stripe Checkout |
+| Print quote / CSV takeoff | Shipped (HTML print, not file PDF) | `quote-docs.ts`, `/quote`, `/takeoff-csv` |
+| Draft permit packet | Shipped (HTML, not PE-stamped) | `/permit-packet` |
+| Native AR site capture | None | — |
 | AI photo-to-3D | None | — |
-| Realtime collab | None | — |
-| PDF quote / plan packet | None | — |
-| AR site / grade capture | None | — |
+| CRDT multiplayer CAD | None | — |
 
 ---
 
