@@ -4,6 +4,8 @@ PoolShape already has the sales-cycle loop: company trial, CAD + 3D, share links
 
 This is the ordered list of what still has to happen to get off the ground. Product polish (water, plants, coping) can continue in parallel; it is not the launch gate.
 
+**How to build it:** [launch-implementation-plan.md](launch-implementation-plan.md) — slice-by-slice PRs, files, and done-when.
+
 ---
 
 ## 1. Take money and keep the lights on (do first)
