@@ -4,6 +4,7 @@ type Props = {
   email: string;
   inviteUrl: string;
   emailSent: boolean;
+  emailError?: string | null;
   temporaryPassword: string | null;
 };
 
@@ -11,6 +12,7 @@ export function InviteCreatedNotice({
   email,
   inviteUrl,
   emailSent,
+  emailError,
   temporaryPassword,
 }: Props) {
   return (
@@ -21,10 +23,13 @@ export function InviteCreatedNotice({
           one-time password.
         </p>
       ) : (
-        <p>
-          Invite for <strong>{email}</strong>. Email was not sent — copy the
-          link and password now.
-        </p>
+        <>
+          <p>
+            Invite for <strong>{email}</strong>. Email was not sent — copy the
+            link and password now.
+          </p>
+          {emailError ? <p className="muted">{emailError}</p> : null}
+        </>
       )}
       <p>
         Link:{" "}

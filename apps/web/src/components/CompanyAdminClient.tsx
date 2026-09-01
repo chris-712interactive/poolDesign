@@ -38,6 +38,7 @@ type InviteResult = {
   inviteUrl: string;
   email: string;
   emailSent: boolean;
+  emailError: string | null;
 } | null;
 
 const NAV: { id: AdminSection; label: string; hint: string }[] = [
@@ -402,6 +403,7 @@ export function CompanyAdminClient({
         inviteUrl: json.inviteUrl,
         email: json.email,
         emailSent: Boolean(json.emailSent),
+        emailError: json.emailError ?? null,
       });
       setInviteName("");
       setInviteEmail("");
@@ -732,6 +734,7 @@ export function CompanyAdminClient({
                   email={inviteResult.email}
                   inviteUrl={inviteResult.inviteUrl}
                   emailSent={inviteResult.emailSent}
+                  emailError={inviteResult.emailError}
                   temporaryPassword={inviteResult.temporaryPassword}
                 />
               ) : null}

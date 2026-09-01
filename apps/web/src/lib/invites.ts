@@ -40,6 +40,8 @@ export type InviteCreateResult =
       role: string;
       inviteUrl: string;
       emailSent: boolean;
+      /** Set when mail was skipped or Resend rejected the send. */
+      emailError: string | null;
       /** Present only when mail was skipped or failed — copy from the admin UI. */
       temporaryPassword: string | null;
     }
@@ -114,6 +116,7 @@ export async function createCompanyInvite(
     role: invite.role,
     inviteUrl,
     emailSent: sent.sent,
+    emailError: sent.sent ? null : (sent.error ?? sent.reason),
     temporaryPassword: sent.sent ? null : password,
   };
 }

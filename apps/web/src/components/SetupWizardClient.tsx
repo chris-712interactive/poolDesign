@@ -13,6 +13,7 @@ type InviteResult = {
   email: string;
   inviteUrl: string;
   emailSent: boolean;
+  emailError: string | null;
   temporaryPassword: string | null;
 };
 
@@ -75,6 +76,7 @@ export function SetupWizardClient({ companyName }: { companyName: string }) {
         json.invite = {
           ...json.invite,
           emailSent: Boolean(json.invite.emailSent),
+          emailError: json.invite.emailError ?? null,
           temporaryPassword: json.invite.temporaryPassword ?? null,
         };
       }
@@ -100,6 +102,7 @@ export function SetupWizardClient({ companyName }: { companyName: string }) {
           email={invite.email}
           inviteUrl={invite.inviteUrl}
           emailSent={invite.emailSent}
+          emailError={invite.emailError}
           temporaryPassword={invite.temporaryPassword}
         />
         <button

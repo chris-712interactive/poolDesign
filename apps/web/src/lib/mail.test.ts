@@ -22,6 +22,7 @@ describe("sendMail", () => {
     assert.equal(result.sent, false);
     if (result.sent) throw new Error("expected skip");
     assert.equal(result.reason, "unset");
+    assert.equal(result.error, "RESEND_API_KEY is not set on this server");
     assert.equal(called, false);
   });
 
@@ -38,6 +39,7 @@ describe("sendMail", () => {
     assert.equal(result.sent, false);
     if (result.sent) throw new Error("expected skip");
     assert.equal(result.reason, "unset");
+    assert.equal(result.error, "MAIL_FROM is not set on this server");
   });
 
   it("sends through the transport when configured", async () => {

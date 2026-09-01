@@ -73,8 +73,19 @@ export async function sendMail(
   options?: { config?: MailConfig; send?: MailSendFn },
 ): Promise<SendMailResult> {
   const config = options?.config ?? readMailConfig();
-  if (!config.apiKey || !config.from) {
-    return { sent: false, reason: "unset" };
+  if (!config.apiKey) {
+    return {
+      sent: false,
+      reason: "unset",
+      error: "RESEND_API_KEY is not set on this server",
+    };
+  }
+  if (!config.from) {
+    return {
+      sent: false,
+      reason: "unset",
+      error: "MAIL_FROM is not set on this server",
+    };
   }
   const send =
     options?.send ?? ((message) => resendSend(config.apiKey!, message));

@@ -102,6 +102,7 @@ export async function POST(request: Request) {
           email: invite.email,
           inviteUrl: invite.inviteUrl,
           emailSent: invite.emailSent,
+          emailError: invite.emailError,
           temporaryPassword: invite.temporaryPassword,
         }
       : null,

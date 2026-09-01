@@ -75,6 +75,7 @@ export async function POST(request: Request) {
     role: result.role,
     inviteUrl: result.inviteUrl,
     emailSent: result.emailSent,
+    emailError: result.emailError,
     temporaryPassword: result.temporaryPassword,
   });
 }
