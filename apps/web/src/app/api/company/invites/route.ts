@@ -28,7 +28,7 @@ export async function GET() {
   return NextResponse.json({ invites });
 }
 
-/** Create invite with temporary password (shown once). */
+/** Create invite; email the temp password when Resend is configured. */
 export async function POST(request: Request) {
   const user = await getSessionUser();
   if (!user?.companyId || user.role !== "company_admin") {
@@ -73,7 +73,8 @@ export async function POST(request: Request) {
     email: result.email,
     name: result.name,
     role: result.role,
-    temporaryPassword: result.temporaryPassword,
     inviteUrl: result.inviteUrl,
+    emailSent: result.emailSent,
+    temporaryPassword: result.temporaryPassword,
   });
 }

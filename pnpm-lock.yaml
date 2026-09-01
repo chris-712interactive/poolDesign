@@ -67,6 +67,9 @@ importers:
       '@types/three':
         specifier: ^0.185.4
         version: 0.185.4
+      tsx:
+        specifier: ^4.23.8
+        version: 4.23.8
       typescript:
         specifier: ^5.8.2
         version: 5.9.3

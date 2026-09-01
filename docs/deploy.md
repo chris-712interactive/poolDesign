@@ -54,6 +54,8 @@ If the dashboard overrides `vercel.json`, paste the Install/Build commands above
 | `STRIPE_PRICE_PRO_MONTHLY` | Price ID |
 | `STRIPE_PRICE_DESIGNER_SEAT_MONTHLY` | Extra designer seat ($40/mo) |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Publishable key |
+| `RESEND_API_KEY` | Resend API key (invites + welcome mail) |
+| `MAIL_FROM` | Verified sender, e.g. `PoolShape <noreply@your-domain.com>` |
 
 6. After first deploy, push the schema. **Do not load demo users into production.**
 
@@ -104,7 +106,9 @@ Company admins start Checkout / open the Customer Portal from `/app/admin`.
 - Public page: `/p/[token]` (no login)
 - APIs: `/api/projects/[id]/shares`, `/api/public/shares/[token]`
 
-## Team invites (Phase 3)
+## Team invites
 
 - Company admin invites from `/app/admin`
-- Invitee accepts at `/invite/[token]` with the temporary password
+- When `RESEND_API_KEY` and `MAIL_FROM` are set, the invitee gets the link and temporary password by email
+- Invitee accepts at `/invite/[token]` with that temporary password
+- If mail is unset (local Docker), the admin UI still shows the password once

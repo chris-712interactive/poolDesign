@@ -6,6 +6,7 @@ import { formatMoney, COMPANY_STAFF_ROLES, STAFF_ROLE_LABELS, DESIGNER_SEAT_MONT
 import { AddressFields } from "@/components/AddressFields";
 import { BillingActions } from "@/components/BillingActions";
 import { EstimateRecipeEditor } from "@/components/EstimateRecipeEditor";
+import { InviteCreatedNotice } from "@/components/InviteCreatedNotice";
 import { type AdminSection } from "@/lib/adminSections";
 import { TOUR_QUERY, TOUR_STEP_QUERY } from "@/lib/onboardingTour";
 
@@ -33,9 +34,10 @@ type PriceItem = {
 };
 
 type InviteResult = {
-  temporaryPassword: string;
+  temporaryPassword: string | null;
   inviteUrl: string;
   email: string;
+  emailSent: boolean;
 } | null;
 
 const NAV: { id: AdminSection; label: string; hint: string }[] = [
@@ -396,9 +398,10 @@ export function CompanyAdminClient({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Invite failed");
       setInviteResult({
-        temporaryPassword: json.temporaryPassword,
+        temporaryPassword: json.temporaryPassword ?? null,
         inviteUrl: json.inviteUrl,
         email: json.email,
+        emailSent: Boolean(json.emailSent),
       });
       setInviteName("");
       setInviteEmail("");
@@ -682,8 +685,8 @@ export function CompanyAdminClient({
               <h3 style={{ margin: 0 }}>Invite teammate</h3>
               <p className="muted" style={{ margin: 0 }}>
                 {trialActive
-                  ? "Invite a designer during the trial — extra seats are free until you subscribe. Share the link and one-time password."
-                  : `Creates an invite link and one-time temporary password. Extra designer seats are ${formatMoney(DESIGNER_SEAT_MONTHLY_CENTS)}/month on your plan.`}
+                  ? "Invite a designer during the trial — extra seats are free until you subscribe. We email the link and one-time password when mail is configured."
+                  : `Sends an invite email with a link and one-time password. Extra designer seats are ${formatMoney(DESIGNER_SEAT_MONTHLY_CENTS)}/month on your plan.`}
               </p>
               <div className="grid-2">
                 <div className="field">
@@ -725,28 +728,12 @@ export function CompanyAdminClient({
                 <p style={{ color: "var(--danger)" }}>{inviteError}</p>
               ) : null}
               {inviteResult ? (
-                <div className="panel" style={{ background: "var(--accent-soft)" }}>
-                  <p>
-                    Invite for <strong>{inviteResult.email}</strong>
-                  </p>
-                  <p>
-                    Link:{" "}
-                    <a
-                      href={inviteResult.inviteUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {inviteResult.inviteUrl}
-                    </a>
-                  </p>
-                  <p>
-                    Temporary password:{" "}
-                    <code>{inviteResult.temporaryPassword}</code>
-                  </p>
-                  <p className="muted">
-                    Copy these now — the password is only shown once.
-                  </p>
-                </div>
+                <InviteCreatedNotice
+                  email={inviteResult.email}
+                  inviteUrl={inviteResult.inviteUrl}
+                  emailSent={inviteResult.emailSent}
+                  temporaryPassword={inviteResult.temporaryPassword}
+                />
               ) : null}
             </form>
           </>

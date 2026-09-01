@@ -22,7 +22,8 @@ export default async function InvitePage({
           <h1>Join {invite.company.name}</h1>
           <p className="muted">
             You were invited as <strong>{invite.name}</strong> ({invite.email}).
-            Use the temporary password from your admin to create your account.
+            Use the temporary password from your invite email (or from your
+            admin) to create your account.
           </p>
           {expired ? (
             <p style={{ color: "var(--danger)" }}>

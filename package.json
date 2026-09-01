@@ -11,6 +11,6 @@
     "db:seed": "pnpm --filter @pool-design/db seed",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter @pool-design/shared test"
+    "test": "pnpm --filter @pool-design/shared test && pnpm --filter @pool-design/web test"
   }
 }

@@ -2,8 +2,12 @@ import { ensureOnboardingMilestoneCatalog, prisma } from "@pool-design/db";
 import bcrypt from "bcryptjs";
 import {
   slugifyCompanyName,
+  TRIAL_DURATION_DAYS,
   trialEndsAtFrom,
 } from "@pool-design/shared";
+import { appBaseUrl } from "@/lib/app-url";
+import { sendMail } from "@/lib/mail";
+import { welcomeEmail } from "@/lib/mail-templates";
 
 const MIN_PASSWORD = 8;
 
@@ -108,6 +112,19 @@ export async function createTrialCompany(
     }
 
     return { userId: user.id, companyId: company.id };
+  });
+
+  const welcome = welcomeEmail({
+    name,
+    companyName,
+    loginUrl: `${appBaseUrl()}/login`,
+    trialDays: TRIAL_DURATION_DAYS,
+  });
+  await sendMail({
+    to: email,
+    subject: welcome.subject,
+    html: welcome.html,
+    text: welcome.text,
   });
 
   return { ok: true, ...result };

@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { AddressParts } from "@pool-design/shared";
 import { AddressFields } from "@/components/AddressFields";
+import { InviteCreatedNotice } from "@/components/InviteCreatedNotice";
 
 type Path = "self" | "invite" | "both";
 type Step = "profile" | "team";
@@ -11,7 +12,8 @@ type Step = "profile" | "team";
 type InviteResult = {
   email: string;
   inviteUrl: string;
-  temporaryPassword: string;
+  emailSent: boolean;
+  temporaryPassword: string | null;
 };
 
 export function SetupWizardClient({ companyName }: { companyName: string }) {
@@ -69,6 +71,13 @@ export function SetupWizardClient({ companyName }: { companyName: string }) {
         error?: string;
         invite?: InviteResult | null;
       };
+      if (json.invite) {
+        json.invite = {
+          ...json.invite,
+          emailSent: Boolean(json.invite.emailSent),
+          temporaryPassword: json.invite.temporaryPassword ?? null,
+        };
+      }
       if (!res.ok) throw new Error(json.error || "Could not save setup");
       if (json.invite) {
         setInvite(json.invite);
@@ -87,19 +96,12 @@ export function SetupWizardClient({ companyName }: { companyName: string }) {
     return (
       <div className="panel stack" style={{ maxWidth: 560, margin: "0 auto" }}>
         <h1>Invite sent</h1>
-        <p>
-          Share this with <strong>{invite.email}</strong>. The password is only
-          shown once.
-        </p>
-        <p>
-          Link:{" "}
-          <a href={invite.inviteUrl} target="_blank" rel="noreferrer">
-            {invite.inviteUrl}
-          </a>
-        </p>
-        <p>
-          Temporary password: <code>{invite.temporaryPassword}</code>
-        </p>
+        <InviteCreatedNotice
+          email={invite.email}
+          inviteUrl={invite.inviteUrl}
+          emailSent={invite.emailSent}
+          temporaryPassword={invite.temporaryPassword}
+        />
         <button
           className="btn"
           type="button"
