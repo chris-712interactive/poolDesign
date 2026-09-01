@@ -103,13 +103,16 @@ model User {
   role         UserRole
   /** Company admin who also takes a designer seat (opens CAD). */
   alsoDesigner Boolean    @default(false)
+  /** Bumped on password reset so older session cookies die. */
+  sessionEpoch Int        @default(0)
   companyId    String?
   unitSystem   UnitSystem @default(imperial)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  roleGrants UserRoleGrant[]
+  company        Company?             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  roleGrants     UserRoleGrant[]
+  passwordResets PasswordResetToken[]
 
   @@index([companyId])
 }
@@ -273,6 +276,31 @@ model CompanyInvite {
 
   @@index([companyId])
   @@index([email])
+}
+
+/** One-time password reset. Store sha256(token), never the raw token. */
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/** Sliding auth rate-limit buckets (serverless-safe; not Redis). */
+model AuthThrottle {
+  id          String   @id @default(cuid())
+  key         String
+  windowStart DateTime
+  count       Int      @default(0)
+
+  @@unique([key, windowStart])
+  @@index([windowStart])
 }
 
 model OnboardingMilestone {

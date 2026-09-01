@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@pool-design/db";
 import { getSessionUser, setSessionCookie } from "@/lib/auth";
-
-const MIN_PASSWORD = 8;
+import { MIN_PASSWORD } from "@/lib/password";
 
 export async function PATCH(request: Request) {
   const user = await getSessionUser();
@@ -55,11 +54,15 @@ export async function PATCH(request: Request) {
     );
   }
 
-  await prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: user.id },
-    data: { passwordHash: await bcrypt.hash(next, 10) },
+    data: {
+      passwordHash: await bcrypt.hash(next, 10),
+      sessionEpoch: { increment: 1 },
+    },
+    select: { id: true, sessionEpoch: true },
   });
-  await setSessionCookie(user.id);
+  await setSessionCookie(updated.id, updated.sessionEpoch);
 
   return NextResponse.json({ ok: true });
 }

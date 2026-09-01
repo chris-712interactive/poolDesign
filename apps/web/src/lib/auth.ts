@@ -1,70 +1,39 @@
 import { cookies } from "next/headers";
 import { prisma, type User, type Company, type UserRoleGrant } from "@pool-design/db";
 import bcrypt from "bcryptjs";
-import { createHmac, timingSafeEqual } from "crypto";
 import { expireStaleTrial } from "@/lib/subscription";
 import { ensureRoleGrants } from "@/lib/roleGrants";
+import {
+  createSessionToken,
+  SESSION_MAX_AGE_SECONDS,
+  verifySessionToken,
+} from "@/lib/session-token";
 
 const SESSION_COOKIE = "pd_session";
-const MAX_AGE_SECONDS = 60 * 60 * 24 * 14;
 
 export type SessionUser = User & {
   company: Company | null;
   roleGrants: UserRoleGrant[];
 };
 
-const DEV_SESSION_SECRET = "dev-session-secret-change-me";
-const PLACEHOLDER_SECRETS = new Set([
-  "",
-  DEV_SESSION_SECRET,
-  "change-me-in-production-use-a-long-random-string",
-]);
+export { createSessionToken, verifySessionToken };
 
-function secret() {
-  const value = process.env.SESSION_SECRET?.trim() ?? "";
-  if (process.env.NODE_ENV === "production" && PLACEHOLDER_SECRETS.has(value)) {
-    throw new Error(
-      "SESSION_SECRET must be a long random string in production (see .env.example).",
-    );
+export async function setSessionCookie(userId: string, sessionEpoch?: number) {
+  let epoch = sessionEpoch;
+  if (epoch === undefined) {
+    const row = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { sessionEpoch: true },
+    });
+    epoch = row?.sessionEpoch ?? 0;
   }
-  return value || DEV_SESSION_SECRET;
-}
-
-function sign(value: string): string {
-  return createHmac("sha256", secret()).update(value).digest("base64url");
-}
-
-export function createSessionToken(userId: string): string {
-  const payload = `${userId}.${Date.now()}`;
-  return `${payload}.${sign(payload)}`;
-}
-
-export function verifySessionToken(token: string): string | null {
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  const [userId, ts, sig] = parts;
-  const payload = `${userId}.${ts}`;
-  const expected = sign(payload);
-  try {
-    const a = Buffer.from(sig);
-    const b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  } catch {
-    return null;
-  }
-  const age = Date.now() - Number(ts);
-  if (!Number.isFinite(age) || age > MAX_AGE_SECONDS * 1000) return null;
-  return userId;
-}
-
-export async function setSessionCookie(userId: string) {
   const jar = await cookies();
-  jar.set(SESSION_COOKIE, createSessionToken(userId), {
+  jar.set(SESSION_COOKIE, createSessionToken(userId, epoch), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: MAX_AGE_SECONDS,
+    maxAge: SESSION_MAX_AGE_SECONDS,
   });
 }
 
@@ -90,14 +59,15 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  const userId = verifySessionToken(token);
-  if (!userId) return null;
+  const claims = verifySessionToken(token);
+  if (!claims) return null;
   try {
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: claims.userId },
       include: { company: true, roleGrants: true },
     });
     if (!user) return null;
+    if (user.sessionEpoch !== claims.sessionEpoch) return null;
     let roleGrants = user.roleGrants;
     if (user.companyId && roleGrants.length === 0 && user.role !== "platform_owner") {
       await ensureRoleGrants({

@@ -1,20 +1,39 @@
 import { redirect, unstable_rethrow } from "next/navigation";
+import { headers } from "next/headers";
 import { authenticate, getSessionUser, setSessionCookie } from "@/lib/auth";
 import { MarketingFooter } from "@/components/MarketingFooter";
 import { MarketingHeader } from "@/components/MarketingHeader";
 import { appHomePath } from "@/lib/companyAccess";
+import { ipFromHeaders, throttleEmailKey } from "@/lib/request-ip";
+import { AUTH_LIMITS, assertNotThrottled, ThrottleError } from "@/lib/throttle";
 import Link from "next/link";
 
 async function loginAction(formData: FormData) {
   "use server";
   const email = String(formData.get("email") || "");
   const password = String(formData.get("password") || "");
+  const ip = ipFromHeaders(await headers());
+  try {
+    await assertNotThrottled({
+      key: `login:ip:${ip}`,
+      ...AUTH_LIMITS.loginIp,
+    });
+    if (email.includes("@")) {
+      await assertNotThrottled({
+        key: throttleEmailKey("login:email", email),
+        ...AUTH_LIMITS.loginEmail,
+      });
+    }
+  } catch (err) {
+    if (err instanceof ThrottleError) redirect("/login?error=rate");
+    throw err;
+  }
   try {
     const user = await authenticate(email, password);
     if (!user) {
       redirect("/login?error=1");
     }
-    await setSessionCookie(user.id);
+    await setSessionCookie(user.id, user.sessionEpoch);
     redirect(appHomePath(user));
   } catch (err) {
     unstable_rethrow(err);
@@ -54,6 +73,9 @@ export default async function LoginPage({
           </p>
           {params.error === "1" && (
             <p className="error">Invalid email or password.</p>
+          )}
+          {params.error === "rate" && (
+            <p className="error">Too many attempts. Try again later.</p>
           )}
           {params.error === "db" && (
             <p className="error">

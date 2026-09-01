@@ -8,8 +8,7 @@ import {
 import { appBaseUrl } from "@/lib/app-url";
 import { sendMail } from "@/lib/mail";
 import { welcomeEmail } from "@/lib/mail-templates";
-
-const MIN_PASSWORD = 8;
+import { MIN_PASSWORD } from "@/lib/password";
 
 export type SignupInput = {
   companyName: string;

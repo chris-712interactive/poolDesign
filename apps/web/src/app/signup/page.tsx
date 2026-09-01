@@ -1,13 +1,28 @@
 import { redirect, unstable_rethrow } from "next/navigation";
+import { headers } from "next/headers";
 import { getSessionUser, setSessionCookie } from "@/lib/auth";
 import { createTrialCompany } from "@/lib/signup";
 import { MarketingFooter } from "@/components/MarketingFooter";
 import { MarketingHeader } from "@/components/MarketingHeader";
 import { TRIAL_DURATION_DAYS, needsCompanySetup } from "@pool-design/shared";
+import { ipFromHeaders } from "@/lib/request-ip";
+import { AUTH_LIMITS, assertNotThrottled, ThrottleError } from "@/lib/throttle";
 import Link from "next/link";
 
 async function signupAction(formData: FormData) {
   "use server";
+  const ip = ipFromHeaders(await headers());
+  try {
+    await assertNotThrottled({
+      key: `signup:ip:${ip}`,
+      ...AUTH_LIMITS.signupIp,
+    });
+  } catch (err) {
+    if (err instanceof ThrottleError) {
+      redirect("/signup?error=Too%20many%20attempts.%20Try%20again%20later.");
+    }
+    throw err;
+  }
   const result = await createTrialCompany({
     companyName: String(formData.get("companyName") || ""),
     name: String(formData.get("name") || ""),

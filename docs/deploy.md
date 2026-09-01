@@ -76,6 +76,8 @@ SEED_DEMO=1 SEED_RESET_DEMO_PASSWORDS=1 DATABASE_URL="postgresql://..." pnpm db:
 
 Then open `https://your-deployment.vercel.app/api/health` — you should see `"ok": true`. Production responses omit user counts. If health fails, login will fail too (usually missing env, wrong URL, schema not pushed, or Prisma engine not traced — see below).
 
+After a deploy that adds Prisma models (password reset, auth throttle), run `pnpm db:push` against production **before** expecting forgot-password or login rate limits to work. Existing session cookies are invalidated when the cookie format changes — users sign in again.
+
 ### Prisma query engine on Vercel
 
 This monorepo generates the client into `packages/db/src/generated/client` (includes `libquery_engine-rhel-openssl-3.0.x.so.node`). `apps/web/next.config.ts` traces that folder into the serverless bundle via `outputFileTracingIncludes` + `@prisma/nextjs-monorepo-workaround-plugin`.
@@ -112,3 +114,8 @@ Company admins start Checkout / open the Customer Portal from `/app/admin`.
 - When `RESEND_API_KEY` and `MAIL_FROM` are set, the invitee gets the link and temporary password by email
 - Invitee accepts at `/invite/[token]` with that temporary password
 - If mail is unset (local Docker), the admin UI still shows the password once
+
+## Password reset
+
+- `/forgot-password` emails a one-hour link to `/reset/[token]`
+- After reset, older session cookies no longer work (`User.sessionEpoch`)

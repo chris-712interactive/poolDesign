@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isMailConfigured, sendMail, type MailSendFn } from "./mail";
-import { inviteEmail, welcomeEmail } from "./mail-templates";
+import { inviteEmail, resetPasswordEmail, welcomeEmail } from "./mail-templates";
 
 describe("sendMail", () => {
   it("no-ops with reason unset when API key and from are missing", async () => {
@@ -166,5 +166,17 @@ describe("welcomeEmail", () => {
     assert.match(mail.subject, /14-day/);
     assert.match(mail.html, /https:\/\/app\.example\.com\/login/);
     assert.doesNotMatch(mail.html, /Gulf Coast/);
+  });
+});
+
+describe("resetPasswordEmail", () => {
+  it("includes the reset URL and does not leak another user", () => {
+    const mail = resetPasswordEmail({
+      name: "Alex",
+      resetUrl: "https://app.example.com/reset/token-alex",
+    });
+    assert.match(mail.html, /https:\/\/app\.example\.com\/reset\/token-alex/);
+    assert.match(mail.text, /token-alex/);
+    assert.doesNotMatch(mail.html, /token-blake/);
   });
 });

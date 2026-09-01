@@ -92,3 +92,32 @@ export function welcomeEmail(input: WelcomeEmailInput): {
   ].join("\n");
   return { subject, html, text };
 }
+
+export type ResetPasswordEmailInput = {
+  name: string;
+  resetUrl: string;
+};
+
+export function resetPasswordEmail(input: ResetPasswordEmailInput): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const subject = "Reset your PoolShape password";
+  const html = wrapHtml(
+    subject,
+    `<p style="margin:0 0 12px;">Hi ${esc(input.name)},</p>
+<p style="margin:0 0 12px;">Use this link to choose a new password. It expires in one hour.</p>
+<p style="margin:0 0 16px;"><a href="${esc(input.resetUrl)}">${esc(input.resetUrl)}</a></p>
+<p style="margin:0;color:#5c6b64;font-size:14px;">If you did not ask for this, you can ignore the email.</p>`,
+  );
+  const text = [
+    `Hi ${input.name},`,
+    "",
+    "Use this link to choose a new password. It expires in one hour.",
+    input.resetUrl,
+    "",
+    "If you did not ask for this, you can ignore the email.",
+  ].join("\n");
+  return { subject, html, text };
+}

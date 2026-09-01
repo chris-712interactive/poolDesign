@@ -4,11 +4,29 @@ import { prisma } from "@pool-design/db";
 import { setSessionCookie } from "@/lib/auth";
 import { grantRoles } from "@/lib/roleGrants";
 import { isCompanyStaffRole } from "@pool-design/shared";
+import { MIN_PASSWORD } from "@/lib/password";
+import { ipFromHeaders } from "@/lib/request-ip";
+import {
+  AUTH_LIMITS,
+  assertNotThrottled,
+  ThrottleError,
+  throttleJson,
+} from "@/lib/throttle";
 
 type RouteContext = { params: Promise<{ token: string }> };
 
 /** Accept an invite: verify temp password, create user, start session. */
 export async function POST(request: Request, context: RouteContext) {
+  const ip = ipFromHeaders(request.headers);
+  try {
+    await assertNotThrottled({
+      key: `invite-accept:ip:${ip}`,
+      ...AUTH_LIMITS.inviteAcceptIp,
+    });
+  } catch (err) {
+    if (err instanceof ThrottleError) return throttleJson();
+    throw err;
+  }
   const { token } = await context.params;
   const body = (await request.json().catch(() => ({}))) as {
     temporaryPassword?: string;
@@ -43,7 +61,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const password =
-    body.newPassword && body.newPassword.length >= 8
+    body.newPassword && body.newPassword.length >= MIN_PASSWORD
       ? body.newPassword
       : temp;
   const passwordHash = await bcrypt.hash(password, 10);
@@ -73,7 +91,7 @@ export async function POST(request: Request, context: RouteContext) {
     data: { acceptedAt: new Date() },
   });
 
-  await setSessionCookie(user.id);
+  await setSessionCookie(user.id, user.sessionEpoch);
 
   return NextResponse.json({ ok: true, redirectTo: "/app" });
 }
