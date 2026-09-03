@@ -7,6 +7,15 @@ type MilestoneDb = Pick<PrismaClient, "onboardingMilestone">;
 export async function ensureOnboardingMilestoneCatalog(
   db: MilestoneDb,
 ): Promise<void> {
+  const retired = [
+    "first_contract_signed",
+    "first_payment_recorded",
+    "offline_sync",
+  ];
+  await db.onboardingMilestone.deleteMany({
+    where: { key: { in: retired } },
+  });
+
   for (const m of DEFAULT_ONBOARDING_MILESTONES) {
     await db.onboardingMilestone.upsert({
       where: { key: m.key },

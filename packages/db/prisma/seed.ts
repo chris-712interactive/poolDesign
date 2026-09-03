@@ -1,12 +1,23 @@
 import { PrismaClient } from "../src/generated/client";
 import bcrypt from "bcryptjs";
-import {
-  DESIGN_LEVEL_CONFIG,
-  emptyDesignDocument,
-} from "@pool-design/shared";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { kendigResidentialDesign, type DesignDocument } from "@pool-design/shared";
 import { ensureOnboardingMilestoneCatalog } from "../src/milestones";
 
 const prisma = new PrismaClient();
+
+function kendigDesign(): DesignDocument {
+  const fixture = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "fixtures/kendig-residential.json",
+  );
+  if (existsSync(fixture)) {
+    return JSON.parse(readFileSync(fixture, "utf8")) as DesignDocument;
+  }
+  return kendigResidentialDesign();
+}
 
 function allowDemoSeed(): boolean {
   if (process.env.SEED_DEMO === "1") return true;
@@ -58,6 +69,7 @@ async function main() {
       name: "Acme Pools",
       slug: "acme-pools",
       defaultUnitSystem: "imperial",
+      enabledDesignLevels: "residential",
       region: "Southwest US",
       street: "4100 Desert Bloom Rd",
       city: "Scottsdale",
@@ -72,6 +84,7 @@ async function main() {
     },
     update: {
       name: "Acme Pools",
+      enabledDesignLevels: "residential",
       region: "Southwest US",
       street: "4100 Desert Bloom Rd",
       city: "Scottsdale",
@@ -152,11 +165,7 @@ async function main() {
     data: [{ userId: designer.id, companyId: company.id, role: "designer" }],
   });
 
-  const design = emptyDesignDocument(
-    "residential",
-    "imperial",
-    DESIGN_LEVEL_CONFIG.residential.defaultLayers,
-  );
+  const design = kendigDesign();
 
   const existing = await prisma.project.findFirst({
     where: { companyId: company.id, name: "Kendig Residence Pool" },
@@ -187,7 +196,7 @@ async function main() {
   } else {
     await prisma.project.update({
       where: { id: existing.id },
-      data: site,
+      data: { ...site, designJson: JSON.stringify(design) },
     });
   }
 

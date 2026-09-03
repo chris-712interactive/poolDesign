@@ -11,6 +11,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { CreateProjectForm } from "@/components/CreateProjectForm";
 import { ProjectList } from "@/components/ProjectList";
 import { SubscriptionBlocked } from "@/components/SubscriptionBlocked";
+import { companyPublicDesignLevels } from "@/lib/design-levels";
 import { companyHasAppAccess } from "@/lib/subscription";
 
 export default async function ProjectsPage() {
@@ -25,7 +26,7 @@ export default async function ProjectsPage() {
   }
 
   const company = user.company!;
-  const enabled = company.enabledDesignLevels.split(",") as DesignLevel[];
+  const enabled = companyPublicDesignLevels(company.enabledDesignLevels);
   const trialActive = isLocalTrialActive(company);
   const isAdmin = user.role === "company_admin";
 
@@ -69,8 +70,7 @@ export default async function ProjectsPage() {
               <div>
                 <h1>{company.name}</h1>
                 <p className="muted">
-                  Projects for designers and estimators. Choose a design level
-                  when creating a job.
+                  Projects for designers and estimators.
                 </p>
                 {isAdmin ? (
                   <p className="muted">

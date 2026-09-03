@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "PoolShape — CAD, 3D, and takeoff for production pool companies",
   description:
-    "Plan, photoreal 3D, live client finishes, and model-based takeoff for residential, commercial, and water-park builders. 14-day company trial. No credit card.",
+    "Plan, 3D walkthrough, live client finishes, and model-based takeoff for residential pool companies. 14-day company trial. No credit card.",
   icons: {
     icon: [{ url: "/brand/mark.svg", type: "image/svg+xml" }],
     apple: [{ url: "/brand/mark.png" }],

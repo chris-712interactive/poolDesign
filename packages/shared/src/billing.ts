@@ -40,7 +40,7 @@ export const PLAN_MARKETING: Record<
       "Branded PDF quotes",
       "CSV takeoffs and price book",
       "Draft permit packet (not PE-stamped)",
-      "AR grade-walk import",
+      "Phone grade import",
     ],
   },
 };

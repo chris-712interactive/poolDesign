@@ -11,6 +11,7 @@ import {
   type DesignLevel,
 } from "@pool-design/shared";
 import { getSessionUser } from "@/lib/auth";
+import { companyPublicDesignLevels } from "@/lib/design-levels";
 import { companyHasAppAccess } from "@/lib/subscription";
 
 export async function createProjectAction(formData: FormData) {
@@ -37,7 +38,7 @@ export async function createProjectAction(formData: FormData) {
   const company = await prisma.company.findUniqueOrThrow({
     where: { id: user.companyId },
   });
-  const enabled = company.enabledDesignLevels.split(",");
+  const enabled = companyPublicDesignLevels(company.enabledDesignLevels);
   if (!enabled.includes(designLevel)) {
     redirect("/app");
   }

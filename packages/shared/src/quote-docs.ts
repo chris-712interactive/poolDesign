@@ -98,16 +98,24 @@ export function buildQuoteHtml(
     th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #5c6b64; }
     .total { text-align: right; font-size: 1.15rem; margin-top: 1rem; }
     .disclaimer { margin-top: 1.75rem; font-size: 0.8rem; color: #5c6b64; border-top: 1px solid #d9e0db; padding-top: 0.85rem; }
+    .no-print-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+    button.print { appearance: none; border: 1px solid #1a2420; background: #1a2420; color: #fff; padding: 0.4rem 0.85rem; border-radius: 8px; font-weight: 650; cursor: pointer; }
+    @page { size: letter; margin: 0.6in; }
     @media print {
       body { background: #fff; }
       .sheet { max-width: none; padding: 0; }
       .no-print { display: none !important; }
+      thead { display: table-header-group; }
+      tr { break-inside: avoid; }
     }
   </style>
 </head>
 <body>
   <div class="sheet">
-    <p class="no-print muted">Use your browser Print dialog and choose “Save as PDF”.</p>
+    <div class="no-print no-print-actions">
+      <button type="button" class="print" onclick="window.print()">Print / Save as PDF</button>
+      <span class="muted">Letter · in the print dialog, choose “Save as PDF”.</span>
+    </div>
     <header>
       <div class="brand">
         ${

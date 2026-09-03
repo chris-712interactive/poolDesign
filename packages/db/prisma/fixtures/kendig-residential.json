@@ -1,0 +1,480 @@
+{
+  "version": 1,
+  "designLevel": "residential",
+  "unitSystem": "imperial",
+  "layers": [
+    {
+      "id": "house",
+      "name": "house",
+      "visible": true
+    },
+    {
+      "id": "pool",
+      "name": "pool",
+      "visible": true
+    },
+    {
+      "id": "features",
+      "name": "features",
+      "visible": true
+    },
+    {
+      "id": "patio",
+      "name": "patio",
+      "visible": true
+    },
+    {
+      "id": "covers",
+      "name": "covers",
+      "visible": true
+    },
+    {
+      "id": "furniture",
+      "name": "furniture",
+      "visible": true
+    },
+    {
+      "id": "plumbing",
+      "name": "plumbing",
+      "visible": true
+    },
+    {
+      "id": "equipment",
+      "name": "equipment",
+      "visible": true
+    },
+    {
+      "id": "fence",
+      "name": "fence",
+      "visible": true
+    },
+    {
+      "id": "property",
+      "name": "property",
+      "visible": true
+    },
+    {
+      "id": "easement",
+      "name": "easement",
+      "visible": true
+    },
+    {
+      "id": "grade",
+      "name": "grade",
+      "visible": true
+    },
+    {
+      "id": "notes",
+      "name": "notes",
+      "visible": true
+    }
+  ],
+  "poolBodies": [
+    {
+      "id": "kendig_pool",
+      "name": "Pool",
+      "kind": "pool",
+      "outline": [
+        {
+          "x": 5486.400000000001,
+          "y": 13411.2
+        },
+        {
+          "x": 10363.2,
+          "y": 13411.2
+        },
+        {
+          "x": 10363.2,
+          "y": 23774.4
+        },
+        {
+          "x": 5486.400000000001,
+          "y": 23774.4
+        }
+      ],
+      "depthShallowMm": 1066.8,
+      "depthDeepMm": 2438.4,
+      "wallThicknessMm": 203.2,
+      "waterlineTileId": "wl_porcelain_ivory"
+    },
+    {
+      "id": "kendig_spa",
+      "name": "Spa",
+      "kind": "spa",
+      "outline": [
+        {
+          "x": 6400.800000000001,
+          "y": 10363.2
+        },
+        {
+          "x": 9448.800000000001,
+          "y": 10363.2
+        },
+        {
+          "x": 9448.800000000001,
+          "y": 13411.2
+        },
+        {
+          "x": 6400.800000000001,
+          "y": 13411.2
+        }
+      ],
+      "depthShallowMm": 1066.8,
+      "depthDeepMm": 1066.8,
+      "wallThicknessMm": 152.4,
+      "shellHeightMm": 457.2,
+      "waterlineTileId": "wl_porcelain_ivory",
+      "spillover": {
+        "enabled": true,
+        "targetPoolId": "kendig_pool",
+        "join": "raised_spillover",
+        "style": "sheet"
+      }
+    }
+  ],
+  "patios": [
+    {
+      "id": "kendig_patio",
+      "name": "Travertine deck",
+      "outline": [
+        {
+          "x": 3048,
+          "y": 10363.2
+        },
+        {
+          "x": 15240,
+          "y": 10363.2
+        },
+        {
+          "x": 15240,
+          "y": 26212.800000000003
+        },
+        {
+          "x": 3048,
+          "y": 26212.800000000003
+        }
+      ],
+      "materialId": "stone_travertine_ivory",
+      "gradeStrategy": "both"
+    }
+  ],
+  "flowerBeds": [],
+  "buildings": [
+    {
+      "id": "kendig_house",
+      "name": "Residence",
+      "kind": "house",
+      "outline": [
+        {
+          "x": 2438.4,
+          "y": 1219.2
+        },
+        {
+          "x": 17068.800000000003,
+          "y": 1219.2
+        },
+        {
+          "x": 17068.800000000003,
+          "y": 10363.2
+        },
+        {
+          "x": 2438.4,
+          "y": 10363.2
+        }
+      ],
+      "stories": 1,
+      "exteriorFinishId": "house_white",
+      "exteriorSidingId": "stucco",
+      "openings": [
+        {
+          "id": "kendig_slider",
+          "kind": "sliding_door",
+          "edgeIndex": 2,
+          "t": 0.45,
+          "widthMm": 1828.8,
+          "heightMm": 2032,
+          "story": 1,
+          "sillAboveFloorMm": 0
+        },
+        {
+          "id": "kendig_window_e",
+          "kind": "window",
+          "edgeIndex": 1,
+          "t": 0.4,
+          "widthMm": 914.4,
+          "heightMm": 1219.2,
+          "story": 1
+        },
+        {
+          "id": "kendig_window_w",
+          "kind": "window",
+          "edgeIndex": 3,
+          "t": 0.55,
+          "widthMm": 914.4,
+          "heightMm": 1219.2,
+          "story": 1
+        }
+      ]
+    }
+  ],
+  "patioCovers": [],
+  "objects": [
+    {
+      "id": "kendig_equip_pad_12802_17678",
+      "catalogItemId": "equip_pad",
+      "name": "Equipment pad",
+      "position": {
+        "x": 12801.6,
+        "y": 17678.4
+      },
+      "rotationDeg": 0,
+      "layerId": "equipment",
+      "widthMm": 2438.4,
+      "depthMm": 1219.2,
+      "heightMm": 150
+    },
+    {
+      "id": "kendig_pump_variable_speed_12344_17374",
+      "catalogItemId": "pump_variable_speed",
+      "name": "Variable-speed pump",
+      "position": {
+        "x": 12344.4,
+        "y": 17373.600000000002
+      },
+      "rotationDeg": 0,
+      "layerId": "equipment",
+      "widthMm": 762,
+      "depthMm": 432,
+      "heightMm": 508
+    },
+    {
+      "id": "kendig_filter_cartridge_12802_17435",
+      "catalogItemId": "filter_cartridge",
+      "name": "Cartridge filter",
+      "position": {
+        "x": 12801.6,
+        "y": 17434.56
+      },
+      "rotationDeg": 0,
+      "layerId": "equipment",
+      "widthMm": 559,
+      "depthMm": 559,
+      "heightMm": 1143
+    },
+    {
+      "id": "kendig_heater_gas_13350_17526",
+      "catalogItemId": "heater_gas",
+      "name": "Gas heater",
+      "position": {
+        "x": 13350.24,
+        "y": 17526
+      },
+      "rotationDeg": 0,
+      "layerId": "equipment",
+      "widthMm": 1016,
+      "depthMm": 762,
+      "heightMm": 1168
+    },
+    {
+      "id": "kendig_salt_chlorinator_12558_18044",
+      "catalogItemId": "salt_chlorinator",
+      "name": "Salt chlorinator cell",
+      "position": {
+        "x": 12557.760000000002,
+        "y": 18044.16
+      },
+      "rotationDeg": 0,
+      "layerId": "equipment",
+      "widthMm": 508,
+      "depthMm": 280,
+      "heightMm": 380
+    },
+    {
+      "id": "kendig_lounge_chair_4267_15240",
+      "catalogItemId": "lounge_chair",
+      "name": "Lounge chair",
+      "position": {
+        "x": 4267.2,
+        "y": 15240
+      },
+      "rotationDeg": 90,
+      "layerId": "furniture",
+      "widthMm": 670.5600000000001,
+      "depthMm": 1981.2,
+      "heightMm": 900
+    },
+    {
+      "id": "kendig_lounge_chair_4267_17678",
+      "catalogItemId": "lounge_chair",
+      "name": "Lounge chair",
+      "position": {
+        "x": 4267.2,
+        "y": 17678.4
+      },
+      "rotationDeg": 90,
+      "layerId": "furniture",
+      "widthMm": 670.5600000000001,
+      "depthMm": 1981.2,
+      "heightMm": 900
+    },
+    {
+      "id": "kendig_sabal_palmetto_3658_26213",
+      "catalogItemId": "sabal_palmetto",
+      "name": "Cabbage palmetto",
+      "position": {
+        "x": 3657.6000000000004,
+        "y": 26212.8
+      },
+      "rotationDeg": 0,
+      "layerId": "furniture",
+      "widthMm": 3048,
+      "depthMm": 3048,
+      "heightMm": 5486.400000000001
+    },
+    {
+      "id": "kendig_sabal_palmetto_14630_26213",
+      "catalogItemId": "sabal_palmetto",
+      "name": "Cabbage palmetto",
+      "position": {
+        "x": 14630.400000000001,
+        "y": 26212.8
+      },
+      "rotationDeg": 0,
+      "layerId": "furniture",
+      "widthMm": 3048,
+      "depthMm": 3048,
+      "heightMm": 5486.400000000001
+    },
+    {
+      "id": "kendig_areca_palm_14021_12802",
+      "catalogItemId": "areca_palm",
+      "name": "Areca palm",
+      "position": {
+        "x": 14020.800000000001,
+        "y": 12801.6
+      },
+      "rotationDeg": 0,
+      "layerId": "furniture",
+      "widthMm": 2438.4,
+      "depthMm": 2438.4,
+      "heightMm": 4267.2
+    },
+    {
+      "id": "kendig_clusia_3353_11582",
+      "catalogItemId": "clusia",
+      "name": "Pitch apple / clusia",
+      "position": {
+        "x": 3352.8,
+        "y": 11582.4
+      },
+      "rotationDeg": 0,
+      "layerId": "furniture",
+      "widthMm": 2438.4,
+      "depthMm": 2438.4,
+      "heightMm": 3048
+    },
+    {
+      "id": "kendig_firebush_14935_14630",
+      "catalogItemId": "firebush",
+      "name": "Firebush",
+      "position": {
+        "x": 14935.2,
+        "y": 14630.400000000001
+      },
+      "rotationDeg": 0,
+      "layerId": "furniture",
+      "widthMm": 1524,
+      "depthMm": 1524,
+      "heightMm": 1828.8000000000002
+    },
+    {
+      "id": "kendig_foxtail_palm_2438_21336",
+      "catalogItemId": "foxtail_palm",
+      "name": "Foxtail palm",
+      "position": {
+        "x": 2438.4,
+        "y": 21336
+      },
+      "rotationDeg": 0,
+      "layerId": "furniture",
+      "widthMm": 3048,
+      "depthMm": 3048,
+      "heightMm": 5486.400000000001
+    }
+  ],
+  "plumbingRuns": [],
+  "features": [
+    {
+      "id": "kendig_steps",
+      "kind": "steps",
+      "name": "Entry steps",
+      "poolBodyId": "kendig_pool",
+      "outline": [
+        {
+          "x": 6705.6,
+          "y": 13411.2
+        },
+        {
+          "x": 9144,
+          "y": 13411.2
+        },
+        {
+          "x": 9144,
+          "y": 14630.400000000001
+        },
+        {
+          "x": 6705.6,
+          "y": 14630.400000000001
+        }
+      ],
+      "riserCount": 4
+    }
+  ],
+  "fences": [
+    {
+      "id": "kendig_fence",
+      "name": "Yard fence",
+      "kind": "aluminum",
+      "finishId": "fence_aluminum_black",
+      "heightMm": 1828.8,
+      "points": [
+        {
+          "x": 1219.2,
+          "y": 10363.2
+        },
+        {
+          "x": 1219.2,
+          "y": 29260.800000000003
+        },
+        {
+          "x": 17068.8,
+          "y": 29260.800000000003
+        },
+        {
+          "x": 17068.8,
+          "y": 10363.2
+        }
+      ],
+      "gates": [
+        {
+          "id": "kendig_gate",
+          "kind": "swing",
+          "edgeIndex": 2,
+          "t": 0.15,
+          "widthMm": 914.4
+        }
+      ]
+    }
+  ],
+  "siteLines": [],
+  "estimate": {
+    "removedLineKeys": [],
+    "customLines": []
+  },
+  "gradeSamples": [],
+  "presentationCameras": [],
+  "gradeOptions": {
+    "retainingTriggerMm": 457.2
+  },
+  "northDeg": 0
+}

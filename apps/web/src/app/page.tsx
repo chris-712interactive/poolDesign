@@ -15,7 +15,7 @@ import {
 
 const CAPABILITIES = [
   "Construction-true plan CAD",
-  "Photoreal 3D walkthrough",
+  "3D walkthrough",
   "Live client finish sessions",
   "Takeoff from the model",
   "Branded proposals",
@@ -87,7 +87,7 @@ const WORKFLOW = [
   {
     n: "01",
     title: "Open the job",
-    body: "Create the project, set the design level, and bring the survey onto the sheet.",
+    body: "Create the project and bring the survey onto the sheet.",
   },
   {
     n: "02",
@@ -132,8 +132,7 @@ export default async function HomePage() {
             <h1>The drawing that carries the job.</h1>
             <p className="mkt-lede">
               PoolShape is plan, 3D, takeoff, and client presentation — built
-              for companies that design and build at scale. Residential,
-              commercial, and water-park work in one account.
+              for residential production pool companies. Florida first.
             </p>
             <div className="mkt-hero-actions">
               <Link className="mkt-btn" href={appHref}>

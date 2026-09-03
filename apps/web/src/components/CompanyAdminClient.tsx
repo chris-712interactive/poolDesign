@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, Fragment } from "react";
+import { useEffect, useRef, useState, type FormEvent, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { formatMoney, COMPANY_STAFF_ROLES, STAFF_ROLE_LABELS, DESIGNER_SEAT_MONTHLY_CENTS, type CompanyStaffRole, type EstimateRecipe, type MarketStateRow } from "@pool-design/shared";
 import { AddressFields } from "@/components/AddressFields";
@@ -125,6 +125,7 @@ export function CompanyAdminClient({
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [items, setItems] = useState<PriceItem[]>([]);
   const [priceMsg, setPriceMsg] = useState<string | null>(null);
+  const priceFileRef = useRef<HTMLInputElement>(null);
   const [pricesLoaded, setPricesLoaded] = useState(false);
   const [recipe, setRecipe] = useState<EstimateRecipe | null>(null);
   const [recipeDefault, setRecipeDefault] = useState(true);
@@ -452,6 +453,56 @@ export function CompanyAdminClient({
       setPriceMsg(err instanceof Error ? err.message : "Save failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function exportPriceCsv() {
+    setPriceMsg(null);
+    try {
+      const res = await fetch("/api/company/price-book?level=residential&format=csv");
+      if (!res.ok) throw new Error("Could not export price book");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "price-book-residential.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+      setPriceMsg("Downloaded CSV — edit in Sheets, then import");
+    } catch (err) {
+      setPriceMsg(err instanceof Error ? err.message : "Export failed");
+    }
+  }
+
+  async function importPriceCsv(file: File) {
+    setBusy(true);
+    setPriceMsg(null);
+    try {
+      const csv = await file.text();
+      const res = await fetch("/api/company/price-book?level=residential", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        count?: number;
+        skipped?: Array<{ name?: string; catalogItemId?: string; reason?: string }>;
+        items?: PriceItem[];
+      };
+      if (!res.ok) throw new Error(json.error || "Import failed");
+      if (json.items) setItems(json.items);
+      const skipped = json.skipped?.length ?? 0;
+      setPriceMsg(
+        skipped > 0
+          ? `Imported ${json.count ?? 0} prices. Skipped ${skipped} unknown row${skipped === 1 ? "" : "s"}.`
+          : `Imported ${json.count ?? 0} prices from CSV`,
+      );
+    } catch (err) {
+      setPriceMsg(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setBusy(false);
+      if (priceFileRef.current) priceFileRef.current.value = "";
     }
   }
 
@@ -802,10 +853,11 @@ export function CompanyAdminClient({
           <div className="stack">
             <p className="muted" style={{ margin: 0 }}>
               Override catalog unit prices for estimates, or accept defaults.
-              To change <em>what</em> is billed from the plan (pavers, seat
-              tile, plumbing), use Estimate recipe.
+              Export CSV, change prices in Sheets, then import — unknown SKUs
+              are skipped. To change <em>what</em> is billed from the plan
+              (pavers, seat tile, plumbing), use Estimate recipe.
             </p>
-            <div className="row">
+            <div className="row" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
               <button
                 type="button"
                 className="btn secondary"
@@ -822,6 +874,32 @@ export function CompanyAdminClient({
               >
                 Save overrides
               </button>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={busy}
+                onClick={() => void exportPriceCsv()}
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={busy}
+                onClick={() => priceFileRef.current?.click()}
+              >
+                Import CSV
+              </button>
+              <input
+                ref={priceFileRef}
+                type="file"
+                accept=".csv,text/csv"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void importPriceCsv(file);
+                }}
+              />
             </div>
             {priceMsg ? <p className="muted">{priceMsg}</p> : null}
             <div className="proposal-table-wrap">

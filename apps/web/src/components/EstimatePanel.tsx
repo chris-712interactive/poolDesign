@@ -226,7 +226,8 @@ export function EstimatePanel({
               ? " using your company estimate recipe"
               : ""}
             . Furniture is layout-only and not billed. Remove or add lines as
-            needed.
+            needed. PDF quote opens in a new tab — Print → Save as PDF for a
+            letter-sized file.
           </p>
         </div>
         <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
@@ -240,7 +241,7 @@ export function EstimatePanel({
                 entitlements?.pdfQuote,
               )
             }
-            title="Open printable quote (Save as PDF from the browser)"
+            title="Opens in a new tab. Print → Save as PDF."
           >
             PDF quote
           </button>

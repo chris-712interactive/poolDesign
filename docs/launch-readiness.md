@@ -36,16 +36,16 @@ Do not wait for commercial/water-park depth. Win one residential shop.
 
 | Gap | Why it matters | Notes |
 | --- | --- | --- |
-| **Starter catalog, not their book** | Takeoffs use a generic residential price list. Overrides exist, but there is no CSV import of a real builder book. First quote will be wrong until they reprice everything. | `packages/shared/src/catalog.ts`, `/app/admin` price book |
-| **Quote is print-HTML, not a file** | “PDF quote” is “open HTML → Print → Save as PDF.” Works, but salespeople expect a download. | `api/projects/[id]/quote` |
+| **Starter catalog, not their book** | **CSV import is in.** Export/import overrides against existing `catalogItemId` (name fallback). Unknown SKUs are skipped — no free-form catalog in v1. First quote is still our book until they reprice. | `/app/admin` prices, `price-book-csv.ts` |
+| **Quote is print-HTML, not a file** | **Print bar is in.** Quote HTML is letter-sized (`@page` 0.6in) with Print / Save as PDF. Estimate panel copy says Print → Save as PDF. True PDF service is parked until a paying builder refuses print-to-PDF. | `quote-docs.ts`, `/api/projects/[id]/quote` |
 | **Live session is DB polling** | Kitchen-table finish swaps work without WebSockets. Latency and “is the host online?” will feel cheap on a bad connection. Acceptable for v1 if you set expectations. | `ProjectLiveSession`, `/api/p/[token]/live` |
 | **Grade walk is typed distances, not AR** | The import API and panel exist. The phone ARKit companion does not. Do not market “AR grade walk” until the companion ships. | `GradeWalkPanel`, roadmap Phase 3 |
 | **Landscaping is Florida-specific** | Plant library is a FL production palette. Fine if the first market is Florida; misleading on a national landing page. | `florida-plants.ts` |
 | **Commercial / water-park are labels** | Design levels exist; the catalog comment says commercial/water park expand later. Do not sell those levels as first-class until the book and objects match. | `catalog.ts`, `object-library.ts` |
 | **Field / iPad CAD** | Phase 5 is deferred. Designers on a tablet in the backyard will struggle. First customers should design at a desk. | `docs/product-roadmap.md` Phase 5 |
 | **Desktop offline is a noop** | `apps/desktop` prints “later milestone.” Do not promise field-without-Wi‑Fi. | `apps/desktop/package.json` |
-| **Owner-console milestones overclaim** | Catalog includes “contract signed,” “payment recorded,” and “offline sync” — none of which the app does. | `DEFAULT_ONBOARDING_MILESTONES` |
-| **CAD visual debt is ongoing** | Recent history is water, coping, plants, spa, deck. That work should continue, but a **canned residential demo job** (not an empty design) is more important for sales than the next shader. | git log, seed project `Kendig Residence Pool` |
+| **Owner-console milestones overclaim** | **Closed.** `first_contract_signed`, `first_payment_recorded`, and `offline_sync` are removed from the default catalog and deleted on ensure. | `DEFAULT_ONBOARDING_MILESTONES` |
+| **CAD visual debt is ongoing** | Visual polish continues off the launch path. **Kendig Residence Pool** is a complete Tampa backyard (pool, spa+spillover, patio, fence, equipment, plants) loaded from `packages/db/prisma/fixtures/kendig-residential.json` when `SEED_DEMO=1`. | seed, `kendig-residential.ts` |
 
 **Exit criteria:** One FL production builder completes a real backyard in CAD, sends a share link, hosts a live finish swap, downloads a quote they would actually show a homeowner, and does not need you on Zoom to invite their designer.
 
@@ -58,8 +58,8 @@ Do not wait for commercial/water-park depth. Win one residential shop.
 | **Support channel** | Set `SUPPORT_EMAIL`. Put it on terms, privacy, footer, and the forgot-password page. A mailbox you actually read. |
 | **Domain + wildcard** | `NEXT_PUBLIC_ROOT_DOMAIN` + `*.your-domain.com` or drop subdomain tenancy until you need it. Signup works on the apex today. |
 | **Do not seed production demos** | Milestones yes; Acme Pools / `password123` no. Use `SEED_DEMO=1` only on staging. |
-| **Marketing vs product** | Landing page says “photoreal 3D” and “AR grade-walk import” on Builder. 3D is WebGL procedural; AR is a web form. Tighten copy for the first ten customers. |
-| **Feature flags** | Roadmap Phase 0 still lists flags. You do not have them. Ship one `SHOW_DEMO_LOGIN` / `ENABLE_WATER_PARK` if you need to hide unfinished levels. |
+| **Marketing vs product** | **Closed for launch copy.** Landing and Builder bullets say 3D walkthrough and phone grade import. Do not reintroduce photoreal / AR / PE stamps. |
+| **Feature flags** | `NEXT_PUBLIC_ENABLE_COMMERCIAL` and `NEXT_PUBLIC_ENABLE_WATER_PARK` default off; create-project hides the level select when only residential is public. |
 | **Credit packs** | Roadmap optional. Skip until a Sales customer hits HQ export limits. |
 
 ---

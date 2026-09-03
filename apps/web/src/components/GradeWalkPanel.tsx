@@ -50,7 +50,7 @@ function parseDistanceToMm(
 
 /**
  * Field grade-walk importer.
- * Phone AR companions POST the same payload to /grade-walk; this UI lets
+ * Phone companions can POST the same payload to /grade-walk; this UI lets
  * designers capture or paste a transect (distance + drop) in-browser.
  */
 export function GradeWalkPanel({
@@ -114,7 +114,7 @@ export function GradeWalkPanel({
       <div className="stack" style={{ gap: "0.35rem" }}>
         <strong>Grade walk import</strong>
         <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
-          Builder plan required to import phone / AR grade walks.
+          Builder plan required to import phone grade walks.
         </p>
       </div>
     );
@@ -201,7 +201,7 @@ export function GradeWalkPanel({
       // Keep local CAD in sync with server merge
       await applyLocal();
       setMessage(
-        `Saved ${json.samples?.length ?? 0} grade samples (AR walk API).`,
+        `Saved ${json.samples?.length ?? 0} grade samples.`,
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed");
@@ -215,7 +215,7 @@ export function GradeWalkPanel({
       <strong>Grade walk capture</strong>
       <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
         Start at the house (FFE), walk outward, record distance and elevation
-        drop. Phone AR apps can POST the same payload to the grade-walk API.
+        drop. Typed samples today; a phone companion can POST the same payload later.
       </p>
       <div className="row" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
         <div className="field" style={{ flex: "1 1 5rem" }}>
@@ -276,7 +276,7 @@ export function GradeWalkPanel({
             checked={replaceExisting}
             onChange={(e) => setReplaceExisting(e.target.checked)}
           />
-          Replace prior AR walk samples
+          Replace prior grade samples
         </label>
       </div>
       <div className="row" style={{ gap: "0.5rem" }}>

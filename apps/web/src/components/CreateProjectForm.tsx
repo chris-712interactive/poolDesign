@@ -74,16 +74,20 @@ export function CreateProjectForm({
           streetPlaceholder="Job site street"
         />
       </div>
-      <div className="field">
-        <label htmlFor="designLevel">Design level</label>
-        <select id="designLevel" name="designLevel" defaultValue="residential">
-          {enabledLevels.map((level) => (
-            <option key={level} value={level}>
-              {DESIGN_LEVEL_LABELS[level]}
-            </option>
-          ))}
-        </select>
-      </div>
+      {enabledLevels.length <= 1 ? (
+        <input type="hidden" name="designLevel" value={enabledLevels[0] ?? "residential"} />
+      ) : (
+        <div className="field">
+          <label htmlFor="designLevel">Design level</label>
+          <select id="designLevel" name="designLevel" defaultValue="residential">
+            {enabledLevels.map((level) => (
+              <option key={level} value={level}>
+                {DESIGN_LEVEL_LABELS[level]}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <button className="btn" type="submit">
         {submitLabel}
       </button>

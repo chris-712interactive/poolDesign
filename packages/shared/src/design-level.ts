@@ -6,6 +6,23 @@ export const DESIGN_LEVELS: DesignLevel[] = [
   "water_park",
 ];
 
+export function isDesignLevel(value: string): value is DesignLevel {
+  return (DESIGN_LEVELS as readonly string[]).includes(value);
+}
+
+/** Company DB list, filtered for public create-project (commercial / water park off by default). */
+export function publicDesignLevels(
+  companyLevels: readonly string[],
+  flags: { commercial?: boolean; waterPark?: boolean } = {},
+): DesignLevel[] {
+  const allowed = companyLevels.filter(isDesignLevel).filter((level) => {
+    if (level === "commercial") return flags.commercial === true;
+    if (level === "water_park") return flags.waterPark === true;
+    return true;
+  });
+  return allowed.length > 0 ? allowed : ["residential"];
+}
+
 export const DESIGN_LEVEL_LABELS: Record<DesignLevel, string> = {
   residential: "Residential",
   commercial: "Commercial",

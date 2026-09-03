@@ -79,24 +79,6 @@ export const DEFAULT_ONBOARDING_MILESTONES: MilestoneDefinition[] = [
     description: "Design shared with a client",
     sortOrder: 11,
   },
-  {
-    key: "first_contract_signed",
-    title: "First contract signed",
-    description: "Homeowner or operator signed a contract",
-    sortOrder: 12,
-  },
-  {
-    key: "first_payment_recorded",
-    title: "First payment recorded",
-    description: "Cash, check, card, or loan disbursement recorded",
-    sortOrder: 13,
-  },
-  {
-    key: "offline_sync",
-    title: "Offline client sync",
-    description: "Desktop/offline client installed and first sync",
-    sortOrder: 14,
-  },
 ];
 
 export const STUCK_THRESHOLD_DAYS = 7;

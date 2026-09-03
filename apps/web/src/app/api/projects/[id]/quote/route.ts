@@ -45,6 +45,7 @@ export async function GET(
   return new NextResponse(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
+      // inline so the browser renders and prints; attachment would download .html
       "Content-Disposition": `inline; filename="${project.name.replace(/[^\w.-]+/g, "_")}-quote.html"`,
     },
   });
